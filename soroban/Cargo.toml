@@ -16,7 +16,7 @@ version = "0.1.0"
 
 [workspace.dependencies]
 # Pinned for reproducible WASM provenance (must match CI / BUILD_PROVENANCE.md).
-soroban-sdk = "=27.0.6"
+soroban-sdk = "=29.0.1"
 
 # CI and scripts/build-soroban.sh use `stellar contract build` → wasm32v1-none.
 [profile.release]
