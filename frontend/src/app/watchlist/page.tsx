@@ -125,7 +125,7 @@ export default async function WatchlistPage({
       {/* Header */}
       <header className="flex flex-col gap-2">
         <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
-          Golden Raccoon · V3 · Watchlist
+          Cryptara · V3 · Watchlist
         </p>
         <h1 className="text-3xl font-semibold text-white">Chain-aware watchlist</h1>
         <p className="max-w-3xl text-sm text-slate-300">

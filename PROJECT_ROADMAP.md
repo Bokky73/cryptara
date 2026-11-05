@@ -1,10 +1,10 @@
-# Golden Raccoon Product Roadmap
+# Cryptara Product Roadmap
 
 Bu dosya projenin yeni urun yonunu tanimlar. Eski todo dosyalarindaki teknik maddeler korunabilir, ama urun karari icin ana referans bu dosya olmalidir.
 
 ## Product Vision
 
-Golden Raccoon, kullanicinin bir token kontratini veya DexScreener linkini girerek anlasilir bir AI risk raporu almasini saglayan Web3 risk intelligence urunudur.
+Cryptara, kullanicinin bir token kontratini veya DexScreener linkini girerek anlasilir bir AI risk raporu almasini saglayan Web3 risk intelligence urunudur.
 
 Urunun temel vaadi:
 
@@ -628,7 +628,7 @@ Alanlar:
 
 V1'de kontrat zorunlu olmamali. V1'in ana hedefi risk report ve approval-only execution'dir.
 
-Mevcut GoldRaccoonVault V1 icin sadece audit/log prototipi olarak kalabilir.
+Mevcut CryptaraVault V1 icin sadece audit/log prototipi olarak kalabilir.
 
 V1 kontrat ihtiyaci:
 

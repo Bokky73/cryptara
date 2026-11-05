@@ -25,7 +25,7 @@ fi
 npx --no-install hardhat clean
 npx --no-install hardhat compile
 
-ARTIFACT="artifacts/contracts/GoldRaccoonPolicy.sol/GoldRaccoonPolicy.json"
+ARTIFACT="artifacts/contracts/CryptaraPolicy.sol/CryptaraPolicy.json"
 if [ ! -f "$ARTIFACT" ]; then
   echo "ERROR: expected Hardhat artifact was not generated: $ARTIFACT" >&2
   exit 1
@@ -64,9 +64,9 @@ hash_creation_bytecode() {
 
 echo "=== Build Verification (creation bytecode + metadata) ==="
 for ARTIFACT in \
-  "artifacts/contracts/GoldRaccoonPolicy.sol/GoldRaccoonPolicy.json" \
-  "artifacts/contracts/GoldRaccoonVault.sol/GoldRaccoonVault.json" \
-  "artifacts/contracts/GoldenRaccoonAudit.sol/GoldenRaccoonAudit.json"
+  "artifacts/contracts/CryptaraPolicy.sol/CryptaraPolicy.json" \
+  "artifacts/contracts/CryptaraVault.sol/CryptaraVault.json" \
+  "artifacts/contracts/CryptaraAudit.sol/CryptaraAudit.json"
 do
   if [ -f "$ARTIFACT" ]; then
     read -r CREATION_HASH METADATA_HASH < <(hash_creation_bytecode "$ARTIFACT")

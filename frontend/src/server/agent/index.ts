@@ -10,7 +10,7 @@ export type AgentAnalysisResult = {
   preview: TransactionPreview;
 };
 
-export function runGoldRaccoonAgent(portfolio: PortfolioSnapshot): AgentAnalysisResult {
+export function runCryptaraAgent(portfolio: PortfolioSnapshot): AgentAnalysisResult {
   const observeStep = observePortfolio(portfolio);
   const discoveryStep = observeDiscoveryCandidates();
   const analyzeStep = analyzePortfolio(portfolio);

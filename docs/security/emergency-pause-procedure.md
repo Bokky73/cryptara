@@ -51,7 +51,7 @@ stellar contract invoke \
 
 Feature-flags (if implemented):
 ```bash
-curl -X POST https://app.goldenraccoon.xyz/admin/feature-flag \
+curl -X POST https://app.cryptara.xyz/admin/feature-flag \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -d '{"flag": "app_enabled", "value": false}'
 ```

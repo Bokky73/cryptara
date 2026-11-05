@@ -1,6 +1,6 @@
 # Production Hardening Documentation
 
-This directory contains the production-hardening deliverables for Golden Raccoon, produced on 2026-07-29 as part of pre-mainnet readiness.
+This directory contains the production-hardening deliverables for Cryptara, produced on 2026-07-29 as part of pre-mainnet readiness.
 
 ## Documents
 
@@ -8,7 +8,7 @@ This directory contains the production-hardening deliverables for Golden Raccoon
 |---|---|
 | `PRODUCTION_HARDENING_THREAT_MODEL.md` | 9 threat categories with mitigations, gaps, and risk levels |
 | `dependency-review-checklist.md` | npm audit results and remediation plan |
-| `evm-contract-review-checklist.md` | 39-point review of GoldRaccoonPolicy, Vault, RiskRegistry |
+| `evm-contract-review-checklist.md` | 39-point review of CryptaraPolicy, Vault, RiskRegistry |
 | `soroban-contract-review-checklist.md` | 24-point review of Soroban policy and vault contracts |
 | `testnet-soak-runbook.md` | 48-hour testnet soak test procedure |
 | `pubnet-deploy-procedure.md` | Step-by-step mainnet deployment procedure |

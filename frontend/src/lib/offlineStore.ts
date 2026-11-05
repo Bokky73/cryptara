@@ -1,6 +1,6 @@
 import type { PortfolioSnapshot, TokenScanResult } from "@/server/types";
 
-const STORE_KEY = "golden-raccoon:offline-readonly:v1";
+const STORE_KEY = "cryptara:offline-readonly:v1";
 
 export type OfflineCapture<T> = {
   id: string;

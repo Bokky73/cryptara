@@ -727,41 +727,41 @@ dependencies = [
 ]
 
 [[package]]
-name = "golden-raccoon-audit-registry"
+name = "cryptara-audit-registry"
 version = "0.1.0"
 dependencies = [
  "soroban-sdk",
 ]
 
 [[package]]
-name = "golden-raccoon-governance"
+name = "cryptara-governance"
 version = "0.1.0"
 dependencies = [
- "golden-raccoon-audit-registry",
- "golden-raccoon-policy",
- "golden-raccoon-risk-registry",
+ "cryptara-audit-registry",
+ "cryptara-policy",
+ "cryptara-risk-registry",
  "soroban-sdk",
 ]
 
 [[package]]
-name = "golden-raccoon-policy"
-version = "0.1.0"
-dependencies = [
- "soroban-sdk",
-]
-
-[[package]]
-name = "golden-raccoon-risk-registry"
+name = "cryptara-policy"
 version = "0.1.0"
 dependencies = [
  "soroban-sdk",
 ]
 
 [[package]]
-name = "golden-raccoon-vault"
+name = "cryptara-risk-registry"
 version = "0.1.0"
 dependencies = [
- "golden-raccoon-policy",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "cryptara-vault"
+version = "0.1.0"
+dependencies = [
+ "cryptara-policy",
  "soroban-sdk",
 ]
 

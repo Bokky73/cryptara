@@ -7,7 +7,7 @@ export type DeterministicContext = {
 };
 
 export function createDeterministicContext(seed: string, now = 0): DeterministicContext {
-  const normalizedSeed = seed.trim() || "golden-raccoon";
+  const normalizedSeed = seed.trim() || "cryptara";
   return { now: () => now, seed: normalizedSeed };
 }
 

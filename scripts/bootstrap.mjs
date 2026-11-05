@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 
-console.log("=> Bootstrapping Golden Raccoon environment...");
+console.log("=> Bootstrapping Cryptara environment...");
 
 const nodeVersion = process.version;
 if (!nodeVersion.startsWith("v22.")) {

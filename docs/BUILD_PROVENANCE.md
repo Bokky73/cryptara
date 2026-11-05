@@ -2,7 +2,7 @@
 
 ## Overview
 
-Golden Raccoon emits cryptographic provenance manifests for Hardhat EVM bytecode and Soroban WASM release artifacts. Reviewers can prove which commit, lockfiles, compiler settings, and source inputs produced a given artifact hash.
+Cryptara emits cryptographic provenance manifests for Hardhat EVM bytecode and Soroban WASM release artifacts. Reviewers can prove which commit, lockfiles, compiler settings, and source inputs produced a given artifact hash.
 
 Manifests live under `release-manifests/` and use **repo-relative paths only**.
 
@@ -20,7 +20,7 @@ Manifests live under `release-manifests/` and use **repo-relative paths only**.
 ## What is hashed
 
 - **EVM**: creation bytecode SHA-256, deployed bytecode SHA-256, Solidity metadata SHA-256, ABI SHA-256.
-- **Soroban**: full WASM file SHA-256 for `golden_raccoon_*.wasm` under `soroban/target/wasm32v1-none/release/`.
+- **Soroban**: full WASM file SHA-256 for `cryptara_*.wasm` under `soroban/target/wasm32v1-none/release/`.
 - **Inputs**: Hardhat config, Solidity sources, `soroban/Cargo.toml`, `soroban/Cargo.lock`, contracts `package-lock.json`.
 
 ## Commands

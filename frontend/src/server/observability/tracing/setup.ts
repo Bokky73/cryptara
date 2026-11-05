@@ -52,7 +52,7 @@ export async function initializeTracing(): Promise<void> {
 
   const provider = new NodeTracerProvider({
     resource: new Resource({
-      [ATTR_SERVICE_NAME]: process.env.OTEL_SERVICE_NAME?.trim() || "golden-raccoon-frontend",
+      [ATTR_SERVICE_NAME]: process.env.OTEL_SERVICE_NAME?.trim() || "cryptara-frontend",
     }),
     spanProcessors: [new BatchSpanProcessor(exporter)],
   });

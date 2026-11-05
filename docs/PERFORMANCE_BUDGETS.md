@@ -1,6 +1,6 @@
 # Performance budgets
 
-Golden Raccoon treats performance regressions like functional regressions. This
+Cryptara treats performance regressions like functional regressions. This
 document defines the Web Vitals and API latency budgets the frontend must stay
 inside of, how they are measured, and how a maintainer approves an intentional
 change to a budget. Note that these performance budgets tie closely into our
@@ -12,7 +12,7 @@ which also runs as part of the root `quality:gate`.
 
 ## Measurement profiles
 
-Every budget is defined for two profiles, because Golden Raccoon's users check
+Every budget is defined for two profiles, because Cryptara's users check
 token risk from both desks and phones on the go:
 
 | Profile | Network | CPU | Intent |

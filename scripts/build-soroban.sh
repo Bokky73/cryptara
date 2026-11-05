@@ -29,10 +29,10 @@ stellar contract build --manifest-path "${ROOT_DIR}/soroban/Cargo.toml"
 
 WASM_DIR="${ROOT_DIR}/soroban/target/wasm32v1-none/release"
 EXPECTED_WASMS=(
-  golden_raccoon_policy.wasm
-  golden_raccoon_vault.wasm
-  golden_raccoon_risk_registry.wasm
-  golden_raccoon_audit_registry.wasm
+  cryptara_policy.wasm
+  cryptara_vault.wasm
+  cryptara_risk_registry.wasm
+  cryptara_audit_registry.wasm
 )
 
 hash_file() {

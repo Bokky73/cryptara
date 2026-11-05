@@ -99,12 +99,12 @@ type ApiTimingSample = {
 const RING_BUFFER_SIZE = 200;
 
 const ringBufferHolder = globalThis as typeof globalThis & {
-  __goldenRaccoonApiTimingRingBuffer?: ApiTimingSample[];
+  __cryptaraApiTimingRingBuffer?: ApiTimingSample[];
 };
 
 function getRingBuffer() {
-  ringBufferHolder.__goldenRaccoonApiTimingRingBuffer ??= [];
-  return ringBufferHolder.__goldenRaccoonApiTimingRingBuffer;
+  ringBufferHolder.__cryptaraApiTimingRingBuffer ??= [];
+  return ringBufferHolder.__cryptaraApiTimingRingBuffer;
 }
 
 /** Records a single API request's total latency. Latency numbers only — no wallet or payload data. */

@@ -53,7 +53,7 @@ type StellarWalletState = {
 };
 
 const StellarWalletContext = createContext<StellarWalletState | null>(null);
-const stellarSessionChangedEvent = "golden-raccoon:stellar-session-changed";
+const stellarSessionChangedEvent = "cryptara:stellar-session-changed";
 
 function notifyStellarSessionChanged() {
   window.dispatchEvent(new Event(stellarSessionChangedEvent));

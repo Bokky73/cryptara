@@ -22,7 +22,7 @@ export const WALLET_CHALLENGE_TTL_SECONDS = 60 * 5; // 5 minutes
 const SESSION_VERSION = "v2";
 const CHALLENGE_VERSION = "v2";
 const DEVELOPMENT_COOKIE_SECRET =
-  "golden-raccoon-development-only-cookie-secret";
+  "cryptara-development-only-cookie-secret";
 
 export type WalletFamily = "evm" | "stellar";
 
@@ -79,7 +79,7 @@ function normalizeWallet(input: string | null | undefined): string | undefined {
 const SESSION_VERSION_V2 = "v2";
 
 function computeWalletHmac(wallet: string): string {
-  const secret = process.env.SESSION_SECRET || "golden-raccoon-session-hmac-secret-key-32b";
+  const secret = process.env.SESSION_SECRET || "cryptara-session-hmac-secret-key-32b";
   return crypto.createHmac("sha256", secret).update(wallet).digest("hex").slice(0, 16);
 }
 
@@ -345,7 +345,7 @@ export function mintWalletChallenge(input: {
   let challengeBody: string;
   if (input.family === "evm") {
     challengeBody = [
-      "Sign in to Golden Raccoon",
+      "Sign in to Cryptara",
       "",
       `Wallet: ${normalizedWallet}`,
       `Nonce: ${nonce}`,
@@ -376,7 +376,7 @@ export function mintWalletChallenge(input: {
       // with the SEP-10 wallet-auth vocabulary.
       Operation.manageData({
         name: "auth",
-        value: "Golden Raccoon wallet auth",
+        value: "Cryptara wallet auth",
       }),
     );
     const tx = builder.build();

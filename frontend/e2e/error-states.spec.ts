@@ -51,7 +51,7 @@ test.describe("Error and edge-case states", () => {
     expect(response?.ok()).toBeTruthy();
 
     const title = await page.title();
-    expect(title).toContain("Golden Raccoon");
+    expect(title).toContain("Cryptara");
   });
 
   test.describe("Data quality warnings", () => {

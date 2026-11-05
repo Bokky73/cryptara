@@ -2,10 +2,10 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { time, loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 
-describe("GoldRaccoonPolicy", function () {
+describe("CryptaraPolicy", function () {
   async function deployFixture() {
     const [owner, emergency, agent, user, user2, token, blockedToken] = await ethers.getSigners();
-    const Policy = await ethers.getContractFactory("GoldRaccoonPolicy");
+    const Policy = await ethers.getContractFactory("CryptaraPolicy");
     const policy = await Policy.deploy();
     await policy.waitForDeployment();
 
@@ -267,8 +267,8 @@ describe("GoldRaccoonPolicy", function () {
     it("should deploy V2 and retain storage layout", async function () {
       const { policy, owner, agent, user, token } = await loadFixture(deployFixture);
 
-      const PolicyV2 = await ethers.getContractFactory("GoldRaccoonPolicyV2");
-      const proxy = await ethers.getContractAt("GoldRaccoonPolicy", policy.target);
+      const PolicyV2 = await ethers.getContractFactory("CryptaraPolicyV2");
+      const proxy = await ethers.getContractAt("CryptaraPolicy", policy.target);
       const v2 = await PolicyV2.deploy();
       await v2.waitForDeployment();
 
@@ -280,7 +280,7 @@ describe("GoldRaccoonPolicy", function () {
       expect(policyData.decisionHash).to.equal(decision);
       expect(policyData.user).to.equal(user.address);
 
-      const v2Contract = await ethers.getContractAt("GoldRaccoonPolicyV2", policy.target);
+      const v2Contract = await ethers.getContractAt("CryptaraPolicyV2", policy.target);
       const decisionV2 = await v2Contract.getPolicyDecision(decision);
       expect(decisionV2.decisionHash).to.equal(decision);
       expect(decisionV2.user).to.equal(user.address);

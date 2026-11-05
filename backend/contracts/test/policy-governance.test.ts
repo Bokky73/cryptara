@@ -5,13 +5,13 @@ import { time, loadFixture } from "@nomicfoundation/hardhat-toolbox/network-help
 describe("Policy Governance via Timelock", function () {
   async function deployFixture() {
     const [owner, emergency, agent, user, signerA, signerB, signerC] = await ethers.getSigners();
-    const Policy = await ethers.getContractFactory("GoldRaccoonPolicy");
+    const Policy = await ethers.getContractFactory("CryptaraPolicy");
     const policy = await Policy.deploy();
     await policy.waitForDeployment();
     await policy.setEmergencyAdmin(emergency.address);
     await policy.setAgent(agent.address);
 
-    const Timelock = await ethers.getContractFactory("GoldRaccoonTimelock");
+    const Timelock = await ethers.getContractFactory("CryptaraTimelock");
     const timelock = await Timelock.deploy(
       [signerA.address, signerB.address, signerC.address],
       2,
@@ -25,7 +25,7 @@ describe("Policy Governance via Timelock", function () {
     await policy.transferOwnership(await timelock.getAddress());
 
     // Deploy V2 to test upgrade path
-    const PolicyV2 = await ethers.getContractFactory("GoldRaccoonPolicyV2");
+    const PolicyV2 = await ethers.getContractFactory("CryptaraPolicyV2");
     const policyV2Impl = await PolicyV2.deploy();
     await policyV2Impl.waitForDeployment();
 

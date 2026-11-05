@@ -1,5 +1,5 @@
 [package]
-name = "golden-raccoon-vault"
+name = "cryptara-vault"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,4 +12,4 @@ soroban-sdk.workspace = true
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
-golden-raccoon-policy = { path = "../policy" }
+cryptara-policy = { path = "../policy" }

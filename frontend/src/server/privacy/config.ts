@@ -1,5 +1,5 @@
 /**
- * Privacy & Data Retention Configuration for Golden Raccoon.
+ * Privacy & Data Retention Configuration for Cryptara.
  * Provides conservative production defaults backed by environment variable overrides.
  */
 

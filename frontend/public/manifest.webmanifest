@@ -1,6 +1,6 @@
 {
-  "name": "Golden Raccoon",
-  "short_name": "G. Raccoon",
+  "name": "Cryptara",
+  "short_name": "Cryptara",
   "description": "AI crypto portfolio risk guardian with explicit stale-data offline mode.",
   "start_url": "/dashboard",
   "scope": "/",

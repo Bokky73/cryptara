@@ -158,7 +158,7 @@ export function redactRiskReportSnapshot(
     missingData: publicMissingData(report?.missingData),
     freshness: { generatedAt, sourceCheckedAt: checkedTimes, staleAt },
     expiresAt,
-    product: { name: "Golden Raccoon", version: options.productVersion?.trim() || "unknown" },
+    product: { name: "Cryptara", version: options.productVersion?.trim() || "unknown" },
     notices: { informationOnly: true, providerCorrectnessNotProven: true },
   });
 

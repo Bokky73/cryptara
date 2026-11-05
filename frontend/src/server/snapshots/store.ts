@@ -19,7 +19,7 @@ const MIN_TTL_SECONDS = 5 * 60;
 const MAX_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 type SnapshotAdapterGlobal = typeof globalThis & {
-  __goldenRaccoonSnapshotAdapter?: Promise<IStorageAdapter>;
+  __cryptaraSnapshotAdapter?: Promise<IStorageAdapter>;
 };
 
 const adapterGlobal = globalThis as SnapshotAdapterGlobal;
@@ -30,14 +30,14 @@ export type SnapshotReadResult =
   | { ok: false; code: "not_found"; detail: string };
 
 export async function getSnapshotStorageAdapter(): Promise<IStorageAdapter> {
-  adapterGlobal.__goldenRaccoonSnapshotAdapter ??= (async () => {
+  adapterGlobal.__cryptaraSnapshotAdapter ??= (async () => {
     if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
       const { SupabaseStorageAdapter } = await import("@/server/storage/adapters/supabase");
       return wrapStorageAdapter(new SupabaseStorageAdapter());
     }
     return wrapStorageAdapter(new MemoryStorageAdapter());
   })();
-  return adapterGlobal.__goldenRaccoonSnapshotAdapter;
+  return adapterGlobal.__cryptaraSnapshotAdapter;
 }
 
 function boundedTtl(value?: number): number {

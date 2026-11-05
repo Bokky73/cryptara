@@ -64,7 +64,7 @@ export const riskSnapshotDocumentSchema = z.object({
   }),
   expiresAt: isoTimestampSchema,
   product: z.object({
-    name: z.literal("Golden Raccoon"),
+    name: z.literal("Cryptara"),
     version: boundedText(80),
   }),
   notices: z.object({

@@ -10,7 +10,7 @@ interface IPolicyValidator {
     function policyDecisions(bytes32 decisionHash) external view returns (bytes32 decisionHash_, address user, address authorizedAgent, uint256 maxTransactionValue, uint256 maxSlippageBps, uint256 nonce, uint64 expiry, bool revoked);
 }
 
-contract GoldRaccoonVault {
+contract CryptaraVault {
     using SafeERC20 for IERC20;
 
     IPolicyValidator public immutable policy;

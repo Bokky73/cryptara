@@ -84,7 +84,7 @@ export async function GET() {
   return NextResponse.json(
     {
       ok: true,
-      service: "golden-raccoon",
+      service: "cryptara",
       env: getEnvHealth(),
       agentReadiness: getAgentReadiness(),
       storage: await getStorageHealth(),

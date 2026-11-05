@@ -2,11 +2,11 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { time, loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 
-describe("GoldRaccoonVault", function () {
+describe("CryptaraVault", function () {
   async function deployFixture() {
     const [owner, emergency, agent, user, recipient, otherUser] = await ethers.getSigners();
 
-    const Policy = await ethers.getContractFactory("GoldRaccoonPolicy");
+    const Policy = await ethers.getContractFactory("CryptaraPolicy");
     const policy = await Policy.deploy();
     await policy.waitForDeployment();
 
@@ -20,7 +20,7 @@ describe("GoldRaccoonVault", function () {
 
     await policy.allowAsset(token.target);
 
-    const Vault = await ethers.getContractFactory("GoldRaccoonVault");
+    const Vault = await ethers.getContractFactory("CryptaraVault");
     const vault = await Vault.deploy(policy.target, agent.address);
     await vault.waitForDeployment();
 

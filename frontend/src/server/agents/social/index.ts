@@ -166,7 +166,7 @@ async function fetchMetadata(url: string): Promise<SocialMetadata> {
   const response = await fetch(url, {
     headers: {
       Accept: "text/html,application/xhtml+xml",
-      "User-Agent": "GoldenRaccoonBot/1.0",
+      "User-Agent": "CryptaraBot/1.0",
     },
     next: { revalidate: 60 * 15 },
   });

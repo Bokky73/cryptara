@@ -1,11 +1,11 @@
 blank_issues_enabled: true
 contact_links:
   - name: Security policy
-    url: https://github.com/Drago-Labs/golden-raccoon/security/policy
+    url: https://github.com/Drago-Labs/cryptara/security/policy
     about: Report a security vulnerability — do not open a public issue.
   - name: Project roadmap
-    url: https://github.com/Drago-Labs/golden-raccoon/blob/main/PROJECT_ROADMAP.md
+    url: https://github.com/Drago-Labs/cryptara/blob/main/PROJECT_ROADMAP.md
     about: Understand the product direction and V1/V2/V3 goals.
   - name: Contributing guide
-    url: https://github.com/Drago-Labs/golden-raccoon/blob/main/CONTRIBUTING.md
+    url: https://github.com/Drago-Labs/cryptara/blob/main/CONTRIBUTING.md
     about: Learn how to set up the project, run the quality gate, and submit PRs.

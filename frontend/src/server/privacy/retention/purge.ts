@@ -1,5 +1,5 @@
 /**
- * Bounded-batch scheduled purge for Golden Raccoon.
+ * Bounded-batch scheduled purge for Cryptara.
  *
  * Deletes or anonymizes records that have exceeded their retention window.
  * Designed to run as a cron job (scripts/retention-purge.mjs) without
@@ -40,12 +40,12 @@ export interface PurgeReport {
 // ---------------------------------------------------------------------------
 
 type MemoryStore = typeof globalThis & {
-  __goldenRaccoonAgentRuns?: Array<{ createdAt: string; walletAddress?: string }>;
-  __goldenRaccoonAlertObservations?: Array<{ createdAt: string; walletAddress?: string }>;
-  __goldenRaccoonAlerts?: Array<{ triggeredAt?: string; createdAt?: string }>;
-  __goldenRaccoonWatchlistScanRuns?: Array<{ scannedAt: string }>;
-  __goldenRaccoonTransactions?: Array<{ createdAt: string; walletAddress?: string | null; sourceAccount?: string | null }>;
-  __goldenRaccoonX402PaymentReceipts?: Array<{ createdAt: string; walletAddress?: string | null; payer?: string | null }>;
+  __cryptaraAgentRuns?: Array<{ createdAt: string; walletAddress?: string }>;
+  __cryptaraAlertObservations?: Array<{ createdAt: string; walletAddress?: string }>;
+  __cryptaraAlerts?: Array<{ triggeredAt?: string; createdAt?: string }>;
+  __cryptaraWatchlistScanRuns?: Array<{ scannedAt: string }>;
+  __cryptaraTransactions?: Array<{ createdAt: string; walletAddress?: string | null; sourceAccount?: string | null }>;
+  __cryptaraX402PaymentReceipts?: Array<{ createdAt: string; walletAddress?: string | null; payer?: string | null }>;
 };
 
 /**
@@ -60,11 +60,11 @@ export function purgeExpiredMemoryData(now = new Date()): PurgeTableResult[] {
   // ── agent_runs ─────────────────────────────────────────────────────────
   {
     const cutoff = getRetentionCutoffDate(config.agentRunsDays, now);
-    const list = store.__goldenRaccoonAgentRuns;
+    const list = store.__cryptaraAgentRuns;
     if (list) {
       const before = list.length;
-      store.__goldenRaccoonAgentRuns = list.filter((r) => new Date(r.createdAt) >= cutoff);
-      const purged = before - store.__goldenRaccoonAgentRuns.length;
+      store.__cryptaraAgentRuns = list.filter((r) => new Date(r.createdAt) >= cutoff);
+      const purged = before - store.__cryptaraAgentRuns.length;
       results.push({ table: "agent_runs", action: purged > 0 ? "deleted" : "skipped", rowsPurged: purged });
     } else {
       results.push({ table: "agent_runs", action: "skipped", rowsPurged: 0 });
@@ -74,11 +74,11 @@ export function purgeExpiredMemoryData(now = new Date()): PurgeTableResult[] {
   // ── alert_observations ─────────────────────────────────────────────────
   {
     const cutoff = getRetentionCutoffDate(config.alertObservationsDays, now);
-    const list = store.__goldenRaccoonAlertObservations;
+    const list = store.__cryptaraAlertObservations;
     if (list) {
       const before = list.length;
-      store.__goldenRaccoonAlertObservations = list.filter((r) => new Date(r.createdAt) >= cutoff);
-      const purged = before - store.__goldenRaccoonAlertObservations.length;
+      store.__cryptaraAlertObservations = list.filter((r) => new Date(r.createdAt) >= cutoff);
+      const purged = before - store.__cryptaraAlertObservations.length;
       results.push({ table: "alert_observations", action: purged > 0 ? "deleted" : "skipped", rowsPurged: purged });
     } else {
       results.push({ table: "alert_observations", action: "skipped", rowsPurged: 0 });
@@ -88,14 +88,14 @@ export function purgeExpiredMemoryData(now = new Date()): PurgeTableResult[] {
   // ── alerts ─────────────────────────────────────────────────────────────
   {
     const cutoff = getRetentionCutoffDate(config.alertsDays, now);
-    const list = store.__goldenRaccoonAlerts;
+    const list = store.__cryptaraAlerts;
     if (list) {
       const before = list.length;
-      store.__goldenRaccoonAlerts = list.filter((r) => {
+      store.__cryptaraAlerts = list.filter((r) => {
         const ts = r.triggeredAt ?? r.createdAt;
         return ts ? new Date(ts) >= cutoff : true;
       });
-      const purged = before - store.__goldenRaccoonAlerts.length;
+      const purged = before - store.__cryptaraAlerts.length;
       results.push({ table: "alerts", action: purged > 0 ? "deleted" : "skipped", rowsPurged: purged });
     } else {
       results.push({ table: "alerts", action: "skipped", rowsPurged: 0 });
@@ -105,11 +105,11 @@ export function purgeExpiredMemoryData(now = new Date()): PurgeTableResult[] {
   // ── watchlist_scan_runs ────────────────────────────────────────────────
   {
     const cutoff = getRetentionCutoffDate(config.watchlistRunsDays, now);
-    const list = store.__goldenRaccoonWatchlistScanRuns;
+    const list = store.__cryptaraWatchlistScanRuns;
     if (list) {
       const before = list.length;
-      store.__goldenRaccoonWatchlistScanRuns = list.filter((r) => new Date(r.scannedAt) >= cutoff);
-      const purged = before - store.__goldenRaccoonWatchlistScanRuns.length;
+      store.__cryptaraWatchlistScanRuns = list.filter((r) => new Date(r.scannedAt) >= cutoff);
+      const purged = before - store.__cryptaraWatchlistScanRuns.length;
       results.push({ table: "watchlist_scan_runs", action: purged > 0 ? "deleted" : "skipped", rowsPurged: purged });
     } else {
       results.push({ table: "watchlist_scan_runs", action: "skipped", rowsPurged: 0 });
@@ -119,7 +119,7 @@ export function purgeExpiredMemoryData(now = new Date()): PurgeTableResult[] {
   // ── transactions (anonymize after threshold) ───────────────────────────
   {
     const cutoff = getRetentionCutoffDate(config.transactionsUnlinkDays, now);
-    const list = store.__goldenRaccoonTransactions;
+    const list = store.__cryptaraTransactions;
     let anonymized = 0;
     if (list) {
       for (const tx of list) {
@@ -136,7 +136,7 @@ export function purgeExpiredMemoryData(now = new Date()): PurgeTableResult[] {
   // ── x402_payment_receipts (anonymize after threshold) ─────────────────
   {
     const cutoff = getRetentionCutoffDate(config.x402ReceiptsUnlinkDays, now);
-    const list = store.__goldenRaccoonX402PaymentReceipts;
+    const list = store.__cryptaraX402PaymentReceipts;
     let anonymized = 0;
     if (list) {
       for (const rec of list) {

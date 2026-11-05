@@ -7,14 +7,14 @@ with open('frontend/src/server/storage/adapters/memory.ts', 'r') as f:
 content = content.replace('X402PaymentReceipt,\n  StorageHealth,', 'X402PaymentReceipt,\n  StorageHealth,\n  WatchlistEntry,')
 
 memory_vars = """
-  __goldenRaccoonWatchlistEntries?: WatchlistEntry[];
+  __cryptaraWatchlistEntries?: WatchlistEntry[];
 """
-content = content.replace('__goldenRaccoonX402PaymentReceipts?: X402PaymentReceipt[];', '__goldenRaccoonX402PaymentReceipts?: X402PaymentReceipt[];' + memory_vars)
+content = content.replace('__cryptaraX402PaymentReceipts?: X402PaymentReceipt[];', '__cryptaraX402PaymentReceipts?: X402PaymentReceipt[];' + memory_vars)
 
 methods = """
   async addWatchlistEntriesBulk(entries: WatchlistEntry[]): Promise<{ added: WatchlistEntry[] }> {
-    memoryStore.__goldenRaccoonWatchlistEntries ??= [];
-    const store = memoryStore.__goldenRaccoonWatchlistEntries;
+    memoryStore.__cryptaraWatchlistEntries ??= [];
+    const store = memoryStore.__cryptaraWatchlistEntries;
     const added: WatchlistEntry[] = [];
     for (const entry of entries) {
       const existing = store.find(e => e.walletAddress === entry.walletAddress && e.identityKey === entry.identityKey);

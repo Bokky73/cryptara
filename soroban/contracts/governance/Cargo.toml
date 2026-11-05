@@ -1,5 +1,5 @@
 [package]
-name = "golden-raccoon-governance"
+name = "cryptara-governance"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
@@ -8,15 +8,15 @@ publish = false
 
 [dependencies]
 soroban-sdk = { workspace = true }
-golden-raccoon-policy = { path = "../policy", optional = true }
-golden-raccoon-risk-registry = { path = "../risk-registry", optional = true }
-golden-raccoon-audit-registry = { path = "../audit-registry", optional = true }
+cryptara-policy = { path = "../policy", optional = true }
+cryptara-risk-registry = { path = "../risk-registry", optional = true }
+cryptara-audit-registry = { path = "../audit-registry", optional = true }
 
 [features]
 default = []
-policy = ["golden-raccoon-policy"]
-risk-registry = ["golden-raccoon-risk-registry"]
-audit-registry = ["golden-raccoon-audit-registry"]
+policy = ["cryptara-policy"]
+risk-registry = ["cryptara-risk-registry"]
+audit-registry = ["cryptara-audit-registry"]
 testutils = []
 
 [profile.release]

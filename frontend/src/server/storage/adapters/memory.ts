@@ -19,61 +19,61 @@ import { alertDeliveryToRow, rowToAlertDelivery } from "./types";
 import { wrapStorageAdapter } from "@/server/observability/tracing/spans";
 
 const memoryStore = globalThis as typeof globalThis & {
-  __goldenRaccoonAgentRuns?: AgentRunRecord[];
-  __goldenRaccoonRecommendations?: RecommendationRecord[];
-  __goldenRaccoonTransactions?: TransactionRecord[];
-  __goldenRaccoonTransactionObservations?: TransactionObservation[];
-  __goldenRaccoonApprovals?: UserApprovalRecord[];
-  __goldenRaccoonUserRules?: UserRule[];
-  __goldenRaccoonX402PaymentReceipts?: X402PaymentReceipt[];
-  __goldenRaccoonWatchlistEntries?: WatchlistEntry[];
-  __goldenRaccoonRiskSnapshots?: RiskSnapshotRecord[];
-  __goldenRaccoonAdapterAlertDeliveries?: AlertDelivery[];
-  __goldenRaccoonAdapterNotificationPreferences?: NotificationPreferences[];
-  __goldenRaccoonErasureReceipts?: StoredErasureReceipt[];
+  __cryptaraAgentRuns?: AgentRunRecord[];
+  __cryptaraRecommendations?: RecommendationRecord[];
+  __cryptaraTransactions?: TransactionRecord[];
+  __cryptaraTransactionObservations?: TransactionObservation[];
+  __cryptaraApprovals?: UserApprovalRecord[];
+  __cryptaraUserRules?: UserRule[];
+  __cryptaraX402PaymentReceipts?: X402PaymentReceipt[];
+  __cryptaraWatchlistEntries?: WatchlistEntry[];
+  __cryptaraRiskSnapshots?: RiskSnapshotRecord[];
+  __cryptaraAdapterAlertDeliveries?: AlertDelivery[];
+  __cryptaraAdapterNotificationPreferences?: NotificationPreferences[];
+  __cryptaraErasureReceipts?: StoredErasureReceipt[];
 };
 
 function getAgentRuns(): AgentRunRecord[] {
-  memoryStore.__goldenRaccoonAgentRuns ??= [];
-  return memoryStore.__goldenRaccoonAgentRuns;
+  memoryStore.__cryptaraAgentRuns ??= [];
+  return memoryStore.__cryptaraAgentRuns;
 }
 function getRecommendations(): RecommendationRecord[] {
-  memoryStore.__goldenRaccoonRecommendations ??= [];
-  return memoryStore.__goldenRaccoonRecommendations;
+  memoryStore.__cryptaraRecommendations ??= [];
+  return memoryStore.__cryptaraRecommendations;
 }
 function getTransactions(): TransactionRecord[] {
-  memoryStore.__goldenRaccoonTransactions ??= [];
-  return memoryStore.__goldenRaccoonTransactions;
+  memoryStore.__cryptaraTransactions ??= [];
+  return memoryStore.__cryptaraTransactions;
 }
 function getTransactionObservations(): TransactionObservation[] {
-  memoryStore.__goldenRaccoonTransactionObservations ??= [];
-  return memoryStore.__goldenRaccoonTransactionObservations;
+  memoryStore.__cryptaraTransactionObservations ??= [];
+  return memoryStore.__cryptaraTransactionObservations;
 }
 function getApprovals(): UserApprovalRecord[] {
-  memoryStore.__goldenRaccoonApprovals ??= [];
-  return memoryStore.__goldenRaccoonApprovals;
+  memoryStore.__cryptaraApprovals ??= [];
+  return memoryStore.__cryptaraApprovals;
 }
 function getUserRules(): UserRule[] {
-  memoryStore.__goldenRaccoonUserRules ??= [];
-  return memoryStore.__goldenRaccoonUserRules;
+  memoryStore.__cryptaraUserRules ??= [];
+  return memoryStore.__cryptaraUserRules;
 }
 function getX402PaymentReceipts(): X402PaymentReceipt[] {
-  memoryStore.__goldenRaccoonX402PaymentReceipts ??= [];
-  return memoryStore.__goldenRaccoonX402PaymentReceipts;
+  memoryStore.__cryptaraX402PaymentReceipts ??= [];
+  return memoryStore.__cryptaraX402PaymentReceipts;
 }
 function getRiskSnapshots(): RiskSnapshotRecord[] {
-  memoryStore.__goldenRaccoonRiskSnapshots ??= [];
-  return memoryStore.__goldenRaccoonRiskSnapshots;
+  memoryStore.__cryptaraRiskSnapshots ??= [];
+  return memoryStore.__cryptaraRiskSnapshots;
 }
 
 function getAlertDeliveries(): AlertDelivery[] {
-  memoryStore.__goldenRaccoonAdapterAlertDeliveries ??= [];
-  return memoryStore.__goldenRaccoonAdapterAlertDeliveries;
+  memoryStore.__cryptaraAdapterAlertDeliveries ??= [];
+  return memoryStore.__cryptaraAdapterAlertDeliveries;
 }
 
 function getNotificationPreferences(): NotificationPreferences[] {
-  memoryStore.__goldenRaccoonAdapterNotificationPreferences ??= [];
-  return memoryStore.__goldenRaccoonAdapterNotificationPreferences;
+  memoryStore.__cryptaraAdapterNotificationPreferences ??= [];
+  return memoryStore.__cryptaraAdapterNotificationPreferences;
 }
 
 function normalizedWallet(walletAddress?: string): string | undefined {
@@ -373,8 +373,8 @@ export class MemoryStorageAdapter implements IStorageAdapter {
 
   
   async addWatchlistEntriesBulk(entries: WatchlistEntry[]): Promise<{ added: WatchlistEntry[] }> {
-    memoryStore.__goldenRaccoonWatchlistEntries ??= [];
-    const store = memoryStore.__goldenRaccoonWatchlistEntries;
+    memoryStore.__cryptaraWatchlistEntries ??= [];
+    const store = memoryStore.__cryptaraWatchlistEntries;
     const added: WatchlistEntry[] = [];
     for (const entry of entries) {
       const existing = store.find(e => e.walletAddress === entry.walletAddress && e.identityKey === entry.identityKey);
@@ -456,18 +456,18 @@ export class MemoryStorageAdapter implements IStorageAdapter {
   }
 
   async storeErasureReceipt(receipt: StoredErasureReceipt): Promise<StoredErasureReceipt> {
-    memoryStore.__goldenRaccoonErasureReceipts ??= [];
-    const existing = memoryStore.__goldenRaccoonErasureReceipts.find(
+    memoryStore.__cryptaraErasureReceipts ??= [];
+    const existing = memoryStore.__cryptaraErasureReceipts.find(
       (r) => r.receiptId === receipt.receiptId,
     );
     if (existing) return existing;
-    memoryStore.__goldenRaccoonErasureReceipts.unshift(receipt);
+    memoryStore.__cryptaraErasureReceipts.unshift(receipt);
     return receipt;
   }
 
   async getErasureReceipt(receiptId: string): Promise<StoredErasureReceipt | null> {
-    memoryStore.__goldenRaccoonErasureReceipts ??= [];
-    return memoryStore.__goldenRaccoonErasureReceipts.find((r) => r.receiptId === receiptId) ?? null;
+    memoryStore.__cryptaraErasureReceipts ??= [];
+    return memoryStore.__cryptaraErasureReceipts.find((r) => r.receiptId === receiptId) ?? null;
   }
 }
 

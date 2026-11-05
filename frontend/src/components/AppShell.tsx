@@ -33,14 +33,14 @@ export function AppShell({ children, commandAssets }: { children: ReactNode; com
           <Link href="/" className="flex items-center gap-3">
             <Image
               src="/brand/logo.png"
-              alt="Golden Raccoon guardian emblem"
+              alt="Cryptara guardian emblem"
               width={44}
               height={44}
               className="rounded-2xl border border-[var(--color-border)]"
               priority
             />
             <div>
-              <div className="text-sm font-semibold tracking-[0.18em] text-brand">GOLDEN RACCOON</div>
+              <div className="text-sm font-semibold tracking-[0.18em] text-brand">CRYPTARA</div>
             </div>
           </Link>
           <nav aria-label="Primary" className="hidden items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-glass-bg)] p-1 md:flex">

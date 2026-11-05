@@ -51,7 +51,7 @@ function walletConnectModule(): ModuleInterface | null {
     projectId,
     allowedChains: [WalletConnectTargetChain.TESTNET, WalletConnectTargetChain.PUBLIC],
     metadata: {
-      name: "Golden Raccoon",
+      name: "Cryptara",
       description: "AI-powered crypto risk intelligence",
       url: origin,
       icons: [`${origin}/brand/logo.png`],

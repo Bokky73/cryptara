@@ -7,11 +7,11 @@ const appUrl =
   (process.env.NEXT_PUBLIC_VERCEL_URL ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}` : "http://localhost:3000");
 
 export const wagmiConfig = getDefaultConfig({
-  appName: "Golden Raccoon",
+  appName: "Cryptara",
   appDescription: "Multi-agent portfolio intelligence",
   appUrl,
   appIcon: `${appUrl}/brand/logo.png`,
-  projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "gold-raccoon-demo",
+  projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "cryptara-demo",
   chains: [goatNetwork, baseSepolia, base],
   ssr: true,
 });

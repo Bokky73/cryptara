@@ -24,7 +24,7 @@ That is all.
 
 They are not a vault. Neither contract holds funds or moves value:
 
-- `GoldenRaccoonAudit.sol` has no `payable` function, no `receive`, no
+- `CryptaraAudit.sol` has no `payable` function, no `receive`, no
   `fallback`, and no transfer, approval or balance logic. Ether sent to it
   reverts. A test asserts this over the compiled ABI so it stays true.
 - `AuditRegistry` (Soroban) instantiates no token client and performs no
@@ -229,7 +229,7 @@ git checkout <commit>
 rustup show                       # must match rust-toolchain.toml
 stellar --version                 # must match the recorded version
 RUSTC="$(rustup which rustc)" stellar contract build --manifest-path soroban/Cargo.toml
-sha256sum soroban/target/wasm32v1-none/release/golden_raccoon_audit_registry.wasm
+sha256sum soroban/target/wasm32v1-none/release/cryptara_audit_registry.wasm
 # compare against wasmSha256 in the artifact record, and against
 # `stellar contract info --id <contractId>` on the recorded network
 ```
@@ -252,7 +252,7 @@ a mismatch means the source and the deployment genuinely differ.
 Typed interfaces are generated, not hand-written, so they cannot drift:
 
 - **EVM**: `npm --prefix backend/contracts run compile` emits the ABI to
-  `artifacts/contracts/GoldenRaccoonAudit.sol/GoldenRaccoonAudit.json`. TypeChain
+  `artifacts/contracts/CryptaraAudit.sol/CryptaraAudit.json`. TypeChain
   types come from the same run via `@nomicfoundation/hardhat-toolbox`.
 - **Soroban**: `stellar contract bindings typescript --contract-id <id>
   --network <network> --output-dir <dir>` generates a typed client from the

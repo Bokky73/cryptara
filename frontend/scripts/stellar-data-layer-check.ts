@@ -19,7 +19,7 @@ import {
   type StellarRpcTransport,
 } from "../src/server/stellar/dataLayer";
 import {
-  GoldenRaccoonEventIngestor,
+  CryptaraEventIngestor,
   JsonFileStellarEventStore,
 } from "../src/server/stellar/eventIngestion";
 import { HorizonAccountDataAdapter } from "../src/server/stellar/horizonAdapter";
@@ -366,7 +366,7 @@ function eventTransport(
 }
 
 async function checkDurableEventResumeAndDedup() {
-  const directory = await mkdtemp(join(tmpdir(), "golden-raccoon-events-"));
+  const directory = await mkdtemp(join(tmpdir(), "cryptara-events-"));
   const path = join(directory, "checkpoints.json");
   const policy = {
     contractIds: [contractId],
@@ -377,7 +377,7 @@ async function checkDurableEventResumeAndDedup() {
 
   try {
     const firstStore = new JsonFileStellarEventStore(path);
-    const firstIngestor = new GoldenRaccoonEventIngestor(
+    const firstIngestor = new CryptaraEventIngestor(
       dataLayer({
         "https://events.test": eventTransport(
           "cursor-1",
@@ -412,7 +412,7 @@ async function checkDurableEventResumeAndDedup() {
     // A fresh store instance models a process restart. Replayed event-1 is
     // deduplicated while event-2 and the next cursor are committed atomically.
     const restartedStore = new JsonFileStellarEventStore(path);
-    const restartedIngestor = new GoldenRaccoonEventIngestor(
+    const restartedIngestor = new CryptaraEventIngestor(
       dataLayer({
         "https://events.test": eventTransport(
           "cursor-2",
@@ -472,7 +472,7 @@ async function checkDurableEventResumeAndDedup() {
 }
 
 async function checkGapDetection() {
-  const ingestor = new GoldenRaccoonEventIngestor(
+  const ingestor = new CryptaraEventIngestor(
     dataLayer({
       "https://events.test": eventTransport("cursor-gap", []),
     }),

@@ -2,9 +2,9 @@
 
 | Field | Value |
 | --- | --- |
-| Issue | Drago-Labs/golden-raccoon#31 |
+| Issue | Drago-Labs/cryptara#31 |
 | Companion docs | `docs/V3_CONTRACT_TEST_MATRIX.md`, `docs/V3_AUDIT_CHECKLIST.md`, `docs/V3_UPGRADE_RECOVERY.md` |
-| Authors | Golden Raccoon contributors |
+| Authors | Cryptara contributors |
 | Status | Audit-ready specification. All defaults in §9 are binding unless a maintainer explicitly substitutes an item during PR review; absent substitutions, defaults merge at PR approval. **No implementation code is introduced.** |
 | Roadmap coverage | V3-101 (vault custody model), V3-102 (policy commitment), V3-103 (agent authorization + limits), V3-104 (execution intent + nonce + expiry), V3-105 (pause + revoke + recovery), V3-106 (cross-chain domain separation), V3-107 (upgrade + admin), V3-108 (governance timelock, issue #145) |
 | Target networks | **Primary (dev):** EVM — GOAT Network (id 48816); Soroban — Stellar Testnet. **Production:** deferred until third-party audit closes (see §9.3). |
@@ -25,7 +25,7 @@ The V3 contract surface has four goals:
 
 ### Non-custodial proof (each contract)
 
-| Invariant | GoldRaccoonVault (EVM) | RiskRegistry (Soroban) |
+| Invariant | CryptaraVault (EVM) | RiskRegistry (Soroban) |
 | --- | --- | --- |
 | No `ERC20` / `transfer` / `transferFrom` / `swap` / `permit` calls | Contract exposes only `setAgent`, `setPolicy`, `logDecision`, `logExecutionIntent`, `revokeAgent`, `pause`, `upgrade`, `version`, and view accessors. It never calls into a token contract. | Contract exposes only `initialize`, `set_publisher`, `publish_risk`, `revoke_risk`, `get_risk`, `pause`, `upgrade`, `version`, and view accessors. No token transfer. |
 | No private key custody | Contract never holds a signer; `agent` is a public address authorized by the owner. | Contract requires `require_auth()` on the publisher for state writes; never holds a secret. |
@@ -37,7 +37,7 @@ The V3 contract surface has four goals:
 
 ## 2. V3 requirements traceability
 
-| ID | Requirement | Owner | EVM (`GoldRaccoonVault`) | Soroban (`RiskRegistry`) |
+| ID | Requirement | Owner | EVM (`CryptaraVault`) | Soroban (`RiskRegistry`) |
 | --- | --- | --- | --- | --- |
 | V3-101 | Funds-versus-allowance model | V3 | ✅ Allowance model: contract never holds funds; users approve token allowances directly to a DEX/router. The contract logs the intent and verifies policy. See §3. | N/A — registry does not touch funds |
 | V3-102 | Policy commitment (hash) | V3 | ✅ `setPolicy` stores `policyHash` on-chain; `logExecutionIntent` requires the intent's policy hash to match. | N/A |
@@ -136,7 +136,7 @@ All events MUST be emitted in this order to keep frontend indexers deterministic
 
 ---
 
-## 5. GoldRaccoonVault (EVM) interface
+## 5. CryptaraVault (EVM) interface
 
 ### 5.1 Storage layout
 
@@ -531,7 +531,7 @@ pub fn is_paused(env: Env) -> bool;
 
 ## 7. Cross-chain differences and domain separation
 
-| Concern | EVM (GoldRaccoonVault) | Soroban (RiskRegistry) |
+| Concern | EVM (CryptaraVault) | Soroban (RiskRegistry) |
 | --- | --- | --- |
 | Storage model | contract storage + event log | instance + persistent + TTL |
 | Auth model | `owner` / `agent` / `guardian` modifiers | `require_auth` + storage-level allowlist |
@@ -617,12 +617,12 @@ Each threat is mapped to a concrete control and a test identifier in `docs/V3_CO
 3. **Frontend integration PR** — the frontend wires the new events to the new contract events.
 4. **Testnet soak** — 14 days of soak testing on testnet with synthetic load and a forced pause / unpause cycle.
 5. **Audit** — third-party audit of the implementation PR (out of scope of this spec).
-6. **Pubnet deploy** — only after audit, the admin calls `VersionReported`, then `setPublisher` / `addAgent` for the canonical Golden Raccoon publisher / agent.
+6. **Pubnet deploy** — only after audit, the admin calls `VersionReported`, then `setPublisher` / `addAgent` for the canonical Cryptara publisher / agent.
 7. **Frontend cutoff** — the frontend flips `x402Required: true` for non-custodial write paths after the first confirmed event on pubnet.
 
 ### 9.4 Cutover and rollback
 
-- The frontend MUST be able to roll back to the V2 contract addresses by swapping the `NEXT_PUBLIC_GOLD_RACCOON_VAULT_ADDRESS` and `NEXT_PUBLIC_RISK_REGISTRY_ADDRESS` env vars.
+- The frontend MUST be able to roll back to the V2 contract addresses by swapping the `NEXT_PUBLIC_CRYPTARA_VAULT_ADDRESS` and `NEXT_PUBLIC_RISK_REGISTRY_ADDRESS` env vars.
 - The frontend MUST NOT auto-upgrade; every version bump is gated behind a manual `NEXT_PUBLIC_CONTRACT_VERSION` bump and a code-release.
 
 ### 9.5 Defaults and maintainer substitution policy
@@ -633,7 +633,7 @@ The defaults below are binding at PR merge unless a single maintainer comment su
 2. **Stellar target** — Default: Stellar Testnet dev now, Stellar Pubnet deferred until audit. Substitution path: comment "substitute Stellar dev <network>".
 3. **Proxy pattern for V3** — Default: UUPS proxy (`ERC1967Proxy` + `UUPSUpgradeable`) with §5.7 timelock and cancel path. Substitution alternatives: minimal proxy, beacon, or transparent proxy.
 4. **Upgrade delay window** — Default: 24h minimum, 30d maximum. Substitution path: comment with new `[minSec, maxSec]` inclusive bounds.
-5. **Publisher tier list** — Default: `gold_raccoon`, `partner`, `community`. Substitution path: comment with the exact tier symbol list.
+5. **Publisher tier list** — Default: `cryptara`, `partner`, `community`. Substitution path: comment with the exact tier symbol list.
 6. **Version-rebuild hash encoding** — Default: `sha256(git_commit || build_runner)` truncated to 32 bytes for Soroban; `keccak256(git_commit || build_runner)` truncated to 32 bytes for EVM.
 7. **Custody model** — Default: allowance model (non-custodial). Substitution path: comment "substitute custody model <funds|fungible_vault>". The funds model requires a separate audit and is not recommended.
 8. **Daily limit window** — Default: 24-hour rolling window. Substitution path: comment with new window in seconds.
@@ -673,7 +673,7 @@ These approvals are captured as PR review comments on this spec. Absent a substi
 
 Privileged changes (upgrades and parameter changes) are gated by the timelock controller:
 
-- **EVM**: `GoldRaccoonTimelock` (`backend/contracts/contracts/GoldRaccoonTimelock.sol`) with `propose`, `sign`, `execute`, `cancel`, `getPendingQueue`/`getPendingCount`, `pause` immediate. Delay ∈ [24h, 30d], threshold ≥2.
+- **EVM**: `CryptaraTimelock` (`backend/contracts/contracts/CryptaraTimelock.sol`) with `propose`, `sign`, `execute`, `cancel`, `getPendingQueue`/`getPendingCount`, `pause` immediate. Delay ∈ [24h, 30d], threshold ≥2.
 - **Soroban**: `GovernanceContract` (`soroban/contracts/governance/src/lib.rs` + `timelock.rs`) with identical semantics and TTL extension.
 - Events `ProposalCreated`/`ProposalSigned`/`ProposalExecuted`/`ProposalCancelled` carry `payloadHash` (keccak256). Pending queue is readable and verifiable by the frontend (`frontend/src/server/stellar/governance.ts` + `frontend/src/app/api/stellar/governance/pending/route.ts`).
 - Policy/risk-registry/audit-registry expose `set_governance`/`governance` and emit `GovernanceUpdated`. Emergency pause remains immediate.
@@ -697,7 +697,7 @@ Privileged changes (upgrades and parameter changes) are gated by the timelock co
 | Step | Owner | Depends on |
 | --- | --- | --- |
 | Approve this spec | Maintainer | PR review |
-| Implement EVM `GoldRaccoonVault` v3 | Frontend/Contracts | spec approval + maintainer custody/upgrade/admin/audit approval |
+| Implement EVM `CryptaraVault` v3 | Frontend/Contracts | spec approval + maintainer custody/upgrade/admin/audit approval |
 | Implement Soroban `RiskRegistry` v3 | Frontend/Contracts | spec approval |
 | Frontend wiring | Frontend | contract deploys |
 | Test matrix execution | Frontend | test matrix approval |

@@ -1,10 +1,10 @@
 #![no_std]
 
-//! Non-custodial authorization and audit layer for the Golden Raccoon agent
+//! Non-custodial authorization and audit layer for the Cryptara agent
 //! pipeline, on Soroban.
 //!
 //! This is the Stellar half of the V2 audit layer described in issue #16. It
-//! mirrors the EVM `GoldenRaccoonAudit` contract: it records *who may act*,
+//! mirrors the EVM `CryptaraAudit` contract: it records *who may act*,
 //! *under what policy*, and *what they decided*, and it never custodies value.
 //! There is no token client, no transfer, and no balance anywhere in this file.
 //! Executing a trade stays a wallet-signed operation elsewhere.

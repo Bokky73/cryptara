@@ -108,7 +108,7 @@ export default async function DiscoveryScanPage({ searchParams }: { searchParams
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-8 px-6 py-12">
       <header className="flex flex-col gap-2">
-        <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Golden Raccoon · V3 · Discovery scan</p>
+        <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Cryptara · V3 · Discovery scan</p>
         <h1 className="text-3xl font-semibold text-white">
           {entry ? `Rescan · ${entry.symbol ?? entry.tokenName ?? entry.identityKey}` : `Adhoc scan · ${params.symbol ?? params.name ?? params.address ?? params.assetKey ?? "candidate"}`}
         </h1>

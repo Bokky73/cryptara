@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { runGoldRaccoonAgent } from "@/server/agent";
+import { runCryptaraAgent } from "@/server/agent";
 import { getPortfolioSnapshot } from "@/server/portfolio/getPortfolio";
 
 const bodySchema = z.object({
@@ -16,5 +16,5 @@ export async function POST(request: Request) {
   }
 
   const { portfolio } = await getPortfolioSnapshot(parsed.data.walletAddress);
-  return NextResponse.json(runGoldRaccoonAgent(portfolio));
+  return NextResponse.json(runCryptaraAgent(portfolio));
 }

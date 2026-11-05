@@ -90,7 +90,7 @@ Agent DoD — so **no agent behaviour is currently verified on `main`**.
 ### A6 — Soroban contract tests do not compile
 
 ```
-error: could not compile `golden-raccoon-risk-registry` (lib test)
+error: could not compile `cryptara-risk-registry` (lib test)
        due to 16 previous errors
 ```
 

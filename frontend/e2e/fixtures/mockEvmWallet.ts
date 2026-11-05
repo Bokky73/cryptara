@@ -12,7 +12,7 @@ export async function installMockEvmWallet(page: Page, options: { address?: stri
       chainId: walletChainId,
       chainName: "Base",
     };
-    window.localStorage.setItem("golden-raccoon:selected-wallet-family:v1", "evm");
+    window.localStorage.setItem("cryptara:selected-wallet-family:v1", "evm");
     Object.defineProperty(window, "ethereum", {
       configurable: true,
       value: {

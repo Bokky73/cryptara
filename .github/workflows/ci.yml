@@ -54,7 +54,7 @@ jobs:
         run: npm run quality:gate
 
   evm-contracts:
-    name: EVM GoldRaccoonVault
+    name: EVM CryptaraVault
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -73,10 +73,10 @@ jobs:
       - name: Install contract dependencies
         run: npm ci
 
-      - name: Compile GoldRaccoonVault
+      - name: Compile CryptaraVault
         run: npm run compile
 
-      - name: Test GoldRaccoonVault
+      - name: Test CryptaraVault
         run: npm test
 
   soroban:
@@ -193,7 +193,7 @@ jobs:
       APP_MODE: test
       NODE_ENV: test
       NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
-      NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: gold-raccoon-demo
+      NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: cryptara-demo
       NEXT_PUBLIC_STELLAR_NETWORK: stellar-testnet
     steps:
       - name: Checkout
@@ -290,9 +290,9 @@ jobs:
             ' "$1"
           }
           npx hardhat clean && npx hardhat compile
-          H1="$(hash_creation artifacts/contracts/GoldRaccoonPolicy.sol/GoldRaccoonPolicy.json)"
+          H1="$(hash_creation artifacts/contracts/CryptaraPolicy.sol/CryptaraPolicy.json)"
           npx hardhat clean && npx hardhat compile
-          H2="$(hash_creation artifacts/contracts/GoldRaccoonPolicy.sol/GoldRaccoonPolicy.json)"
+          H2="$(hash_creation artifacts/contracts/CryptaraPolicy.sol/CryptaraPolicy.json)"
           echo "EVM creation bytecode pass1=${H1}"
           echo "EVM creation bytecode pass2=${H2}"
           test "$H1" = "$H2"
@@ -300,7 +300,7 @@ jobs:
       - name: Dual clean Soroban builds
         run: |
           set -euo pipefail
-          WASM=soroban/target/wasm32v1-none/release/golden_raccoon_policy.wasm
+          WASM=soroban/target/wasm32v1-none/release/cryptara_policy.wasm
           stellar contract build --manifest-path soroban/Cargo.toml
           H1="$(sha256sum "$WASM" | awk '{print $1}')"
           rm -rf soroban/target/wasm32v1-none/release

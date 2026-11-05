@@ -1,6 +1,6 @@
 # Dependency license policy
 
-Golden Raccoon records a license disposition for every component in the generated CycloneDX inventories. A missing lockfile license is emitted as `NOASSERTION`; it is never silently treated as permissive.
+Cryptara records a license disposition for every component in the generated CycloneDX inventories. A missing lockfile license is emitted as `NOASSERTION`; it is never silently treated as permissive.
 
 ## Dispositions
 

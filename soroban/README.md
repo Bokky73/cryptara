@@ -1,4 +1,4 @@
-# Golden Raccoon Soroban contracts
+# Cryptara Soroban contracts
 
 Workspace crates: policy, vault, risk-registry, and audit-registry. Reports remain off-chain where applicable; digests and policy state are stored on-chain.
 
@@ -13,10 +13,10 @@ stellar contract build --manifest-path soroban/Cargo.toml
 
 CI and `scripts/build-soroban.sh` use `stellar contract build` with the `wasm32v1-none` target. Expected release WASM basenames:
 
-- `golden_raccoon_policy.wasm`
-- `golden_raccoon_vault.wasm`
-- `golden_raccoon_risk_registry.wasm`
-- `golden_raccoon_audit_registry.wasm`
+- `cryptara_policy.wasm`
+- `cryptara_vault.wasm`
+- `cryptara_risk_registry.wasm`
+- `cryptara_audit_registry.wasm`
 
 ## Provenance
 

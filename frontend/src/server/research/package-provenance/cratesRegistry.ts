@@ -16,7 +16,7 @@ import { lookup } from "node:dns/promises";
 import { assertExternalFetchAllowed, isPrivateOrLocalHost } from "@/server/security/urlSafety";
 import { PACKAGE_PROVENANCE_LIMITS } from "./limits";
 
-const USER_AGENT = "golden-raccoon-package-provenance (research tool, read-only, no auth)";
+const USER_AGENT = "cryptara-package-provenance (research tool, read-only, no auth)";
 
 export type CratesTrustedPublishing = {
   provider: string;

@@ -12,7 +12,7 @@ const ZERO_HASH = ethers.ZeroHash;
 
 async function deploy() {
   const [user, agent, stranger] = await ethers.getSigners();
-  const factory = await ethers.getContractFactory("GoldenRaccoonAudit");
+  const factory = await ethers.getContractFactory("CryptaraAudit");
   const audit = await factory.deploy();
 
   await audit.waitForDeployment();
@@ -31,7 +31,7 @@ async function deployAuthorized() {
   return { ...context, expiresAt };
 }
 
-describe("GoldenRaccoonAudit", () => {
+describe("CryptaraAudit", () => {
   describe("version and policy", () => {
     it("reports its interface version", async () => {
       const { audit } = await deploy();
@@ -331,7 +331,7 @@ describe("GoldenRaccoonAudit", () => {
     });
 
     it("exposes no value-moving function in its ABI", async () => {
-      const factory = await ethers.getContractFactory("GoldenRaccoonAudit");
+      const factory = await ethers.getContractFactory("CryptaraAudit");
       const fragments = factory.interface.fragments.filter((fragment) => fragment.type === "function");
 
       // A contract that cannot custody funds has no payable entry point and no

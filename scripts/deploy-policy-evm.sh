@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Deploy GoldRaccoonPolicy to EVM testnet
+# Deploy CryptaraPolicy to EVM testnet
 # Usage: ./scripts/deploy-policy-evm.sh <network> <manifest-path>
 # Requires PRIVATE_KEY env var
 # Never commit a private key.
@@ -26,7 +26,7 @@ esac
 echo "Verifying artifact provenance before deploy..."
 node "${ROOT}/scripts/verify-artifact-provenance.mjs" --strict "${MANIFEST}"
 
-echo "Deploying GoldRaccoonPolicy to ${NETWORK}..."
+echo "Deploying CryptaraPolicy to ${NETWORK}..."
 cd "${ROOT}/backend/contracts"
 npx hardhat run scripts/deploy-policy.ts --network "${NETWORK}"
 

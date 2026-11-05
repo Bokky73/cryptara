@@ -3,7 +3,7 @@
 > Review date: 2026-07-29
 > Source files: `backend/contracts/contracts/`
 
-## GoldRaccoonPolicy.sol
+## CryptaraPolicy.sol
 
 | Check | Status | Notes |
 |---|---|---|
@@ -28,7 +28,7 @@
 | `hashPolicyDecision` includes chainId | ✅ PASS | Chain-bound |
 | `hashIntent` includes user, intentAddress, nonce, expiry | ✅ PASS | Intent-bound |
 
-## GoldRaccoonVault.sol
+## CryptaraVault.sol
 
 | Check | Status | Notes |
 |---|---|---|
@@ -43,7 +43,7 @@
 | Events emitted for all state changes | ✅ PASS | All modifications emit events |
 | No unsafe arithmetic | ✅ PASS | Solidity 0.8.28 has built-in checks |
 
-## GoldRaccoonRiskRegistry.sol
+## CryptaraRiskRegistry.sol
 
 | Check | Status | Notes |
 |---|---|---|

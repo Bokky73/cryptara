@@ -1,13 +1,13 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 
-describe("GoldRaccoonVault constructor smoke checks", function () {
+describe("CryptaraVault constructor smoke checks", function () {
   async function deployVault() {
     const [, agent, user] = await ethers.getSigners();
-    const Policy = await ethers.getContractFactory("GoldRaccoonPolicy");
+    const Policy = await ethers.getContractFactory("CryptaraPolicy");
     const policy = await Policy.deploy();
     await policy.waitForDeployment();
-    const Vault = await ethers.getContractFactory("GoldRaccoonVault");
+    const Vault = await ethers.getContractFactory("CryptaraVault");
     const vault = await Vault.deploy(policy.target, agent.address);
     await vault.waitForDeployment();
     return { Vault, vault, policy, agent, user };

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "./GoldRaccoonPolicy.sol";
+import "./CryptaraPolicy.sol";
 
-contract GoldRaccoonPolicyV2 is GoldRaccoonPolicy {
+contract CryptaraPolicyV2 is CryptaraPolicy {
     string public constant V2_VERSION = "2.0.0";
     address public timelock;
 

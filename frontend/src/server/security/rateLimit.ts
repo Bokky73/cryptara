@@ -18,13 +18,13 @@ export const rateLimitProfiles = {
 } satisfies Record<string, RateLimitOptions>;
 
 const buckets = globalThis as typeof globalThis & {
-  __goldenRaccoonRateLimit?: Map<string, { count: number; resetAt: number }>;
+  __cryptaraRateLimit?: Map<string, { count: number; resetAt: number }>;
 };
 
 function getBuckets() {
-  buckets.__goldenRaccoonRateLimit ??= new Map();
+  buckets.__cryptaraRateLimit ??= new Map();
 
-  return buckets.__goldenRaccoonRateLimit;
+  return buckets.__cryptaraRateLimit;
 }
 
 export function getClientKey(request: Request | NextRequest, namespace: string) {

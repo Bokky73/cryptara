@@ -1,12 +1,12 @@
 import { ethers } from "hardhat";
 
 async function main() {
-  const GoldRaccoonVault = await ethers.getContractFactory("GoldRaccoonVault");
-  const vault = await GoldRaccoonVault.deploy();
+  const CryptaraVault = await ethers.getContractFactory("CryptaraVault");
+  const vault = await CryptaraVault.deploy();
 
   await vault.waitForDeployment();
 
-  console.log(`GoldRaccoonVault deployed to ${await vault.getAddress()}`);
+  console.log(`CryptaraVault deployed to ${await vault.getAddress()}`);
 }
 
 main().catch((error) => {

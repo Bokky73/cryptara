@@ -4,7 +4,7 @@ test.describe("Landing page", () => {
   test("loads with correct title and branding", async ({ page }) => {
     await page.goto("/");
 
-    await expect(page.getByRole("heading", { name: "Golden Raccoon" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Cryptara" })).toBeVisible();
     await expect(page.locator("text=Multi-agent portfolio intelligence")).toBeVisible();
     await expect(page.locator("text=GOAT Network AI Guardian MVP")).toBeVisible();
   });
@@ -12,7 +12,7 @@ test.describe("Landing page", () => {
   test("displays hero section with key features", async ({ page }) => {
     await page.goto("/");
 
-    await expect(page.locator("h1:has-text('Golden Raccoon')")).toBeVisible();
+    await expect(page.locator("h1:has-text('Cryptara')")).toBeVisible();
     await expect(page.locator("text=Open Dashboard")).toBeVisible();
     await expect(page.locator("text=View Agents")).toBeVisible();
   });

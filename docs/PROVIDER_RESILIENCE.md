@@ -1,6 +1,6 @@
 # Provider resilience
 
-Golden Raccoon treats provider failover as a safety boundary, not only an availability feature. A fallback is eligible only when its chain family, network, and chain ID or Stellar network passphrase exactly match the request. A testnet response can never satisfy a pubnet request, and an EVM response from another chain fails before application data is accepted.
+Cryptara treats provider failover as a safety boundary, not only an availability feature. A fallback is eligible only when its chain family, network, and chain ID or Stellar network passphrase exactly match the request. A testnet response can never satisfy a pubnet request, and an EVM response from another chain fails before application data is accepted.
 
 ## Runtime policy
 

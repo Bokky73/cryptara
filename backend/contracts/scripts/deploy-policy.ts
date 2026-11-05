@@ -3,9 +3,9 @@ import { ethers } from "hardhat";
 async function main() {
   const [deployer] = await ethers.getSigners();
 
-  console.log(`Deploying GoldRaccoonPolicy with account: ${deployer.address}`);
+  console.log(`Deploying CryptaraPolicy with account: ${deployer.address}`);
 
-  const Policy = await ethers.getContractFactory("GoldRaccoonPolicy");
+  const Policy = await ethers.getContractFactory("CryptaraPolicy");
   const policy = await Policy.deploy();
 
   await policy.waitForDeployment();
@@ -13,7 +13,7 @@ async function main() {
   const address = await policy.getAddress();
   const version = await policy.getVersion();
 
-  console.log(`GoldRaccoonPolicy deployed to ${address}`);
+  console.log(`CryptaraPolicy deployed to ${address}`);
   console.log(`Contract version: ${version}`);
   console.log(`Owner: ${await policy.owner()}`);
   console.log(`Emergency admin: ${await policy.emergencyAdmin()}`);

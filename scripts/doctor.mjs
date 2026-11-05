@@ -3,7 +3,7 @@ import http from "node:http";
 import fs from "node:fs";
 import net from "node:net";
 
-console.log("=> Running Golden Raccoon environment doctor...\n");
+console.log("=> Running Cryptara environment doctor...\n");
 
 let errors = 0;
 let warnings = 0;

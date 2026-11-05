@@ -4,7 +4,7 @@
 
 ### Soroban (Rust)
 - Tests: `cd soroban && cargo test --locked`
-- Single package: `cargo test --package golden-raccoon-vault --locked`
+- Single package: `cargo test --package cryptara-vault --locked`
 - Clippy: `cargo clippy --all-targets -- -D warnings`
 - Format: `cargo fmt --check`
 - Build script: `scripts/build-soroban.sh`

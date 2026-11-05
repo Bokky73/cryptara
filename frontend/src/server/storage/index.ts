@@ -81,42 +81,42 @@ export const devSeed = seedDevEnvironment;
  * kick off the hydrate; subsequent re-evaluations (HMR, route reloads)
  * await the same promise so the hydrate runs at most once per process.
  */
-  type GoldenRaccoonMemoryGlobal = typeof globalThis & {
-  __goldenRaccoonAlertRules?: AlertRule[];
-  __goldenRaccoonAlertObservations?: AlertObservation[];
-  __goldenRaccoonAlerts?: Alert[];
-  __goldenRaccoonAlertDeliveries?: AlertDelivery[];
-  __goldenRaccoonNotificationPreferences?: NotificationPreferences[];
-  __goldenRaccoonAgentRuns?: AgentRunRecord[];
-  __goldenRaccoonRecommendations?: RecommendationRecord[];
-  __goldenRaccoonTransactions?: TransactionRecord[];
-  __goldenRaccoonTransactionEvents?: TransactionLifecycleEvent[];
-  __goldenRaccoonTransactionObservations?: TransactionObservation[];
-  __goldenRaccoonApprovals?: UserApprovalRecord[];
-  __goldenRaccoonUserRules?: UserRule[];
-  __goldenRaccoonX402PaymentReceipts?: X402PaymentReceipt[];
-  __goldenRaccoonWatchlistEntries?: WatchlistEntry[];
-  __goldenRaccoonWatchlistScanRuns?: WatchlistScanRun[];
-  __goldenRaccoonDiscoveryAlerts?: DiscoveryAlert[];
-  __goldenRaccoonHydrationStarted?: boolean;
-  __goldenRaccoonHydrationPromise?: Promise<{ tried: boolean; hydrated: number; skipped: number; detail: string }>;
-  __goldenRaccoonLastHydration?: { tried: boolean; hydrated: number; skipped: number; detail: string; at: string };
+  type CryptaraMemoryGlobal = typeof globalThis & {
+  __cryptaraAlertRules?: AlertRule[];
+  __cryptaraAlertObservations?: AlertObservation[];
+  __cryptaraAlerts?: Alert[];
+  __cryptaraAlertDeliveries?: AlertDelivery[];
+  __cryptaraNotificationPreferences?: NotificationPreferences[];
+  __cryptaraAgentRuns?: AgentRunRecord[];
+  __cryptaraRecommendations?: RecommendationRecord[];
+  __cryptaraTransactions?: TransactionRecord[];
+  __cryptaraTransactionEvents?: TransactionLifecycleEvent[];
+  __cryptaraTransactionObservations?: TransactionObservation[];
+  __cryptaraApprovals?: UserApprovalRecord[];
+  __cryptaraUserRules?: UserRule[];
+  __cryptaraX402PaymentReceipts?: X402PaymentReceipt[];
+  __cryptaraWatchlistEntries?: WatchlistEntry[];
+  __cryptaraWatchlistScanRuns?: WatchlistScanRun[];
+  __cryptaraDiscoveryAlerts?: DiscoveryAlert[];
+  __cryptaraHydrationStarted?: boolean;
+  __cryptaraHydrationPromise?: Promise<{ tried: boolean; hydrated: number; skipped: number; detail: string }>;
+  __cryptaraLastHydration?: { tried: boolean; hydrated: number; skipped: number; detail: string; at: string };
 };
 
-const memoryStore = globalThis as GoldenRaccoonMemoryGlobal;
+const memoryStore = globalThis as CryptaraMemoryGlobal;
 
 export function ensureStorageReady(): Promise<{ tried: boolean; hydrated: number; skipped: number; detail: string }> {
-  const store = memoryStore as GoldenRaccoonMemoryGlobal;
+  const store = memoryStore as CryptaraMemoryGlobal;
 
-  if (store.__goldenRaccoonHydrationPromise) return store.__goldenRaccoonHydrationPromise;
+  if (store.__cryptaraHydrationPromise) return store.__cryptaraHydrationPromise;
 
-  store.__goldenRaccoonHydrationStarted = true;
-  store.__goldenRaccoonHydrationPromise = (async () => {
+  store.__cryptaraHydrationStarted = true;
+  store.__cryptaraHydrationPromise = (async () => {
     const adapter = getPostgresStorageAdapter();
 
     if (!adapter.isConfigured()) {
       const result = { tried: false, hydrated: 0, skipped: 0, detail: "no DATABASE_URL configured" };
-      store.__goldenRaccoonLastHydration = { ...result, at: new Date().toISOString() };
+      store.__cryptaraLastHydration = { ...result, at: new Date().toISOString() };
 
       return result;
     }
@@ -141,29 +141,29 @@ export function ensureStorageReady(): Promise<{ tried: boolean; hydrated: number
       const totalHydrated = alertHydrate.hydrated + txHydrate.hydrated + watchlistHydrate.hydrated;
       const totalSkipped = alertHydrate.skipped + txHydrate.skipped + watchlistHydrate.skipped;
       const result = { tried: true, hydrated: totalHydrated, skipped: totalSkipped, detail: "ok" };
-      store.__goldenRaccoonLastHydration = { ...result, at: new Date().toISOString() };
+      store.__cryptaraLastHydration = { ...result, at: new Date().toISOString() };
 
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const result = { tried: true, hydrated: 0, skipped: 0, detail: message };
-      store.__goldenRaccoonLastHydration = { ...result, at: new Date().toISOString() };
+      store.__cryptaraLastHydration = { ...result, at: new Date().toISOString() };
 
       return result;
     }
   })();
 
-  return store.__goldenRaccoonHydrationPromise;
+  return store.__cryptaraHydrationPromise;
 }
 
 export function getLastHydrationSummary() {
-  return memoryStore.__goldenRaccoonLastHydration
-    ? { ...memoryStore.__goldenRaccoonLastHydration }
+  return memoryStore.__cryptaraLastHydration
+    ? { ...memoryStore.__cryptaraLastHydration }
     : null;
 }
 
 // Eager hydration on module init. Subsequent reads (SSR pages, API
-// routes, fixtures) see the same globalThis.__goldenRaccoon* arrays
+// routes, fixtures) see the same globalThis.__cryptara* arrays
 // already populated from SQL where available. Errors are absorbed by
 // `ensureStorageReady()` and surfaced via `getStorageHealth()`.
 void ensureStorageReady();
@@ -220,13 +220,13 @@ async function persistTransactionEvent(event: TransactionLifecycleEvent) {
 }
 
 function getTransactionEvents() {
-  memoryStore.__goldenRaccoonTransactionEvents ??= [];
-  return memoryStore.__goldenRaccoonTransactionEvents;
+  memoryStore.__cryptaraTransactionEvents ??= [];
+  return memoryStore.__cryptaraTransactionEvents;
 }
 
 function getTransactionObservations() {
-  memoryStore.__goldenRaccoonTransactionObservations ??= [];
-  return memoryStore.__goldenRaccoonTransactionObservations;
+  memoryStore.__cryptaraTransactionObservations ??= [];
+  return memoryStore.__cryptaraTransactionObservations;
 }
 
 type CreateAgentRunInput = {
@@ -321,87 +321,87 @@ export const storageSchemaContract = {
 };
 
 function getAgentRuns() {
-  memoryStore.__goldenRaccoonAgentRuns ??= [];
+  memoryStore.__cryptaraAgentRuns ??= [];
 
-  return memoryStore.__goldenRaccoonAgentRuns;
+  return memoryStore.__cryptaraAgentRuns;
 }
 
 function getRecommendations() {
-  memoryStore.__goldenRaccoonRecommendations ??= [];
+  memoryStore.__cryptaraRecommendations ??= [];
 
-  return memoryStore.__goldenRaccoonRecommendations;
+  return memoryStore.__cryptaraRecommendations;
 }
 
 function getTransactions() {
-  memoryStore.__goldenRaccoonTransactions ??= [];
+  memoryStore.__cryptaraTransactions ??= [];
 
-  return memoryStore.__goldenRaccoonTransactions;
+  return memoryStore.__cryptaraTransactions;
 }
 
 function getApprovals() {
-  memoryStore.__goldenRaccoonApprovals ??= [];
+  memoryStore.__cryptaraApprovals ??= [];
 
-  return memoryStore.__goldenRaccoonApprovals;
+  return memoryStore.__cryptaraApprovals;
 }
 
 function getUserRules() {
-  memoryStore.__goldenRaccoonUserRules ??= [];
+  memoryStore.__cryptaraUserRules ??= [];
 
-  return memoryStore.__goldenRaccoonUserRules;
+  return memoryStore.__cryptaraUserRules;
 }
 
 function getX402PaymentReceipts() {
-  memoryStore.__goldenRaccoonX402PaymentReceipts ??= [];
+  memoryStore.__cryptaraX402PaymentReceipts ??= [];
 
-  return memoryStore.__goldenRaccoonX402PaymentReceipts;
+  return memoryStore.__cryptaraX402PaymentReceipts;
 }
 
 function getAlertRulesStore() {
-  memoryStore.__goldenRaccoonAlertRules ??= [];
+  memoryStore.__cryptaraAlertRules ??= [];
 
-  return memoryStore.__goldenRaccoonAlertRules;
+  return memoryStore.__cryptaraAlertRules;
 }
 
 function getAlertObservationsStore() {
-  memoryStore.__goldenRaccoonAlertObservations ??= [];
+  memoryStore.__cryptaraAlertObservations ??= [];
 
-  return memoryStore.__goldenRaccoonAlertObservations;
+  return memoryStore.__cryptaraAlertObservations;
 }
 
 function getAlertsStore() {
-  memoryStore.__goldenRaccoonAlerts ??= [];
+  memoryStore.__cryptaraAlerts ??= [];
 
-  return memoryStore.__goldenRaccoonAlerts;
+  return memoryStore.__cryptaraAlerts;
 }
 
 function getAlertDeliveriesStore() {
-  memoryStore.__goldenRaccoonAlertDeliveries ??= [];
+  memoryStore.__cryptaraAlertDeliveries ??= [];
 
-  return memoryStore.__goldenRaccoonAlertDeliveries;
+  return memoryStore.__cryptaraAlertDeliveries;
 }
 
 function getNotificationPreferencesStore() {
-  memoryStore.__goldenRaccoonNotificationPreferences ??= [];
+  memoryStore.__cryptaraNotificationPreferences ??= [];
 
-  return memoryStore.__goldenRaccoonNotificationPreferences;
+  return memoryStore.__cryptaraNotificationPreferences;
 }
 
 function getWatchlistEntries() {
-  memoryStore.__goldenRaccoonWatchlistEntries ??= [];
+  memoryStore.__cryptaraWatchlistEntries ??= [];
 
-  return memoryStore.__goldenRaccoonWatchlistEntries;
+  return memoryStore.__cryptaraWatchlistEntries;
 }
 
 function getWatchlistScanRuns() {
-  memoryStore.__goldenRaccoonWatchlistScanRuns ??= [];
+  memoryStore.__cryptaraWatchlistScanRuns ??= [];
 
-  return memoryStore.__goldenRaccoonWatchlistScanRuns;
+  return memoryStore.__cryptaraWatchlistScanRuns;
 }
 
 function getDiscoveryAlerts() {
-  memoryStore.__goldenRaccoonDiscoveryAlerts ??= [];
+  memoryStore.__cryptaraDiscoveryAlerts ??= [];
 
-  return memoryStore.__goldenRaccoonDiscoveryAlerts;
+  return memoryStore.__cryptaraDiscoveryAlerts;
 }
 
 function createId() {
@@ -1177,13 +1177,13 @@ export function removeWatchlistEntry(id: string) {
   const remaining = store.filter((entry) => entry.id !== id);
   const removed = store.length - remaining.length;
 
-  memoryStore.__goldenRaccoonWatchlistEntries = remaining;
+  memoryStore.__cryptaraWatchlistEntries = remaining;
 
   const runs = getWatchlistScanRuns().filter((run) => run.entryId !== id);
-  memoryStore.__goldenRaccoonWatchlistScanRuns = runs;
+  memoryStore.__cryptaraWatchlistScanRuns = runs;
 
   const alerts = getDiscoveryAlerts().filter((alert) => alert.entryId !== id);
-  memoryStore.__goldenRaccoonDiscoveryAlerts = alerts;
+  memoryStore.__cryptaraDiscoveryAlerts = alerts;
 
   if (removed > 0) {
     mirrorWatchlistEntryDeletion(id);
@@ -1439,96 +1439,96 @@ export async function deleteWalletData(
   let memoryRecordsRemoved = 0;
   let memoryAuditRecordsUnlinked = 0;
 
-  if (memoryStore.__goldenRaccoonAgentRuns && !targetNetwork) {
-    const before = memoryStore.__goldenRaccoonAgentRuns.length;
-    memoryStore.__goldenRaccoonAgentRuns = memoryStore.__goldenRaccoonAgentRuns.filter(
+  if (memoryStore.__cryptaraAgentRuns && !targetNetwork) {
+    const before = memoryStore.__cryptaraAgentRuns.length;
+    memoryStore.__cryptaraAgentRuns = memoryStore.__cryptaraAgentRuns.filter(
       (r) => !matchesWalletAddress(r.walletAddress, canonicalWallet)
     );
-    memoryRecordsRemoved += before - memoryStore.__goldenRaccoonAgentRuns.length;
+    memoryRecordsRemoved += before - memoryStore.__cryptaraAgentRuns.length;
   }
 
-  if (memoryStore.__goldenRaccoonRecommendations && !targetNetwork) {
-    const before = memoryStore.__goldenRaccoonRecommendations.length;
-    memoryStore.__goldenRaccoonRecommendations = memoryStore.__goldenRaccoonRecommendations.filter(
+  if (memoryStore.__cryptaraRecommendations && !targetNetwork) {
+    const before = memoryStore.__cryptaraRecommendations.length;
+    memoryStore.__cryptaraRecommendations = memoryStore.__cryptaraRecommendations.filter(
       (r) => !matchesWalletAddress(r.walletAddress, canonicalWallet)
     );
-    memoryRecordsRemoved += before - memoryStore.__goldenRaccoonRecommendations.length;
+    memoryRecordsRemoved += before - memoryStore.__cryptaraRecommendations.length;
   }
 
-  if (memoryStore.__goldenRaccoonApprovals) {
-    const before = memoryStore.__goldenRaccoonApprovals.length;
-    memoryStore.__goldenRaccoonApprovals = memoryStore.__goldenRaccoonApprovals.filter(
+  if (memoryStore.__cryptaraApprovals) {
+    const before = memoryStore.__cryptaraApprovals.length;
+    memoryStore.__cryptaraApprovals = memoryStore.__cryptaraApprovals.filter(
       (r) => !matchesWalletAddress(r.walletAddress, canonicalWallet, r.network, targetNetwork)
     );
-    memoryRecordsRemoved += before - memoryStore.__goldenRaccoonApprovals.length;
+    memoryRecordsRemoved += before - memoryStore.__cryptaraApprovals.length;
   }
 
-  if (memoryStore.__goldenRaccoonUserRules && !targetNetwork) {
-    const before = memoryStore.__goldenRaccoonUserRules.length;
-    memoryStore.__goldenRaccoonUserRules = memoryStore.__goldenRaccoonUserRules.filter(
+  if (memoryStore.__cryptaraUserRules && !targetNetwork) {
+    const before = memoryStore.__cryptaraUserRules.length;
+    memoryStore.__cryptaraUserRules = memoryStore.__cryptaraUserRules.filter(
       (r) => !matchesWalletAddress(r.walletAddress, canonicalWallet)
     );
-    memoryRecordsRemoved += before - memoryStore.__goldenRaccoonUserRules.length;
+    memoryRecordsRemoved += before - memoryStore.__cryptaraUserRules.length;
   }
 
-  if (memoryStore.__goldenRaccoonAlertRules && !targetNetwork) {
-    const before = memoryStore.__goldenRaccoonAlertRules.length;
-    memoryStore.__goldenRaccoonAlertRules = memoryStore.__goldenRaccoonAlertRules.filter(
+  if (memoryStore.__cryptaraAlertRules && !targetNetwork) {
+    const before = memoryStore.__cryptaraAlertRules.length;
+    memoryStore.__cryptaraAlertRules = memoryStore.__cryptaraAlertRules.filter(
       (r) => !matchesWalletAddress(r.walletAddress, canonicalWallet)
     );
-    memoryRecordsRemoved += before - memoryStore.__goldenRaccoonAlertRules.length;
+    memoryRecordsRemoved += before - memoryStore.__cryptaraAlertRules.length;
   }
 
-  if (memoryStore.__goldenRaccoonAlertObservations && !targetNetwork) {
-    const before = memoryStore.__goldenRaccoonAlertObservations.length;
-    memoryStore.__goldenRaccoonAlertObservations = memoryStore.__goldenRaccoonAlertObservations.filter(
+  if (memoryStore.__cryptaraAlertObservations && !targetNetwork) {
+    const before = memoryStore.__cryptaraAlertObservations.length;
+    memoryStore.__cryptaraAlertObservations = memoryStore.__cryptaraAlertObservations.filter(
       (r) => !matchesWalletAddress(r.walletAddress, canonicalWallet)
     );
-    memoryRecordsRemoved += before - memoryStore.__goldenRaccoonAlertObservations.length;
+    memoryRecordsRemoved += before - memoryStore.__cryptaraAlertObservations.length;
   }
 
-  if (memoryStore.__goldenRaccoonAlerts && !targetNetwork) {
-    const before = memoryStore.__goldenRaccoonAlerts.length;
-    memoryStore.__goldenRaccoonAlerts = memoryStore.__goldenRaccoonAlerts.filter(
+  if (memoryStore.__cryptaraAlerts && !targetNetwork) {
+    const before = memoryStore.__cryptaraAlerts.length;
+    memoryStore.__cryptaraAlerts = memoryStore.__cryptaraAlerts.filter(
       (r) => !matchesWalletAddress(r.walletAddress, canonicalWallet)
     );
-    memoryRecordsRemoved += before - memoryStore.__goldenRaccoonAlerts.length;
+    memoryRecordsRemoved += before - memoryStore.__cryptaraAlerts.length;
   }
 
-  if (memoryStore.__goldenRaccoonAlertDeliveries && !targetNetwork) {
-    const before = memoryStore.__goldenRaccoonAlertDeliveries.length;
-    memoryStore.__goldenRaccoonAlertDeliveries = memoryStore.__goldenRaccoonAlertDeliveries.filter(
+  if (memoryStore.__cryptaraAlertDeliveries && !targetNetwork) {
+    const before = memoryStore.__cryptaraAlertDeliveries.length;
+    memoryStore.__cryptaraAlertDeliveries = memoryStore.__cryptaraAlertDeliveries.filter(
       (r) => !matchesWalletAddress(r.walletAddress, canonicalWallet)
     );
-    memoryRecordsRemoved += before - memoryStore.__goldenRaccoonAlertDeliveries.length;
+    memoryRecordsRemoved += before - memoryStore.__cryptaraAlertDeliveries.length;
   }
 
-  if (memoryStore.__goldenRaccoonWatchlistEntries && !targetNetwork) {
-    const before = memoryStore.__goldenRaccoonWatchlistEntries.length;
-    memoryStore.__goldenRaccoonWatchlistEntries = memoryStore.__goldenRaccoonWatchlistEntries.filter(
+  if (memoryStore.__cryptaraWatchlistEntries && !targetNetwork) {
+    const before = memoryStore.__cryptaraWatchlistEntries.length;
+    memoryStore.__cryptaraWatchlistEntries = memoryStore.__cryptaraWatchlistEntries.filter(
       (r) => !matchesWalletAddress(r.walletAddress, canonicalWallet)
     );
-    memoryRecordsRemoved += before - memoryStore.__goldenRaccoonWatchlistEntries.length;
+    memoryRecordsRemoved += before - memoryStore.__cryptaraWatchlistEntries.length;
   }
 
-  if (memoryStore.__goldenRaccoonWatchlistScanRuns && !targetNetwork) {
-    const before = memoryStore.__goldenRaccoonWatchlistScanRuns.length;
-    memoryStore.__goldenRaccoonWatchlistScanRuns = memoryStore.__goldenRaccoonWatchlistScanRuns.filter(
+  if (memoryStore.__cryptaraWatchlistScanRuns && !targetNetwork) {
+    const before = memoryStore.__cryptaraWatchlistScanRuns.length;
+    memoryStore.__cryptaraWatchlistScanRuns = memoryStore.__cryptaraWatchlistScanRuns.filter(
       (r) => !matchesWalletAddress(r.walletAddress, canonicalWallet)
     );
-    memoryRecordsRemoved += before - memoryStore.__goldenRaccoonWatchlistScanRuns.length;
+    memoryRecordsRemoved += before - memoryStore.__cryptaraWatchlistScanRuns.length;
   }
 
-  if (memoryStore.__goldenRaccoonDiscoveryAlerts && !targetNetwork) {
-    const before = memoryStore.__goldenRaccoonDiscoveryAlerts.length;
-    memoryStore.__goldenRaccoonDiscoveryAlerts = memoryStore.__goldenRaccoonDiscoveryAlerts.filter(
+  if (memoryStore.__cryptaraDiscoveryAlerts && !targetNetwork) {
+    const before = memoryStore.__cryptaraDiscoveryAlerts.length;
+    memoryStore.__cryptaraDiscoveryAlerts = memoryStore.__cryptaraDiscoveryAlerts.filter(
       (r) => !matchesWalletAddress(r.walletAddress, canonicalWallet)
     );
-    memoryRecordsRemoved += before - memoryStore.__goldenRaccoonDiscoveryAlerts.length;
+    memoryRecordsRemoved += before - memoryStore.__cryptaraDiscoveryAlerts.length;
   }
 
-  if (memoryStore.__goldenRaccoonTransactions) {
-    for (const tx of memoryStore.__goldenRaccoonTransactions) {
+  if (memoryStore.__cryptaraTransactions) {
+    for (const tx of memoryStore.__cryptaraTransactions) {
       if (matchesWalletAddress(tx.walletAddress, canonicalWallet, tx.network, targetNetwork)) {
         tx.walletAddress = "";
         tx.sourceAccount = undefined;
@@ -1537,8 +1537,8 @@ export async function deleteWalletData(
     }
   }
 
-  if (memoryStore.__goldenRaccoonX402PaymentReceipts) {
-    for (const rec of memoryStore.__goldenRaccoonX402PaymentReceipts) {
+  if (memoryStore.__cryptaraX402PaymentReceipts) {
+    for (const rec of memoryStore.__cryptaraX402PaymentReceipts) {
       if (matchesWalletAddress(rec.walletAddress, canonicalWallet, rec.network, targetNetwork) || matchesWalletAddress(rec.payer, canonicalWallet, rec.network, targetNetwork)) {
         rec.walletAddress = undefined;
         rec.payer = undefined;

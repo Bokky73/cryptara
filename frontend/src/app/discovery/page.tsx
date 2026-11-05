@@ -135,7 +135,7 @@ export default async function DiscoveryPage({
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-8 px-6 py-12">
       <header className="flex flex-col gap-2">
-        <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Golden Raccoon · V3</p>
+        <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Cryptara · V3</p>
         <h1 className="text-3xl font-semibold text-white">Discovery candidates, scans, watchlists, and alerts</h1>
         <p className="max-w-3xl text-sm text-slate-300">
           {fallbackMessage(origin)} Identity is resolved before any scan. The server never prepares or signs a transaction. Critical risks stay visible regardless of market momentum.

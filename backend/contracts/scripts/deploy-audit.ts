@@ -1,7 +1,7 @@
 import { ethers, network } from "hardhat";
 
 /**
- * Deploy `GoldenRaccoonAudit`.
+ * Deploy `CryptaraAudit`.
  *
  * The network is whatever Hardhat was told on the command line, and this script
  * refuses to run against the in-process `hardhat` network, because a deployment
@@ -18,7 +18,7 @@ async function main() {
     );
   }
 
-  const factory = await ethers.getContractFactory("GoldenRaccoonAudit");
+  const factory = await ethers.getContractFactory("CryptaraAudit");
   const audit = await factory.deploy();
 
   await audit.waitForDeployment();
@@ -31,7 +31,7 @@ async function main() {
   console.log(`network: ${network.name}`);
   console.log(`version: ${await audit.VERSION()}`);
   console.log(`txHash:  ${deployment?.hash ?? "unknown"}`);
-  console.log(`GoldenRaccoonAudit deployed to ${address}`);
+  console.log(`CryptaraAudit deployed to ${address}`);
 }
 
 main().catch((error) => {

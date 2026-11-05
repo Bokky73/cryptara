@@ -1,12 +1,12 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Golden Raccoon HTTP API",
+    "title": "Cryptara HTTP API",
     "version": "1.0.0",
-    "summary": "Token risk-scanning, portfolio, discovery, alerting, and transaction-execution API for the Golden Raccoon Next.js app.",
+    "summary": "Token risk-scanning, portfolio, discovery, alerting, and transaction-execution API for the Cryptara Next.js app.",
     "description": "Versioned OpenAPI contract for every public HTTP route under `frontend/src/app/api/**`. See `docs/openapi/COMPATIBILITY.md` for the versioning/deprecation policy and `docs/openapi/ROUTE_COVERAGE.md` for the route-to-operationId-to-test mapping.\n\nAuthentication: most wallet-scoped routes derive the authoritative wallet from a signed, httpOnly `gr_wallet` session cookie (see `WalletSessionCookieAuth`). A `walletAddress` request field/query param may also be supplied, but it is validated against the session and rejected on mismatch; it never overrides the cookie. Routes that only accept a bare `walletAddress` value with no session enforcement are documented as unauthenticated.\n\nAll examples use synthetic placeholder addresses, hashes, and tokens. No real user data or secrets are included.",
     "contact": {
-      "name": "Drago-Labs/golden-raccoon"
+      "name": "Drago-Labs/cryptara"
     }
   },
   "servers": [
@@ -1106,7 +1106,7 @@
     "/agent/analyze": {
       "post": {
         "operationId": "postAgentAnalyze",
-        "summary": "Run the legacy single-shot Gold Raccoon agent against a wallet's portfolio.",
+        "summary": "Run the legacy single-shot Cryptara agent against a wallet's portfolio.",
         "tags": [
           "agents"
         ],
@@ -3169,7 +3169,7 @@
                 },
                 "example": {
                   "ok": true,
-                  "service": "golden-raccoon",
+                  "service": "cryptara",
                   "mockFallbacksEnabled": false,
                   "liveModeUsesMockData": false,
                   "checkedAt": "2026-07-29T12:00:00.000Z"

@@ -14,16 +14,16 @@ const RECOVERY_EXPIRY_WINDOW_MS = 10 * 60_000;
 const INCIDENT_DEFAULT_REASON = "Global incident pause was enabled by an admin.";
 
 declare global {
-  var __goldenRaccoonIncidentMode: RecoveryIncidentMode | undefined;
+  var __cryptaraIncidentMode: RecoveryIncidentMode | undefined;
 }
 
 function ensureIncidentModeRecord(): RecoveryIncidentMode {
-  globalThis.__goldenRaccoonIncidentMode ??= {
+  globalThis.__cryptaraIncidentMode ??= {
     enabled: false,
     updatedAt: new Date(0).toISOString(),
   };
 
-  return globalThis.__goldenRaccoonIncidentMode;
+  return globalThis.__cryptaraIncidentMode;
 }
 
 export function getIncidentMode(): RecoveryIncidentMode {
@@ -43,7 +43,7 @@ export function isIncidentMode(): boolean {
 export function setIncidentMode(enabled: boolean, options: { reason?: string; updatedBy?: string } = {}): RecoveryIncidentMode {
   const record = ensureIncidentModeRecord();
 
-  globalThis.__goldenRaccoonIncidentMode = {
+  globalThis.__cryptaraIncidentMode = {
     enabled,
     reason: options.reason ?? (enabled ? INCIDENT_DEFAULT_REASON : undefined),
     updatedBy: options.updatedBy,

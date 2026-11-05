@@ -1,8 +1,8 @@
-# Contributing to Golden Raccoon
+# Contributing to Cryptara
 
 ## Required toolchain
 
-Golden Raccoon uses Node.js for the Next.js application and Rust for Soroban contracts.
+Cryptara uses Node.js for the Next.js application and Rust for Soroban contracts.
 
 - Node.js 22 or newer.
 - npm 10 or newer.
@@ -54,7 +54,7 @@ Never commit a Stellar secret key, signed XDR, provider credential, or productio
 
 ## Accessibility
 
-Golden Raccoon targets WCAG 2.2 AA across core flows (scan, wallet, risk
+Cryptara targets WCAG 2.2 AA across core flows (scan, wallet, risk
 report, strategy, execution, history, operations, Soroban publication). When
 changing UI:
 

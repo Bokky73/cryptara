@@ -1,13 +1,13 @@
 import { getPrivacyRetentionConfig, getRetentionCutoffDate } from "@/server/privacy/config";
 import { pruneExpiredRecordsFromPg } from "@/server/storage/postgresAdapter";
 
-type GoldenRaccoonMemoryGlobal = typeof globalThis & {
-  __goldenRaccoonAgentRuns?: Array<{ createdAt: string }>;
-  __goldenRaccoonAlertObservations?: Array<{ createdAt: string }>;
-  __goldenRaccoonAlerts?: Array<{ triggeredAt: string }>;
-  __goldenRaccoonWatchlistScanRuns?: Array<{ scannedAt: string }>;
-  __goldenRaccoonTransactions?: Array<{ createdAt: string; walletAddress?: string; sourceAccount?: string }>;
-  __goldenRaccoonX402PaymentReceipts?: Array<{ createdAt: string; walletAddress?: string; payer?: string }>;
+type CryptaraMemoryGlobal = typeof globalThis & {
+  __cryptaraAgentRuns?: Array<{ createdAt: string }>;
+  __cryptaraAlertObservations?: Array<{ createdAt: string }>;
+  __cryptaraAlerts?: Array<{ triggeredAt: string }>;
+  __cryptaraWatchlistScanRuns?: Array<{ scannedAt: string }>;
+  __cryptaraTransactions?: Array<{ createdAt: string; walletAddress?: string; sourceAccount?: string }>;
+  __cryptaraX402PaymentReceipts?: Array<{ createdAt: string; walletAddress?: string; payer?: string }>;
 };
 
 export async function pruneExpiredStorageData(now = new Date()): Promise<{
@@ -25,44 +25,44 @@ export async function pruneExpiredStorageData(now = new Date()): Promise<{
   const transactionsUnlinkCutoff = getRetentionCutoffDate(config.transactionsUnlinkDays, now);
   const x402ReceiptsUnlinkCutoff = getRetentionCutoffDate(config.x402ReceiptsUnlinkDays, now);
 
-  const memory = globalThis as GoldenRaccoonMemoryGlobal;
+  const memory = globalThis as CryptaraMemoryGlobal;
   let prunedMemoryCount = 0;
   let unlinkedMemoryAuditCount = 0;
 
-  if (memory.__goldenRaccoonAgentRuns) {
-    const before = memory.__goldenRaccoonAgentRuns.length;
-    memory.__goldenRaccoonAgentRuns = memory.__goldenRaccoonAgentRuns.filter(
+  if (memory.__cryptaraAgentRuns) {
+    const before = memory.__cryptaraAgentRuns.length;
+    memory.__cryptaraAgentRuns = memory.__cryptaraAgentRuns.filter(
       (run) => new Date(run.createdAt) >= agentRunsCutoff
     );
-    prunedMemoryCount += before - memory.__goldenRaccoonAgentRuns.length;
+    prunedMemoryCount += before - memory.__cryptaraAgentRuns.length;
   }
 
-  if (memory.__goldenRaccoonAlertObservations) {
-    const before = memory.__goldenRaccoonAlertObservations.length;
-    memory.__goldenRaccoonAlertObservations = memory.__goldenRaccoonAlertObservations.filter(
+  if (memory.__cryptaraAlertObservations) {
+    const before = memory.__cryptaraAlertObservations.length;
+    memory.__cryptaraAlertObservations = memory.__cryptaraAlertObservations.filter(
       (obs) => new Date(obs.createdAt) >= alertObservationsCutoff
     );
-    prunedMemoryCount += before - memory.__goldenRaccoonAlertObservations.length;
+    prunedMemoryCount += before - memory.__cryptaraAlertObservations.length;
   }
 
-  if (memory.__goldenRaccoonAlerts) {
-    const before = memory.__goldenRaccoonAlerts.length;
-    memory.__goldenRaccoonAlerts = memory.__goldenRaccoonAlerts.filter(
+  if (memory.__cryptaraAlerts) {
+    const before = memory.__cryptaraAlerts.length;
+    memory.__cryptaraAlerts = memory.__cryptaraAlerts.filter(
       (alt) => new Date(alt.triggeredAt) >= alertsCutoff
     );
-    prunedMemoryCount += before - memory.__goldenRaccoonAlerts.length;
+    prunedMemoryCount += before - memory.__cryptaraAlerts.length;
   }
 
-  if (memory.__goldenRaccoonWatchlistScanRuns) {
-    const before = memory.__goldenRaccoonWatchlistScanRuns.length;
-    memory.__goldenRaccoonWatchlistScanRuns = memory.__goldenRaccoonWatchlistScanRuns.filter(
+  if (memory.__cryptaraWatchlistScanRuns) {
+    const before = memory.__cryptaraWatchlistScanRuns.length;
+    memory.__cryptaraWatchlistScanRuns = memory.__cryptaraWatchlistScanRuns.filter(
       (w) => new Date(w.scannedAt) >= watchlistScanRunsCutoff
     );
-    prunedMemoryCount += before - memory.__goldenRaccoonWatchlistScanRuns.length;
+    prunedMemoryCount += before - memory.__cryptaraWatchlistScanRuns.length;
   }
 
-  if (memory.__goldenRaccoonTransactions) {
-    for (const tx of memory.__goldenRaccoonTransactions) {
+  if (memory.__cryptaraTransactions) {
+    for (const tx of memory.__cryptaraTransactions) {
       if (new Date(tx.createdAt) < transactionsUnlinkCutoff && tx.walletAddress) {
         tx.walletAddress = undefined;
         tx.sourceAccount = undefined;
@@ -71,8 +71,8 @@ export async function pruneExpiredStorageData(now = new Date()): Promise<{
     }
   }
 
-  if (memory.__goldenRaccoonX402PaymentReceipts) {
-    for (const rec of memory.__goldenRaccoonX402PaymentReceipts) {
+  if (memory.__cryptaraX402PaymentReceipts) {
+    for (const rec of memory.__cryptaraX402PaymentReceipts) {
       if (new Date(rec.createdAt) < x402ReceiptsUnlinkCutoff && rec.walletAddress) {
         rec.walletAddress = undefined;
         rec.payer = undefined;

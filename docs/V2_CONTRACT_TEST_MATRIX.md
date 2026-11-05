@@ -2,10 +2,10 @@
 
 | Field | Value |
 | --- | --- |
-| Issue | Drago-Labs/golden-raccoon#16 |
+| Issue | Drago-Labs/cryptara#16 |
 | Companion spec | `docs/V2_CONTRACT_SPEC.md` |
 | Status | Implementation-ready. Defaults in `docs/V2_CONTRACT_SPEC.md` §9.5 are binding unless a reviewer comment substitutes a specific item; absent substitutions, defaults merge at PR approval. |
-| Scope | Implementation-ready test cases for both `GoldRaccoonVault` (EVM) and `RiskRegistry` (Soroban) |
+| Scope | Implementation-ready test cases for both `CryptaraVault` (EVM) and `RiskRegistry` (Soroban) |
 
 The matrix is exhaustive enough to implement without product guesses. Each row carries a stable identifier (`T-EVM-xxx`, `T-SOR-xxx`) so it can be cross-referenced from the implementation PRs and the audit checklist.
 
@@ -19,13 +19,13 @@ Conventions:
 
 Pre-conditions common to all tests:
 
-- `GoldRaccoonVault` is deployed on a target EVM testnet with `owner = deployer`, `agent = address(0)`, `paused = false`, `agents = {}`, `policyHash = bytes32(0)`, `usedIntents = {}`.
+- `CryptaraVault` is deployed on a target EVM testnet with `owner = deployer`, `agent = address(0)`, `paused = false`, `agents = {}`, `policyHash = bytes32(0)`, `usedIntents = {}`.
 - `RiskRegistry` is deployed on Stellar Testnet with `admin = deployer`, `publishers = {}`, `paused = false`, `version = (0,1,0, ZERO)`.
 - Block timestamps and ledger timestamps are deterministic per test harness.
 
 ---
 
-## EVM — `GoldRaccoonVault`
+## EVM — `CryptaraVault`
 
 ### Authorization and lifecycle
 
@@ -108,8 +108,8 @@ Pre-conditions common to all tests:
 | T-SOR-005 | `initialize` invalid tier | not initialized | `initialize(admin, …, tiers = ["x".repeat(33)], …)` | — | unchanged | `InvalidTier` |
 | T-SOR-006 | `initialize` invalid expiry | not initialized | `initialize(admin, …, expiries = [0])` | — | unchanged | `InvalidFormat("publisher expiry required")` |
 | T-SOR-007 | `initialize` zero upgrade build | not initialized | `initialize(admin, …, version = (0,1,0, BytesN::from_array([0;32])))` | — | unchanged | `ZeroHash` |
-| T-SOR-008 | `set_publisher` happy path | initialized | `set_publisher(p, true, "gold_raccoon", expiry)` | `PublisherAuthorizationChanged(p, true, "gold_raccoon", changedAt)` | `Publisher(p) = true`, `Tier(p) = "gold_raccoon"`, `Expiry(p) = expiry` | none |
-| T-SOR-009 | `set_publisher` revoke | publisher added | `set_publisher(p, false, "gold_raccoon", 0)` | `PublisherAuthorizationChanged(p, false, "gold_raccoon", ts)` | `Publisher(p)` removed | none |
+| T-SOR-008 | `set_publisher` happy path | initialized | `set_publisher(p, true, "cryptara", expiry)` | `PublisherAuthorizationChanged(p, true, "cryptara", changedAt)` | `Publisher(p) = true`, `Tier(p) = "cryptara"`, `Expiry(p) = expiry` | none |
+| T-SOR-009 | `set_publisher` revoke | publisher added | `set_publisher(p, false, "cryptara", 0)` | `PublisherAuthorizationChanged(p, false, "cryptara", ts)` | `Publisher(p)` removed | none |
 | T-SOR-010 | `set_publisher` non-admin | non-admin signer | `set_publisher(p, true, "tier", expiry)` | — | unchanged | `(no auth)` — `require_auth` reverts |
 | T-SOR-011 | `set_publisher` zero publisher | admin | `set_publisher(Address::zero(), true, "tier", expiry)` | — | unchanged | `ZeroAddress` |
 | T-SOR-012 | `set_publisher` invalid tier | admin | `set_publisher(p, true, "x".repeat(33), expiry)` | — | unchanged | `InvalidTier` |
@@ -270,7 +270,7 @@ The defaults below mirror `docs/V2_CONTRACT_SPEC.md` §9.5 so reviewers can cros
 Reference links:
 
 - **EVM testnet production target** — see `docs/V2_CONTRACT_SPEC.md` §9.1 (default primary: GOAT Network id 48816; default secondary: Base Sepolia, see §9.6).
-- **Publisher tier list** — see `docs/V2_CONTRACT_SPEC.md` §9.5 item 5 (default: `gold_raccoon`, `partner`, `community`).
+- **Publisher tier list** — see `docs/V2_CONTRACT_SPEC.md` §9.5 item 5 (default: `cryptara`, `partner`, `community`).
 - **Upgrade delay window** — see `docs/V2_CONTRACT_SPEC.md` §9.5 item 4 (default: 24h minimum, 30d maximum).
 - **Quorum for pause / owner transfer / upgrade execution** — see `docs/V2_CONTRACT_SPEC.md` §9.5 item 7 (default: deferred; covered by V2-068+).
 - **`VersionReported` schema** — see `docs/V2_CONTRACT_SPEC.md` §4 (event signature is the canonical schema; implementation MUST emit semver + `buildHash` in the documented order).

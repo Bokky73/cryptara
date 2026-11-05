@@ -2,11 +2,11 @@
 
 | Field | Value |
 | --- | --- |
-| Issue | Drago-Labs/golden-raccoon#31 |
+| Issue | Drago-Labs/cryptara#31 |
 | Companion spec | `docs/V3_CONTRACT_SPEC.md` |
 | Companion audit checklist | `docs/V3_AUDIT_CHECKLIST.md` |
 | Status | Audit-ready. All defaults in `docs/V3_CONTRACT_SPEC.md` §9.5 are binding unless a maintainer comment substitutes a specific item; absent substitutions, defaults merge at PR approval. |
-| Scope | Implementation-ready test cases for both `GoldRaccoonVault` (EVM) and `RiskRegistry` (Soroban), with explicit threat-to-control-to-test mapping. |
+| Scope | Implementation-ready test cases for both `CryptaraVault` (EVM) and `RiskRegistry` (Soroban), with explicit threat-to-control-to-test mapping. |
 
 The matrix is exhaustive enough to implement without product guesses. Each row carries a stable identifier (`T-EVM-xxx`, `T-SOR-xxx`, `T-X-xxx`) so it can be cross-referenced from the implementation PRs and the audit checklist.
 
@@ -20,7 +20,7 @@ Conventions:
 
 Pre-conditions common to all tests:
 
-- `GoldRaccoonVault` is deployed on GOAT Network (id 48816) with `owner = deployer`, `agent = address(0)`, `paused = false`, `agents = {}`, `policyHash = bytes32(0)`, `usedIntents = {}`.
+- `CryptaraVault` is deployed on GOAT Network (id 48816) with `owner = deployer`, `agent = address(0)`, `paused = false`, `agents = {}`, `policyHash = bytes32(0)`, `usedIntents = {}`.
 - `RiskRegistry` is deployed on Stellar Testnet with `admin = deployer`, `publishers = {}`, `paused = false`, `version = (0,1,0, ZERO)`.
 - Block timestamps and ledger timestamps are deterministic per test harness.
 
@@ -78,20 +78,20 @@ This table maps each threat in `docs/V3_CONTRACT_SPEC.md` §8 to its control and
 
 Covered by `backend/contracts/test/timelock.test.ts`, `policy-governance.test.ts`, `soroban/contracts/governance/src/test.rs`.
 
-## EVM — `GoldRaccoonVault`
+## EVM — `CryptaraVault`
 
 ### Authorization and lifecycle
 
 | ID | Test case | Precondition | Action | Expected events | Expected state | Expected error |
 | --- | --- | --- | --- | --- | --- | --- |
 | T-EVM-001 | `version()` returns registered triple | contract deployed | `version()` | `VersionReported` (on first call) | `version = (0,1,0, buildHash)` then unchanged | none |
-| T-EVM-002 | `addAgent` happy path | owner is `deployer` | `addAgent(agentA, expiry = block.timestamp + 30 days, "gold_raccoon")` | `AgentApproved(wallet, agentA, approvedAt, policyHash, "gold_raccoon", expiry)` | `agentExpiries[agentA] = expiry`, `agentOwner[agentA] = owner` | none |
+| T-EVM-002 | `addAgent` happy path | owner is `deployer` | `addAgent(agentA, expiry = block.timestamp + 30 days, "cryptara")` | `AgentApproved(wallet, agentA, approvedAt, policyHash, "cryptara", expiry)` | `agentExpiries[agentA] = expiry`, `agentOwner[agentA] = owner` | none |
 | T-EVM-003 | `addAgent` zero agent | owner | `addAgent(address(0), expiry, "tier")` | — | unchanged | `ZeroAddress` |
 | T-EVM-004 | `addAgent` zero expiry | owner | `addAgent(agentA, 0, "tier")` | — | unchanged | `InvalidFormat("expiry required")` |
 | T-EVM-005 | `addAgent` non-owner | sender ≠ owner | `addAgent(agentA, expiry, "tier")` | — | unchanged | `NotOwner` |
 | T-EVM-006 | `removeAgent` happy path | agent added | `removeAgent(agentA, "rotated")` | `AgentRevoked(wallet, agentA, revokedAt, "rotated")` | `agentExpiries[agentA] = 0`, `agentOwner[agentA] = address(0)` | none |
 | T-EVM-007 | `removeAgent` unknown agent | owner | `removeAgent(agentUnknown, "x")` | — | unchanged | `InvalidFormat("unknown agent")` |
-| T-EVM-008 | `rotateAgent` happy path | agentA added | `rotateAgent(agentA, agentB, newExpiry, "gold_raccoon")` | `AgentRevoked(wallet, agentA, …)`, `AgentApproved(wallet, agentB, …, "gold_raccoon", newExpiry)` | `agentExpiries[agentB] = newExpiry`, `agentExpiries[agentA] = 0` | none |
+| T-EVM-008 | `rotateAgent` happy path | agentA added | `rotateAgent(agentA, agentB, newExpiry, "cryptara")` | `AgentRevoked(wallet, agentA, …)`, `AgentApproved(wallet, agentB, …, "cryptara", newExpiry)` | `agentExpiries[agentB] = newExpiry`, `agentExpiries[agentA] = 0` | none |
 | T-EVM-009 | `rotateAgent` previous agent unknown | owner | `rotateAgent(address(0), agentB, newExpiry, "tier")` | — | unchanged | `InvalidFormat("agent not registered")` |
 | T-EVM-010 | `rotateAgent` while paused | paused | `rotateAgent(agentA, agentB, newExpiry, "tier")` | — | unchanged | `Paused` |
 | T-EVM-011 | `setPolicy` happy path | owner | `setPolicy(policyBytes)` | `PolicyUpdated(wallet, policyHash, updatedAt)` | `policyHash[w] = newPolicyHash`, `maxDailyValueUsd[w]`, `maxTradePercent[w]`, etc. | none |
@@ -184,8 +184,8 @@ Covered by `backend/contracts/test/timelock.test.ts`, `policy-governance.test.ts
 | T-SOR-005 | `initialize` invalid tier | not initialized | `initialize(admin, …, tiers = ["x".repeat(33)], …)` | — | unchanged | `InvalidTier` |
 | T-SOR-006 | `initialize` invalid expiry | not initialized | `initialize(admin, …, expiries = [0])` | — | unchanged | `InvalidFormat("publisher expiry required")` |
 | T-SOR-007 | `initialize` zero upgrade build | not initialized | `initialize(admin, …, version = (0,1,0, BytesN::from_array([0;32])))` | — | unchanged | `ZeroHash` |
-| T-SOR-008 | `set_publisher` happy path | initialized | `set_publisher(p, true, "gold_raccoon", expiry)` | `PublisherAuthorizationChanged(p, true, "gold_raccoon", changedAt)` | `Publisher(p) = true`, `Tier(p) = "gold_raccoon"`, `Expiry(p) = expiry` | none |
-| T-SOR-009 | `set_publisher` revoke | publisher added | `set_publisher(p, false, "gold_raccoon", 0)` | `PublisherAuthorizationChanged(p, false, "gold_raccoon", ts)` | `Publisher(p)` removed | none |
+| T-SOR-008 | `set_publisher` happy path | initialized | `set_publisher(p, true, "cryptara", expiry)` | `PublisherAuthorizationChanged(p, true, "cryptara", changedAt)` | `Publisher(p) = true`, `Tier(p) = "cryptara"`, `Expiry(p) = expiry` | none |
+| T-SOR-009 | `set_publisher` revoke | publisher added | `set_publisher(p, false, "cryptara", 0)` | `PublisherAuthorizationChanged(p, false, "cryptara", ts)` | `Publisher(p)` removed | none |
 | T-SOR-010 | `set_publisher` non-admin | non-admin signer | `set_publisher(p, true, "tier", expiry)` | — | unchanged | `(no auth)` — `require_auth` reverts |
 | T-SOR-011 | `set_publisher` zero publisher | admin | `set_publisher(Address::zero(), true, "tier", expiry)` | — | unchanged | `ZeroAddress` |
 | T-SOR-012 | `set_publisher` invalid tier | admin | `set_publisher(p, true, "x".repeat(33), expiry)` | — | unchanged | `InvalidTier` |

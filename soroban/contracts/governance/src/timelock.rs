@@ -1,7 +1,7 @@
 //! Timelock helpers for governance proposals.
 //!
 //! The core timelock logic lives in `lib.rs`. This module provides
-//! standalone helpers that mirror the EVM `GoldRaccoonTimelock` semantics
+//! standalone helpers that mirror the EVM `CryptaraTimelock` semantics
 //! and are re-exported for documentation parity. It ensures the expected
 //! file surface `governance/src/timelock.rs` exists as required by the
 //! issue change surface.

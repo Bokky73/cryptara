@@ -13,7 +13,7 @@ import type { Deployment, FlaggedMatch } from "./schema";
 export const FLAGGED_CODE_HASHES: ReadonlyArray<{ codeHash: string; source: string; label: string }> = [
   {
     codeHash: "0x1f5a1c6c9e2c5d8f3b4a7e6d9c2b1a8f4e7d6c9b2a1f8e4d7c6b9a2f1e8d4c7b",
-    source: "golden-raccoon/docs/features/deployer-history-evidence.md#example-honeypot-template",
+    source: "cryptara/docs/features/deployer-history-evidence.md#example-honeypot-template",
     label: "Documented honeypot token template (transfer-blocking on non-owner sells)",
   },
 ];

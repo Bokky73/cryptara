@@ -198,7 +198,7 @@ mod test {
     extern crate std;
 
     use super::*;
-    use golden_raccoon_policy::PolicyContract;
+    use cryptara_policy::PolicyContract;
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
         token::StellarAssetClient,
@@ -218,7 +218,7 @@ mod test {
         env.ledger().set_timestamp(1_700_000_000);
 
         let policy_id = env.register(PolicyContract, ());
-        let policy_client = golden_raccoon_policy::PolicyContractClient::new(&env, &policy_id);
+        let policy_client = cryptara_policy::PolicyContractClient::new(&env, &policy_id);
 
         let owner = Address::generate(&env);
         let agent = Address::generate(&env);
@@ -247,7 +247,7 @@ mod test {
 
         vault.deposit(&user, &token, &100_000_000i128);
 
-        let policy_client = golden_raccoon_policy::PolicyContractClient::new(&_env, &_policy);
+        let policy_client = cryptara_policy::PolicyContractClient::new(&_env, &_policy);
         let decision = policy_client.apply_policy(&user, &100_000_000i128, &50, &1_703_600_000);
         let intent =
             policy_client.create_intent(&decision, &token, &100_000_000i128, &1_701_800_000, &50);
@@ -263,7 +263,7 @@ mod test {
 
         vault.deposit(&user, &token, &100_000_000i128);
 
-        let policy_client = golden_raccoon_policy::PolicyContractClient::new(&_env, &_policy);
+        let policy_client = cryptara_policy::PolicyContractClient::new(&_env, &_policy);
         let decision = policy_client.apply_policy(&user, &100_000_000i128, &50, &1_703_600_000);
         let intent =
             policy_client.create_intent(&decision, &token, &100_000_000i128, &1_701_800_000, &50);
@@ -282,7 +282,7 @@ mod test {
 
         vault.deposit(&user, &token, &100_000_000i128);
 
-        let policy_client = golden_raccoon_policy::PolicyContractClient::new(&_env, &_policy);
+        let policy_client = cryptara_policy::PolicyContractClient::new(&_env, &_policy);
         let decision = policy_client.apply_policy(&user, &100_000_000i128, &50, &1_703_600_000);
         let intent =
             policy_client.create_intent(&decision, &token, &100_000_000i128, &1_701_800_000, &50);
@@ -300,7 +300,7 @@ mod test {
 
         vault.deposit(&user, &token, &100_000_000i128);
 
-        let policy_client = golden_raccoon_policy::PolicyContractClient::new(&_env, &_policy);
+        let policy_client = cryptara_policy::PolicyContractClient::new(&_env, &_policy);
         let decision = policy_client.apply_policy(&user, &1_000_000_000i128, &50, &1_703_600_000);
         let intent =
             policy_client.create_intent(&decision, &token, &1_000_000_000i128, &1_701_800_000, &50);

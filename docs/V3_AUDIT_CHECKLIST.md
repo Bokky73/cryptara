@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Issue | Drago-Labs/golden-raccoon#31 |
+| Issue | Drago-Labs/cryptara#31 |
 | Companion spec | `docs/V3_CONTRACT_SPEC.md` |
 | Companion test matrix | `docs/V3_CONTRACT_TEST_MATRIX.md` |
 | Companion upgrade/recovery analysis | `docs/V3_UPGRADE_RECOVERY.md` |

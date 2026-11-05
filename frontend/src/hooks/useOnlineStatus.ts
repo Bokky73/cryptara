@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-const REFRESH_KEY = "golden-raccoon:offline-refresh-required";
+const REFRESH_KEY = "cryptara:offline-refresh-required";
 
 function getInitialOnlineState() {
   if (typeof navigator === "undefined") return true;

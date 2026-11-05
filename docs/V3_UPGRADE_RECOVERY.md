@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Issue | Drago-Labs/golden-raccoon#31 |
+| Issue | Drago-Labs/cryptara#31 |
 | Companion spec | `docs/V3_CONTRACT_SPEC.md` |
 | Status | Audit-ready. This document analyzes the upgradeability and recovery tradeoffs for the V3 vault and policy contracts. |
 
@@ -12,7 +12,7 @@
 
 All privileged changes (upgrades, `setLimits`, `setAgent`, `setEmergencyAdmin`, `allowAsset`/`blockAsset`, `set_publisher`, `set_governance`, `updateSigners`) are routed through the timelock controller:
 
-- **EVM**: `GoldRaccoonTimelock.sol` — multi-signer timelock with `propose(target, selector, payload, delaySecs)`, `sign(id)`, `execute(id)`, `cancel(id)`, and a readable `getPendingQueue()` / `getPendingCount()` view. `delaySecs ∈ [24h, 30d]`, threshold ≥2 signers. Events `ProposalCreated`, `ProposalSigned`, `ProposalExecuted`, `ProposalCancelled` carry `payloadHash` (keccak256). `pause()`/`unpause()` remain immediate and separate.
+- **EVM**: `CryptaraTimelock.sol` — multi-signer timelock with `propose(target, selector, payload, delaySecs)`, `sign(id)`, `execute(id)`, `cancel(id)`, and a readable `getPendingQueue()` / `getPendingCount()` view. `delaySecs ∈ [24h, 30d]`, threshold ≥2 signers. Events `ProposalCreated`, `ProposalSigned`, `ProposalExecuted`, `ProposalCancelled` carry `payloadHash` (keccak256). `pause()`/`unpause()` remain immediate and separate.
 - **Soroban**: `governance` contract (`contracts/governance/src/lib.rs` + `timelock.rs`) — identical semantics with `propose`, `sign`, `execute`, `cancel`, `get_pending_queue`, `get_pending_count`, `PauseChanged`, `ProposalCreated`/`ProposalSigned`/`ProposalExecuted`/`ProposalCancelled` carrying payload hash.
 
 **Guarantees**: (1) no execution before `effectiveAt`, (2) single signer cannot schedule alone (threshold enforcement), (3) cancel during delay permanently prevents execution, (4) emergency pause immediate, (5) pending queue readable and verifiable (payload hash), (6) test matrices cover authorization, delay, cancel, replay, expiry on both chains.
@@ -21,7 +21,7 @@ All privileged changes (upgrades, `setLimits`, `setAgent`, `setEmergencyAdmin`, 
 
 ### 1.1 EVM — UUPS proxy
 
-The EVM `GoldRaccoonVault` uses the **UUPS (Universal Upgradeable Proxy Standard)** pattern:
+The EVM `CryptaraVault` uses the **UUPS (Universal Upgradeable Proxy Standard)** pattern:
 
 - **Proxy**: OpenZeppelin `ERC1967Proxy` — a minimal proxy that delegates all calls to an implementation address stored in an `ERC1967` slot.
 - **Implementation**: `UUPSUpgradeable` — the implementation contract itself contains the `_authorizeUpgrade` function that gates who can upgrade.

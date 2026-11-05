@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { normalizeStellarNetworkId } from "../src/lib/stellar/config";
 import { StellarRpcDataLayer } from "../src/server/stellar/dataLayer";
 import {
-  GoldenRaccoonEventIngestor,
+  CryptaraEventIngestor,
   JsonFileStellarEventStore,
 } from "../src/server/stellar/eventIngestion";
 
@@ -35,13 +35,13 @@ async function main() {
   const storePath = resolve(
     process.env.STELLAR_EVENT_STORE_PATH ?? ".data/stellar-events.json",
   );
-  const ingestor = new GoldenRaccoonEventIngestor(
+  const ingestor = new CryptaraEventIngestor(
     new StellarRpcDataLayer(network),
     new JsonFileStellarEventStore(storePath),
     { contractIds, topicNames },
   );
   const result = await ingestor.ingestBatch({
-    streamId: process.env.STELLAR_EVENT_STREAM_ID ?? "golden-raccoon",
+    streamId: process.env.STELLAR_EVENT_STREAM_ID ?? "cryptara",
     startLedger,
     limit: Number(process.env.STELLAR_EVENT_BATCH_SIZE ?? 100),
   });

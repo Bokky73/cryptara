@@ -1,5 +1,5 @@
 [package]
-name = "golden-raccoon-audit-registry"
+name = "cryptara-audit-registry"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1,6 +1,6 @@
 # End-to-end (browser) tests
 
-Golden Raccoon ships a Playwright suite that exercises the critical user journeys against a locally running app with deterministic fixtures and mock wallets. No real private keys or mainnet calls are used.
+Cryptara ships a Playwright suite that exercises the critical user journeys against a locally running app with deterministic fixtures and mock wallets. No real private keys or mainnet calls are used.
 
 ## Quick start
 

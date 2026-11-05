@@ -113,7 +113,7 @@ prepared → submitted → confirmed | failed | replaced | expired
 
 ## 4. Contract Compilation and Testnet Deployment
 
-### 4.1 EVM — GoldRaccoonVault
+### 4.1 EVM — CryptaraVault
 
 | Check | Status |
 |---|---|
@@ -243,7 +243,7 @@ prepared → submitted → confirmed | failed | replaced | expired
 |---|---|---|
 | **Postgres adapter is best-effort** | In-memory store is the source of truth; restarts lose data unless Postgres is configured | V2-069 |
 | **EVM quote/simulation not wired** | `planned_dex_aggregator`/`planned_tenderly` in types are not connected to live providers | V2-070 |
-| **V2 contract not deployed** | `GoldRaccoonVault.sol` is V1; V2 spec is approved but not implemented | V2-071 |
+| **V2 contract not deployed** | `CryptaraVault.sol` is V1; V2 spec is approved but not implemented | V2-071 |
 | **npm install timed out** | Frontend node_modules may be incomplete; `npm install` needs longer window or offline cache | Operational |
 | **Soroban build pending** | `cargo build` dependency download may exceed timeouts; toolchain fixed but full build not verified | V2-072 |
 | **Test matrix not executed** | 131 V2 contract test cases are spec-stage; not run against deployed instances | V2-073 |
@@ -266,7 +266,7 @@ prepared → submitted → confirmed | failed | replaced | expired
 
 ```bash
 # Revert env vars to V1 contract addresses
-export NEXT_PUBLIC_GOLD_RACCOON_VAULT_ADDRESS=<V1-ADDRESS>
+export NEXT_PUBLIC_CRYPTARA_VAULT_ADDRESS=<V1-ADDRESS>
 export NEXT_PUBLIC_RISK_REGISTRY_ADDRESS=<V1-ADDRESS>
 export NEXT_PUBLIC_CONTRACT_VERSION=1
 
@@ -312,7 +312,7 @@ The frontend MUST NOT auto-upgrade; every version bump is gated behind a manual 
 | Validation branch | `release/v2-validation` |
 | Base commit | `7586343` (V2 contract spec merged) |
 | Latest commit on branch | `ea61263` (V3 alert rules/persistence) |
-| EVM contract artifact | `backend/contracts/artifacts/contracts/GoldRaccoonVault.sol/GoldRaccoonVault.json` |
+| EVM contract artifact | `backend/contracts/artifacts/contracts/CryptaraVault.sol/CryptaraVault.json` |
 | Soroban contract | `soroban/contracts/risk-registry/src/lib.rs` |
 | Test matrix | `docs/V2_CONTRACT_TEST_MATRIX.md` |
 | Contract spec | `docs/V2_CONTRACT_SPEC.md` |

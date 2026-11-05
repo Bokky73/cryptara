@@ -1,4 +1,4 @@
--- Golden Raccoon production storage contract.
+-- Cryptara production storage contract.
 -- Target: Supabase Postgres. This file is intentionally idempotent so the
 -- MVP can apply the schema in one clean migration.
 

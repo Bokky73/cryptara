@@ -20,7 +20,7 @@ const MAX_DELAY_SECS: u64 = 30 * 86400;
 const MIN_SIGNERS: u32 = 2;
 const MAX_SIGNERS: u32 = 10;
 
-pub const DOMAIN_SEPARATOR: &str = "GOLDEN_RACCOON_GOVERNANCE_V1";
+pub const DOMAIN_SEPARATOR: &str = "CRYPTARA_GOVERNANCE_V1";
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]

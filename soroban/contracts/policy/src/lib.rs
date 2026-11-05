@@ -11,7 +11,7 @@ const LEDGER_TTL_THRESHOLD: u32 = 60 * 24 * 60 * 60 / 5;
 const LEDGER_TTL_EXTEND_TO: u32 = 365 * 24 * 60 * 60 / 5;
 
 pub const VERSION: &str = "1.0.0";
-pub const DOMAIN_SEPARATOR: &str = "GOLDEN_RACCOON_POLICY_V1";
+pub const DOMAIN_SEPARATOR: &str = "CRYPTARA_POLICY_V1";
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]

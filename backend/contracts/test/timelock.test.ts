@@ -2,10 +2,10 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { time, loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 
-describe("GoldRaccoonTimelock", function () {
+describe("CryptaraTimelock", function () {
   async function deployFixture() {
     const [signerA, signerB, signerC, emergency, outsider, target] = await ethers.getSigners();
-    const Timelock = await ethers.getContractFactory("GoldRaccoonTimelock");
+    const Timelock = await ethers.getContractFactory("CryptaraTimelock");
     const timelock = await Timelock.deploy(
       [signerA.address, signerB.address, signerC.address],
       2,

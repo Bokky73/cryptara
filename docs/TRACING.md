@@ -1,6 +1,6 @@
 # Distributed Tracing
 
-Golden Raccoon uses OpenTelemetry on the Next.js server runtime to produce one
+Cryptara uses OpenTelemetry on the Next.js server runtime to produce one
 connected trace per API request. Tracing is **disabled by default** and degrades
 to a no-op when no exporter is configured.
 
@@ -33,13 +33,13 @@ docker run --rm -p 4318:4318 -p 16686:16686 jaegertracing/all-in-one:1.64
 ```env
 OTEL_TRACING_ENABLED=1
 OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
-OTEL_SERVICE_NAME=golden-raccoon-frontend
+OTEL_SERVICE_NAME=cryptara-frontend
 ```
 
 3. Run the frontend as usual (`npm run dev` from `frontend/`).
 
 4. Trigger a scan or agent request, then open Jaeger at `http://127.0.0.1:16686`
-   and search for service `golden-raccoon-frontend`.
+   and search for service `cryptara-frontend`.
 
 ## Environment variables
 
@@ -48,7 +48,7 @@ OTEL_SERVICE_NAME=golden-raccoon-frontend
 | `OTEL_TRACING_ENABLED` | `0` | Must be `1` to activate the SDK |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | empty | OTLP HTTP base URL (`/v1/traces` appended when missing) |
 | `OTEL_EXPORTER_OTLP_HEADERS` | empty | Optional comma-separated `key=value` auth headers |
-| `OTEL_SERVICE_NAME` | `golden-raccoon-frontend` | Service name in exported traces |
+| `OTEL_SERVICE_NAME` | `cryptara-frontend` | Service name in exported traces |
 | `OTEL_LOG_LEVEL` | unset | Set to `debug` for OpenTelemetry SDK diagnostics |
 
 Tracing requires **both** `OTEL_TRACING_ENABLED=1` and a non-empty

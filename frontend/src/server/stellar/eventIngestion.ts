@@ -15,7 +15,7 @@ import {
   type StellarRpcDataLayer,
 } from "@/server/stellar/dataLayer";
 
-export type StoredGoldenRaccoonEvent = {
+export type StoredCryptaraEvent = {
   id: string;
   network: StellarNetworkId;
   contractId: string;
@@ -31,7 +31,7 @@ export type StoredGoldenRaccoonEvent = {
 export type StellarEventCheckpoint = {
   cursor?: string;
   eventIds: string[];
-  events: StoredGoldenRaccoonEvent[];
+  events: StoredCryptaraEvent[];
   updatedAt?: string;
 };
 
@@ -52,7 +52,7 @@ export interface StellarEventStore {
     key: EventStreamKey,
     expectedCursor: string | undefined,
     nextCursor: string,
-    events: readonly StoredGoldenRaccoonEvent[],
+    events: readonly StoredCryptaraEvent[],
   ): Promise<EventCommitResult>;
 }
 
@@ -142,7 +142,7 @@ export class JsonFileStellarEventStore implements StellarEventStore {
     key: EventStreamKey,
     expectedCursor: string | undefined,
     nextCursor: string,
-    events: readonly StoredGoldenRaccoonEvent[],
+    events: readonly StoredCryptaraEvent[],
   ) {
     return this.serialize(async () => {
       const state = await this.read();
@@ -201,7 +201,7 @@ export class MemoryStellarEventStore implements StellarEventStore {
     key: EventStreamKey,
     expectedCursor: string | undefined,
     nextCursor: string,
-    events: readonly StoredGoldenRaccoonEvent[],
+    events: readonly StoredCryptaraEvent[],
   ) {
     const id = streamKey(key);
     const current = cloneCheckpoint(this.streams.get(id));
@@ -232,7 +232,7 @@ export class MemoryStellarEventStore implements StellarEventStore {
   }
 }
 
-export type GoldenRaccoonEventPolicy = {
+export type CryptaraEventPolicy = {
   contractIds: readonly string[];
   topicNames: readonly string[];
 };
@@ -272,7 +272,7 @@ function decodeScVal(value: xdr.ScVal) {
 function normalizeEvent(
   event: rpc.Api.EventResponse,
   network: StellarNetworkId,
-): StoredGoldenRaccoonEvent {
+): StoredCryptaraEvent {
   const contractId = eventContractId(event.contractId);
   if (!contractId) {
     throw new StellarDataLayerError(
@@ -297,7 +297,7 @@ function normalizeEvent(
 
 function requiredEvent(
   event: rpc.Api.EventResponse,
-  policy: GoldenRaccoonEventPolicy,
+  policy: CryptaraEventPolicy,
 ) {
   if (
     event.type !== "contract" ||
@@ -338,11 +338,11 @@ export type IngestEventBatchResult = EventCommitResult & {
   meta: StellarProviderMetadata;
 };
 
-export class GoldenRaccoonEventIngestor {
+export class CryptaraEventIngestor {
   constructor(
     private readonly dataLayer: StellarRpcDataLayer,
     private readonly store: StellarEventStore,
-    private readonly policy: GoldenRaccoonEventPolicy,
+    private readonly policy: CryptaraEventPolicy,
   ) {
     if (
       policy.contractIds.length === 0 ||
@@ -350,7 +350,7 @@ export class GoldenRaccoonEventIngestor {
     ) {
       throw new StellarDataLayerError(
         "invalid_request",
-        "At least one valid Golden Raccoon contract ID is required.",
+        "At least one valid Cryptara contract ID is required.",
         false,
       );
     }

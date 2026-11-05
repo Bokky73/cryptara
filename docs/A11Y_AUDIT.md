@@ -1,7 +1,7 @@
 # Accessibility audit — WCAG 2.2 AA (issue #42)
 
-This document tracks the accessibility remediation done against Golden
-Raccoon's core application flows: scan, wallet, risk report, strategy,
+This document tracks the accessibility remediation done against
+Cryptara's core application flows: scan, wallet, risk report, strategy,
 execution, history, operations, and Soroban publication.
 
 This is an internal engineering audit and remediation log, not a legal
@@ -145,7 +145,7 @@ to `npm run test:a11y`:
 
 ## Theme system (issue #137)
 
-Golden Raccoon ships four user-selectable themes: **light**, **dark** (default), **system**, and **high-contrast**. Tokens live in `frontend/src/theme/`; choice persists in `localStorage` (`golden-raccoon-theme`) and is applied before first paint via a blocking script in `layout.tsx`. `ThemeToggle` in `AppShell` exposes all modes. Risk UI in `RiskScoreCard`, `TokenScanClient`, and `DashboardClient` uses semantic tokens plus text/icons. `npm run test:a11y` checks theme files and key contrast pairs.
+Cryptara ships four user-selectable themes: **light**, **dark** (default), **system**, and **high-contrast**. Tokens live in `frontend/src/theme/`; choice persists in `localStorage` (`cryptara-theme`) and is applied before first paint via a blocking script in `layout.tsx`. `ThemeToggle` in `AppShell` exposes all modes. Risk UI in `RiskScoreCard`, `TokenScanClient`, and `DashboardClient` uses semantic tokens plus text/icons. `npm run test:a11y` checks theme files and key contrast pairs.
 
 ## Responsive layout and touch targets (issue #148)
 

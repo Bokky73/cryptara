@@ -56,20 +56,20 @@ export type AutoModeSnapshot = AutoModeRecord & {
 };
 
 type AutoModeGlobal = typeof globalThis & {
-  __goldenRaccoonAutoModeRecords?: AutoModeRecord[];
-  __goldenRaccoonAutoModeEvents?: AutoModeLifecycleEvent[];
+  __cryptaraAutoModeRecords?: AutoModeRecord[];
+  __cryptaraAutoModeEvents?: AutoModeLifecycleEvent[];
 };
 
 const autoModeGlobal = globalThis as AutoModeGlobal;
 
 function records() {
-  autoModeGlobal.__goldenRaccoonAutoModeRecords ??= [];
-  return autoModeGlobal.__goldenRaccoonAutoModeRecords;
+  autoModeGlobal.__cryptaraAutoModeRecords ??= [];
+  return autoModeGlobal.__cryptaraAutoModeRecords;
 }
 
 function events() {
-  autoModeGlobal.__goldenRaccoonAutoModeEvents ??= [];
-  return autoModeGlobal.__goldenRaccoonAutoModeEvents;
+  autoModeGlobal.__cryptaraAutoModeEvents ??= [];
+  return autoModeGlobal.__cryptaraAutoModeEvents;
 }
 
 function normalizeWallet(walletAddress: string) {
@@ -357,6 +357,6 @@ export function closeAutoModeAuthorization(
 }
 
 export function resetAutoModeStorageForTests() {
-  autoModeGlobal.__goldenRaccoonAutoModeRecords = [];
-  autoModeGlobal.__goldenRaccoonAutoModeEvents = [];
+  autoModeGlobal.__cryptaraAutoModeRecords = [];
+  autoModeGlobal.__cryptaraAutoModeEvents = [];
 }

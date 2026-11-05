@@ -28,9 +28,9 @@ function generateNpmSbom(name, directory) {
         licenses: [{ expression: pkg.license || "NOASSERTION" }],
         ...(pkg.integrity ? { hashes: [{ alg: "SHA-512", content: pkg.integrity.replace(/^sha512-/, "") }] } : {}),
         properties: [
-          { name: "golden-raccoon:npm:path", value: path },
-          { name: "golden-raccoon:npm:development", value: String(pkg.dev === true) },
-          { name: "golden-raccoon:npm:optional", value: String(pkg.optional === true) }
+          { name: "cryptara:npm:path", value: path },
+          { name: "cryptara:npm:development", value: String(pkg.dev === true) },
+          { name: "cryptara:npm:optional", value: String(pkg.optional === true) }
         ]
       };
     })
@@ -62,14 +62,14 @@ function generateCargoSbom() {
     purl: `pkg:cargo/${encodeURIComponent(pkg.name)}@${pkg.version}`,
     licenses: [{ expression: "NOASSERTION" }],
     ...(pkg.checksum ? { hashes: [{ alg: "SHA-256", content: pkg.checksum }] } : {}),
-    ...(pkg.source ? { properties: [{ name: "golden-raccoon:cargo:source", value: pkg.source }] } : {})
+    ...(pkg.source ? { properties: [{ name: "cryptara:cargo:source", value: pkg.source }] } : {})
   }));
   const bom = {
     bomFormat: "CycloneDX",
     specVersion: "1.6",
     serialNumber: "urn:uuid:00000000-0000-4000-8000-000000000104",
     version: 1,
-    metadata: { component: { type: "application", name: "golden-raccoon-soroban", version: "0.1.0" } },
+    metadata: { component: { type: "application", name: "cryptara-soroban", version: "0.1.0" } },
     components
   };
   const output = join(outputDirectory, "soroban.cdx.json");

@@ -1,5 +1,5 @@
 {
-  "name": "gold-raccoon-contracts",
+  "name": "cryptara-contracts",
   "private": true,
   "scripts": {
     "compile": "hardhat compile",

@@ -12,7 +12,7 @@ export default function ScoreCalibrationPage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-8 px-4 py-10 sm:px-6 sm:py-12">
       <header className="flex flex-col gap-2">
-        <p className="text-xs uppercase tracking-[0.18em] text-subtle">Golden Raccoon · Insights</p>
+        <p className="text-xs uppercase tracking-[0.18em] text-subtle">Cryptara · Insights</p>
         <h1 className="text-3xl font-semibold">Score calibration report</h1>
         <p className="max-w-3xl text-sm text-muted">
           A score explains why it was given, not whether similar scores turned out to be right. This report reads

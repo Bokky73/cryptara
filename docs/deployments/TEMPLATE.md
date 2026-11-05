@@ -14,7 +14,7 @@ record that points at it.
 |---|---|
 | Chain | `evm` \| `soroban` |
 | Network | |
-| Contract | `GoldenRaccoonAudit` \| `AuditRegistry` |
+| Contract | `CryptaraAudit` \| `AuditRegistry` |
 | Interface version | |
 | Contract address / id | |
 | Deployment transaction | |

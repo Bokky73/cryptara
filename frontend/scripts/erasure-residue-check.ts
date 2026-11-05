@@ -1,5 +1,5 @@
 /**
- * Erasure Residue Check Script for Golden Raccoon
+ * Erasure Residue Check Script for Cryptara
  *
  * Seeds a wallet with records across every product table, runs a full
  * erasure, then executes the residue check to assert that no wallet
@@ -153,7 +153,7 @@ async function seedWallet(wallet: string, chainFamily: "evm" | "stellar"): Promi
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function runErasureResidueCheck(): Promise<void> {
-  console.log("\n🔒  Golden Raccoon — Erasure Residue Check\n");
+  console.log("\n🔒  Cryptara — Erasure Residue Check\n");
   console.log("=".repeat(60));
 
   // ── 0. Retention policy catalogue ───────────────────────────────

@@ -4,7 +4,7 @@ import { AuthorityHistory } from "@/components/research/authority-history/Author
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Authority history | Golden Raccoon",
+  title: "Authority history | Cryptara",
   description:
     "Read-only Ownable and AccessControl change history at explicit EVM blocks, with proxy admin kept separate.",
 };

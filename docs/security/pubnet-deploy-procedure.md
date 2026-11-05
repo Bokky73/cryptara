@@ -68,7 +68,7 @@ npx hardhat run scripts/deploy-risk-registry.js --network mainnet
 # 6. Soroban: build and deploy
 cd soroban
 cargo build --target wasm32-unknown-unknown --release
-stellar contract deploy --wasm target/wasm32-unknown-unknown/release/gold_raccoon_policy.wasm --network mainnet
+stellar contract deploy --wasm target/wasm32-unknown-unknown/release/cryptara_policy.wasm --network mainnet
 ```
 
 ### Phase 2: Frontend
@@ -90,7 +90,7 @@ npm run deploy
 
 ```bash
 # 1. Health check
-curl https://app.goldenraccoon.xyz/api/health
+curl https://app.cryptara.xyz/api/health
 
 # 2. Smoke test (see low-value-smoke-test-procedure.md)
 # 3. Verify contract interaction

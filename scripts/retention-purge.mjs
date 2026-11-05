@@ -2,7 +2,7 @@
 /**
  * scripts/retention-purge.mjs
  *
- * Scheduled retention purge runner for Golden Raccoon.
+ * Scheduled retention purge runner for Cryptara.
  * Intended to be executed by a cron job, container entrypoint, or CI schedule.
  *
  * Usage:
@@ -200,7 +200,7 @@ async function purgePostgres() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function main() {
-  log("info", `Golden Raccoon — retention purge${isDryRun ? " (DRY RUN)" : ""}`);
+  log("info", `Cryptara — retention purge${isDryRun ? " (DRY RUN)" : ""}`);
   log("info", "Effective retention windows:", config);
 
   const startMs = Date.now();

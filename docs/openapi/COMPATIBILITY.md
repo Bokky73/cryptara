@@ -1,6 +1,6 @@
 # OpenAPI compatibility policy
 
-This document defines how the Golden Raccoon HTTP API's OpenAPI contract
+This document defines how the Cryptara HTTP API's OpenAPI contract
 (`docs/openapi/v1/openapi.json`) is versioned, what counts as a breaking
 change, and how routes migrate to the stable error contract.
 

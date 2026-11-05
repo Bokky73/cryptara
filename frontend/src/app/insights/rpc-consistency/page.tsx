@@ -24,7 +24,7 @@ export default async function RpcConsistencyPage({
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-8 px-4 py-8 sm:px-6 sm:py-12">
       <header className="flex max-w-full flex-col gap-2">
-        <p className="text-xs uppercase tracking-[0.18em] text-white/45">Golden Raccoon · Insights</p>
+        <p className="text-xs uppercase tracking-[0.18em] text-white/45">Cryptara · Insights</p>
         <h1 className="text-3xl font-semibold tracking-tight">Horizon and RPC consistency</h1>
         <p className="max-w-3xl text-sm leading-6 text-white/70">
           Horizon and Stellar RPC can answer the same question at different ledgers. This check reads balances, sequence,

@@ -1,5 +1,5 @@
 /**
- * Per-table retention policy declarations for Golden Raccoon.
+ * Per-table retention policy declarations for Cryptara.
  *
  * Every product table that holds wallet-linked records is listed here with:
  *  - retentionDays: how long records are kept before purge-eligibility

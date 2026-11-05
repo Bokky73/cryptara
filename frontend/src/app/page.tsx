@@ -9,14 +9,14 @@ export default function Home() {
         <Link href="/" className="flex items-center gap-3">
           <Image
             src="/brand/logo.png"
-            alt="Golden Raccoon guardian emblem"
+            alt="Cryptara guardian emblem"
             width={48}
             height={48}
             className="rounded-2xl border border-white/10"
             priority
           />
           <div>
-            <div className="text-sm font-semibold tracking-[0.18em] text-[#d9a441]">GOLDEN RACCOON</div>
+            <div className="text-sm font-semibold tracking-[0.18em] text-[#d9a441]">CRYPTARA</div>
             <div className="text-xs text-white/48">Multi-agent portfolio intelligence</div>
           </div>
         </Link>
@@ -36,7 +36,7 @@ export default function Home() {
             GOAT Network AI Guardian MVP
           </div>
           <h1 className="mt-8 max-w-4xl text-6xl font-semibold leading-[1.02] tracking-tight text-white sm:text-7xl">
-            Golden Raccoon
+            Cryptara
           </h1>
           <p className="mt-6 max-w-2xl text-xl leading-8 text-white/58">
             Multi-agent crypto portfolio intelligence. Analyze wallet activity, market signals, social sentiment and on-chain data before approving blockchain actions.
@@ -73,7 +73,7 @@ export default function Home() {
         <section className="glass-panel rounded-[32px] p-5">
           <Image
             src="/brand/logo.png"
-            alt="Golden Raccoon guardian app mark"
+            alt="Cryptara guardian app mark"
             width={820}
             height={820}
             className="aspect-square w-full rounded-[24px] object-cover"

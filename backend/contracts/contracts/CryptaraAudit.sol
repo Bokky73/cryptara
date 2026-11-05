@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-/// @title GoldenRaccoonAudit
-/// @notice Non-custodial authorization and audit layer for the Golden Raccoon
+/// @title CryptaraAudit
+/// @notice Non-custodial authorization and audit layer for the Cryptara
 ///         agent pipeline.
 ///
 /// @dev This contract records *who may act*, *what policy they act under*, and
@@ -30,7 +30,7 @@ pragma solidity ^0.8.24;
 ///      This interface is the implementation of the V2 audit layer described in
 ///      issue #16. Until that specification is formally approved the surface here
 ///      should be treated as proposed, and `VERSION` bumped on any change.
-contract GoldenRaccoonAudit {
+contract CryptaraAudit {
     /// @notice Interface version. Bump on any externally visible change.
     uint16 public constant VERSION = 1;
 

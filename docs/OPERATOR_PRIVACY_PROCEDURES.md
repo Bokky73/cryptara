@@ -2,7 +2,7 @@
 
 This document covers the operational procedures, per-table retention policies,
 scheduled purge mechanics, the full erasure workflow, and tamper-evident
-receipt verification for Golden Raccoon maintainers and operators.
+receipt verification for Cryptara maintainers and operators.
 
 ---
 
@@ -116,7 +116,7 @@ Override: PURGE_BATCH_SIZE=200 node scripts/retention-purge.mjs
 
 ```cron
 # Run nightly at 02:00 UTC
-0 2 * * * DATABASE_URL="${DATABASE_URL}" node /app/scripts/retention-purge.mjs >> /var/log/golden-raccoon/purge.log 2>&1
+0 2 * * * DATABASE_URL="${DATABASE_URL}" node /app/scripts/retention-purge.mjs >> /var/log/cryptara/purge.log 2>&1
 ```
 
 ---
@@ -285,7 +285,7 @@ no signed XDR). Unchanged from V1.
 
 ### 8.1 Onchain Ledger Immutability
 
-Golden Raccoon cannot alter or delete transaction records, smart contract
+Cryptara cannot alter or delete transaction records, smart contract
 interactions, or balances recorded on public blockchain ledgers (EVM
 mainnet/testnets or Stellar pubnet/testnet). These are public, immutable records.
 

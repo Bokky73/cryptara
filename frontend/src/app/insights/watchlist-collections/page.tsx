@@ -27,7 +27,7 @@ export default async function WatchlistCollectionsPage({
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-8 px-4 py-10 sm:px-6 sm:py-12">
       <header className="flex flex-col gap-2">
-        <p className="text-xs uppercase tracking-[0.18em] text-subtle">Golden Raccoon · Insights</p>
+        <p className="text-xs uppercase tracking-[0.18em] text-subtle">Cryptara · Insights</p>
         <h1 className="text-3xl font-semibold">Watchlist collections</h1>
         <p className="max-w-3xl text-sm text-muted">
           A flat watchlist stops being useful once it holds more than a screenful. Collections group the assets you already

@@ -13,7 +13,7 @@ import {
 type WalletSessionState = ReturnType<typeof buildWalletSession>;
 
 const WalletSessionContext = createContext<WalletSessionState | null>(null);
-const selectedFamilyChangedEvent = "golden-raccoon:selected-family-changed";
+const selectedFamilyChangedEvent = "cryptara:selected-family-changed";
 
 function subscribeToSelectedFamily(callback: () => void) {
   window.addEventListener(selectedFamilyChangedEvent, callback);

@@ -37,7 +37,7 @@ function create(kind, artifacts) {
     schemaVersion: 1,
     subject: resolvedArtifacts.map((artifact) => ({ name: relative(root, artifact), digest: { sha256: digest(artifact) } })).sort((a, b) => a.name.localeCompare(b.name)),
     predicate: {
-      source: { repository: "https://github.com/Drago-Labs/golden-raccoon", revision: git },
+      source: { repository: "https://github.com/Drago-Labs/cryptara", revision: git },
       build: { command: commands[kind], locked: true, networkAccess: false },
       toolchain: kind === "evm"
         ? { node: process.version, npm: commandVersion("npm", ["--version"]), hardhat: commandVersion("npx", ["--no-install", "hardhat", "--version"], join(root, "backend", "contracts")) }

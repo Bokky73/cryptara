@@ -14,7 +14,7 @@ function downloadBundle(payload: string) {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `golden-raccoon-audit-${new Date().toISOString().slice(0, 10)}.json`;
+  anchor.download = `cryptara-audit-${new Date().toISOString().slice(0, 10)}.json`;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();

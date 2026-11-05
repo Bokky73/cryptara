@@ -1,7 +1,7 @@
 import { TransactionBuilder, Transaction } from "@stellar/stellar-sdk";
 import type { StellarAuthorization } from "@/server/types";
 
-const STELLAR_AUTH_PREFIX = "GOLDEN_RACCOON_INTENT:";
+const STELLAR_AUTH_PREFIX = "CRYPTARA_INTENT:";
 
 function hashToHex(input: string): string {
   let hash = 5381;

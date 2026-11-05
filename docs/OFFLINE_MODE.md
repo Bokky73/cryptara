@@ -1,6 +1,6 @@
 # Offline Mode
 
-Golden Raccoon is installable through `frontend/public/manifest.webmanifest` and `frontend/public/sw.js`.
+Cryptara is installable through `frontend/public/manifest.webmanifest` and `frontend/public/sw.js`.
 
 The service worker caches only the application shell and static assets. It does not cache `/api/*` responses, POST requests, risk verdicts, quotes, prices, payment responses, or execution previews. When navigation fails offline, the worker serves `/offline`, which reads locally captured last-known scan and portfolio summaries from `localStorage`.
 

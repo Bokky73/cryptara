@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Deploy GoldenRaccoonPolicy to Soroban testnet
+# Deploy CryptaraPolicy to Soroban testnet
 # Usage: ./scripts/deploy-policy-soroban.sh <network> <manifest-path>
 # Requires: stellar CLI, SOROBAN_SECRET_KEY env var
 # Never commit a Stellar secret key.
@@ -26,12 +26,12 @@ esac
 echo "Verifying artifact provenance before deploy..."
 node "${ROOT}/scripts/verify-artifact-provenance.mjs" --strict "${MANIFEST}"
 
-echo "Building GoldenRaccoonPolicy via workspace stellar contract build..."
+echo "Building CryptaraPolicy via workspace stellar contract build..."
 stellar contract build --manifest-path "${ROOT}/soroban/Cargo.toml"
 
-WASM="${ROOT}/soroban/target/wasm32v1-none/release/golden_raccoon_policy.wasm"
+WASM="${ROOT}/soroban/target/wasm32v1-none/release/cryptara_policy.wasm"
 if [ ! -f "${WASM}" ]; then
-  echo "ERROR: expected wasm at soroban/target/wasm32v1-none/release/golden_raccoon_policy.wasm" >&2
+  echo "ERROR: expected wasm at soroban/target/wasm32v1-none/release/cryptara_policy.wasm" >&2
   exit 1
 fi
 

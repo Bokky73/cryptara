@@ -1,6 +1,6 @@
 # Verifiable risk report snapshots
 
-Golden Raccoon risk snapshots are immutable, public, privacy-redacted artifacts. They let a user share the exact report they reviewed without exporting wallet balances, strategy rules, transaction plans, internal notes, user identifiers, or provider credentials.
+Cryptara risk snapshots are immutable, public, privacy-redacted artifacts. They let a user share the exact report they reviewed without exporting wallet balances, strategy rules, transaction plans, internal notes, user identifiers, or provider credentials.
 
 ## Version 1 document
 

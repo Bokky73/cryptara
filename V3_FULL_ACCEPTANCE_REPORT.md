@@ -1,7 +1,7 @@
-# Golden Raccoon V3 — Full Multi-Chain Acceptance Report
+# Cryptara V3 — Full Multi-Chain Acceptance Report
 
 **Date:** July 28, 2026
-**Repository:** `Drago-Labs/golden-raccoon`
+**Repository:** `Drago-Labs/cryptara`
 **Branch:** `feat/v3-acceptance-report`
 **Commit:** `[final commit hash after merge]`
 **Branch head:** `feat/v3-acceptance-report`
@@ -11,7 +11,7 @@
 
 ## 1. Executive Summary
 
-This report validates the complete Golden Raccoon product across all subsystems: EVM (27 chains), Stellar (testnet + pubnet), agent intelligence, risk scoring, registry publication, execution, payments (x402), storage, security, and monitoring.
+This report validates the complete Cryptara product across all subsystems: EVM (27 chains), Stellar (testnet + pubnet), agent intelligence, risk scoring, registry publication, execution, payments (x402), storage, security, and monitoring.
 
 **Overall Status: PENDING MAINTAINER REVIEW**  
 *This report is a contributor-produced assessment. Maintainer sign-off is recorded separately (see Section 11).*
@@ -48,7 +48,7 @@ This report validates the complete Golden Raccoon product across all subsystems:
 
 ```
 Result: 0 errors, 0 warnings
-Command: cd /workspaces/golden-raccoon && npm run quality:gate
+Command: cd /workspaces/cryptara && npm run quality:gate
 Status: ✅ PASS
 
 Components:
@@ -199,7 +199,7 @@ x402 route serves 402 status when payment is not provided.
 | History | ✅ LIVE | Agent runs, approvals, recommendations |
 | User rules | ✅ LIVE | Configurable risk thresholds |
 | Soroban contracts | ✅ COMPILED | Verified on developer machines |
-| Solidity contracts | ✅ COMPILED | GoldRaccoonVault.sol |
+| Solidity contracts | ✅ COMPILED | CryptaraVault.sol |
 
 ---
 
@@ -326,7 +326,7 @@ Stellar CLI: NOT INSTALLED (needed for Soroban builds)
 
 ## 12. Conclusion
 
-**Golden Raccoon V3 validated against Issue #40 acceptance criteria:**
+**Cryptara V3 validated against Issue #40 acceptance criteria:**
 
 | Criterion | Status | Notes |
 |-----------|--------|-------|

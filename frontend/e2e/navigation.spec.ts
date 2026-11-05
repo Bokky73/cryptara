@@ -42,7 +42,7 @@ test.describe("Navigation", () => {
     test("header shows brand logo and name", async ({ page }) => {
       await page.goto("/dashboard");
 
-      await expect(page.locator("text=GOLDEN RACCOON")).toBeVisible();
+      await expect(page.locator("text=CRYPTARA")).toBeVisible();
     });
   });
 

@@ -6,7 +6,7 @@ import { EVM_WALLET } from "../fixtures/tokens";
 test.describe("Connect wallet journey", () => {
   test("loads landing page with branding", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Golden Raccoon" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Cryptara" })).toBeVisible();
   });
 
   test("shows connect wallet button on dashboard", async ({ page }) => {

@@ -13,7 +13,7 @@ import { applyStaleIfExpired, getIncidentMode, getPolicyVersion } from "@/server
  */
 
 declare global {
-  var __goldenRaccoonRecoveryRequests: RecoveryRequest[] | undefined;
+  var __cryptaraRecoveryRequests: RecoveryRequest[] | undefined;
 }
 
 type CreateRecoveryRequestInput = Omit<RecoveryRequest, "id" | "requestedAt" | "updatedAt" | "policyVersion"> & {
@@ -31,9 +31,9 @@ type PatchRecoveryRequest = Partial<Omit<RecoveryRequest, "id" | "requestedAt" |
 };
 
 function getAllRecoveryRequestsInternal(): RecoveryRequest[] {
-  globalThis.__goldenRaccoonRecoveryRequests ??= [];
+  globalThis.__cryptaraRecoveryRequests ??= [];
 
-  return globalThis.__goldenRaccoonRecoveryRequests;
+  return globalThis.__cryptaraRecoveryRequests;
 }
 
 function createRecordId() {
@@ -176,5 +176,5 @@ export function getRecoveryCounts() {
 }
 
 export function resetRecoveryStoreForTests() {
-  globalThis.__goldenRaccoonRecoveryRequests = [];
+  globalThis.__cryptaraRecoveryRequests = [];
 }

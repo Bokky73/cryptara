@@ -16,7 +16,7 @@
 ## Step 1: Health check
 
 ```bash
-curl -s https://app.goldenraccoon.xyz/api/health | jq .
+curl -s https://app.cryptara.xyz/api/health | jq .
 
 # Expected response:
 # {"status":"ok","timestamp":"<ISO>","version":"1.0.0"}
@@ -25,7 +25,7 @@ curl -s https://app.goldenraccoon.xyz/api/health | jq .
 ## Step 2: Simulation smoke test
 
 ```bash
-curl -s -X POST https://app.goldenraccoon.xyz/api/simulate \
+curl -s -X POST https://app.cryptara.xyz/api/simulate \
   -H "Content-Type: application/json" \
   -d '{
     "chainId": 1,
@@ -68,7 +68,7 @@ cast call $VAULT_ADDRESS "policy()(address)" --rpc-url $RPC_URL
 ## Step 5: x402 payment flow (if applicable)
 
 ```bash
-node scripts/smoke-api.mjs --url https://app.goldenraccoon.xyz --wallet $SMOKE_TEST_WALLET
+node scripts/smoke-api.mjs --url https://app.cryptara.xyz --wallet $SMOKE_TEST_WALLET
 # Expected: Exit code 0
 ```
 

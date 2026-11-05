@@ -33,43 +33,43 @@ const EXPECTED = {
 
 const EVM_ARTIFACTS = [
   {
-    name: "EVM GoldRaccoonPolicy",
-    path: "backend/contracts/artifacts/contracts/GoldRaccoonPolicy.sol/GoldRaccoonPolicy.json",
+    name: "EVM CryptaraPolicy",
+    path: "backend/contracts/artifacts/contracts/CryptaraPolicy.sol/CryptaraPolicy.json",
   },
   {
-    name: "EVM GoldRaccoonVault",
-    path: "backend/contracts/artifacts/contracts/GoldRaccoonVault.sol/GoldRaccoonVault.json",
+    name: "EVM CryptaraVault",
+    path: "backend/contracts/artifacts/contracts/CryptaraVault.sol/CryptaraVault.json",
   },
   {
-    name: "EVM GoldenRaccoonAudit",
-    path: "backend/contracts/artifacts/contracts/GoldenRaccoonAudit.sol/GoldenRaccoonAudit.json",
+    name: "EVM CryptaraAudit",
+    path: "backend/contracts/artifacts/contracts/CryptaraAudit.sol/CryptaraAudit.json",
   },
 ];
 
 const SOROBAN_ARTIFACTS = [
   {
     name: "Soroban Policy WASM",
-    path: "soroban/target/wasm32v1-none/release/golden_raccoon_policy.wasm",
+    path: "soroban/target/wasm32v1-none/release/cryptara_policy.wasm",
   },
   {
     name: "Soroban Vault WASM",
-    path: "soroban/target/wasm32v1-none/release/golden_raccoon_vault.wasm",
+    path: "soroban/target/wasm32v1-none/release/cryptara_vault.wasm",
   },
   {
     name: "Soroban Risk Registry WASM",
-    path: "soroban/target/wasm32v1-none/release/golden_raccoon_risk_registry.wasm",
+    path: "soroban/target/wasm32v1-none/release/cryptara_risk_registry.wasm",
   },
   {
     name: "Soroban Audit Registry WASM",
-    path: "soroban/target/wasm32v1-none/release/golden_raccoon_audit_registry.wasm",
+    path: "soroban/target/wasm32v1-none/release/cryptara_audit_registry.wasm",
   },
 ];
 
 const INPUT_FILES = [
   { name: "EVM Hardhat Config", path: "backend/contracts/hardhat.config.ts" },
-  { name: "EVM Policy Source", path: "backend/contracts/contracts/GoldRaccoonPolicy.sol" },
-  { name: "EVM Vault Source", path: "backend/contracts/contracts/GoldRaccoonVault.sol" },
-  { name: "EVM Audit Source", path: "backend/contracts/contracts/GoldenRaccoonAudit.sol" },
+  { name: "EVM Policy Source", path: "backend/contracts/contracts/CryptaraPolicy.sol" },
+  { name: "EVM Vault Source", path: "backend/contracts/contracts/CryptaraVault.sol" },
+  { name: "EVM Audit Source", path: "backend/contracts/contracts/CryptaraAudit.sol" },
   { name: "Soroban Cargo Manifest", path: "soroban/Cargo.toml" },
   { name: "Soroban Cargo Lock", path: "soroban/Cargo.lock" },
   { name: "Contracts package-lock", path: "backend/contracts/package-lock.json" },

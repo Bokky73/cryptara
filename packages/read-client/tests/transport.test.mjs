@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createReadClient,CompatibilityError,ReadClientError} from '../dist/client.js';
-const health={ok:true,service:'golden-raccoon',checkedAt:'2026-09-12T00:00:00Z',mockFallbacksEnabled:false,liveModeUsesMockData:false};
+const health={ok:true,service:'cryptara',checkedAt:'2026-09-12T00:00:00Z',mockFallbacksEnabled:false,liveModeUsesMockData:false};
 const make=options=>createReadClient({baseUrl:'https://example.test',...options});
 test('Retry-After is respected with a bounded attempt count',async()=>{
   let count=0;const start=Date.now();

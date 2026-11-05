@@ -2,7 +2,7 @@
 
 import { createContext, useContext } from "react";
 
-export const THEME_STORAGE_KEY = "golden-raccoon-theme";
+export const THEME_STORAGE_KEY = "cryptara-theme";
 
 export const themeModes = ["light", "dark", "system", "high-contrast"] as const;
 

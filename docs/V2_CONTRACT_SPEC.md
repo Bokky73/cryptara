@@ -2,8 +2,8 @@
 
 | Field | Value |
 | --- | --- |
-| Issue | Drago-Labs/golden-raccoon#16 |
-| Authors | Golden Raccoon contributors |
+| Issue | Drago-Labs/cryptara#16 |
+| Authors | Cryptara contributors |
 | Status | Implementation-ready. Defaults in §9.5 are binding unless a reviewer comment substitutes a specific item; absent substitutions, defaults merge at PR approval. |
 | Roadmap coverage | V2-061, V2-062, V2-063, prerequisite decisions for V2-066 / V2-067 |
 | Target networks | **Proposed primary targets:** EVM — GOAT Network (id 48816); Soroban — Stellar Testnet (pubnet-equivalent rollout deferred to a follow-up audit). Base Sepolia is documented as a secondary parallel testnet in §9.6. Maintainer can lock the choice in §9.1 / §9.5 with an approving comment. |
@@ -23,7 +23,7 @@ The V2 contract surface has three goals:
 
 Non-custodial proof (each contract):
 
-| Invariant | GoldRaccoonVault (EVM) | RiskRegistry (Soroban) |
+| Invariant | CryptaraVault (EVM) | RiskRegistry (Soroban) |
 | --- | --- | --- |
 | No `ERC20` / `transfer` / `transferFrom` / `swap` calls | ✅ contract exposes only `setAgent`, `setRules`, `logDecision`, `revokeAgent`, plus the new interface additions in §5; never calls into a token contract | ✅ contract exposes only `initialize`, `set_publisher`, `publish_risk`, `get_risk`, `is_publisher`, `admin` plus the new interface additions in §6; no token transfer |
 | No private key custody | ✅ contract never holds a signer; `agent` is a public address authorized by the owner | ✅ contract requires `require_auth()` on the publisher for state writes; never holds a secret |
@@ -34,7 +34,7 @@ Non-custodial proof (each contract):
 
 ## 2. V2 requirements traceability
 
-| ID | Requirement | Owner | EVM (`GoldRaccoonVault`) | Soroban (`RiskRegistry`) |
+| ID | Requirement | Owner | EVM (`CryptaraVault`) | Soroban (`RiskRegistry`) |
 | --- | --- | --- | --- | --- |
 | V2-061 | Agent authorization and revocation | V2 | ✅ `setAgent` / `revokeAgent`; ⚠️ missing mulberry rotation, multi-agent allowlist, expiry | ✅ `set_publisher`; ⚠️ missing publisher expiry, multi-tier allowlist |
 | V2-061 | Agent-list semantic events | V2 | ⚠️ `AgentApproved` / `AgentRevoked` use `owner+agent` topic; missing `previousAgent` and `revokedAt` | ✅ `PublisherAuthorizationChanged`; ⚠️ missing `revokedAt` |
@@ -122,7 +122,7 @@ All events MUST be emitted in this order to keep frontend indexers deterministic
 
 ---
 
-## 5. GoldRaccoonVault (EVM) interface
+## 5. CryptaraVault (EVM) interface
 
 ### 5.1 Storage layout
 
@@ -465,7 +465,7 @@ pub fn is_paused(env: Env) -> bool;
 
 ## 7. Cross-chain differences
 
-| Concern | EVM (GoldRaccoonVault) | Soroban (RiskRegistry) |
+| Concern | EVM (CryptaraVault) | Soroban (RiskRegistry) |
 | --- | --- | --- |
 | Storage model | contract storage + event log | instance + persistent + TTL |
 | Auth model | `owner` / `agent` / `guardian` modifiers + `require_auth` | `require_auth` + storage-level allowlist |
@@ -532,12 +532,12 @@ GOAT Network (id 48816) is the chosen primary EVM testnet and Stellar Testnet is
 3. **Frontend integration PR** — the frontend wires the new `transaction_lifecycle_events` rows to the new contract events; the existing `tx_hash` correlation remains untouched.
 4. **Testnet soak** — 14 days of soak testing on testnet with synthetic load and a forced pause / unpause cycle.
 5. **Audit** — third-party audit of the implementation PR (out of scope of this spec).
-6. **Pubnet deploy** — only after audit, the admin calls `VersionReported`, then `setPublisher` / `addAgent` for the canonical Golden Raccoon publisher / agent.
+6. **Pubnet deploy** — only after audit, the admin calls `VersionReported`, then `setPublisher` / `addAgent` for the canonical Cryptara publisher / agent.
 7. **Frontend cutoff** — the frontend flips `x402Required: true` for non-custodial write paths after the first confirmed event on pubnet.
 
 ### 9.4 Cutover and rollback
 
-- The frontend MUST be able to roll back to the V1 contract addresses by swapping the `NEXT_PUBLIC_GOLD_RACCOON_VAULT_ADDRESS` and `NEXT_PUBLIC_RISK_REGISTRY_ADDRESS` env vars.
+- The frontend MUST be able to roll back to the V1 contract addresses by swapping the `NEXT_PUBLIC_CRYPTARA_VAULT_ADDRESS` and `NEXT_PUBLIC_RISK_REGISTRY_ADDRESS` env vars.
 - The frontend MUST NOT auto-upgrade; every version bump is gated behind a manual `NEXT_PUBLIC_CONTRACT_VERSION` bump and a code-release.
 
 ### 9.5 Defaults and reviewer substitution policy
@@ -548,7 +548,7 @@ The defaults below are binding at PR merge unless a single reviewer comment subs
 2. Stellar target — **Default**: Stellar Testnet dev now, Stellar Pubnet deferred until audit. Substitution path: comment "substitute Stellar dev <network>".
 3. Proxy pattern for V2 — **Default**: UUPS proxy (`ERC1967Proxy` + `UUPSUpgradeable`) with §5.7 timelock and cancel path. Substitution alternatives: minimal proxy, beacon, or transparent proxy; substitute via comment naming the chosen alternative and the §5.7 wording adjustment required.
 4. Upgrade delay window — **Default**: 24h minimum, 30d maximum. Substitution path: comment with new `[minSec, maxSec]` inclusive bounds; §5.7 and §6.7 must mirror the change.
-5. Publisher tier list — **Default**: `gold_raccoon`, `partner`, `community`. Substitution path: comment with the exact tier symbol list.
+5. Publisher tier list — **Default**: `cryptara`, `partner`, `community`. Substitution path: comment with the exact tier symbol list.
 6. Version-rebuild hash encoding — **Default**: `sha256(git_commit || build_runner)` truncated to 32 bytes for Soroban; `keccak256(git_commit || build_runner)` truncated to 32 bytes for EVM. Substitution path: comment naming the chosen hash and the truncation rule.
 7. Publisher quarantine list — **Default**: deferred; covered by a future V2-068+ spec. Substitution path is not in scope for this PR.
 
@@ -613,7 +613,7 @@ The spec is **implementation-ready** at PR merge. The defaults in §9.5 are bind
 | Step | Owner | Depends on |
 | --- | --- | --- |
 | Approve this spec | Reviewer | PR review |
-| Implement EVM `GoldRaccoonVault` v2 | Frontend/Contracts | spec approval |
+| Implement EVM `CryptaraVault` v2 | Frontend/Contracts | spec approval |
 | Implement Soroban `RiskRegistry` v2 | Frontend/Contracts | spec approval |
 | Frontend wiring | Frontend | contract deploys |
 | Test matrix execution | Frontend | test matrix approval |

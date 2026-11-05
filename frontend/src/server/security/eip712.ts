@@ -94,7 +94,7 @@ export function hashIntentPayload(payload: ExecutionIntentPayload): `0x${string}
 
 export function buildPolicyDomain(chainId: number, contractAddress: `0x${string}`): EIP712Domain {
   return {
-    name: "GoldenRaccoonPolicy",
+    name: "CryptaraPolicy",
     version: "1",
     chainId,
     verifyingContract: contractAddress,
@@ -103,7 +103,7 @@ export function buildPolicyDomain(chainId: number, contractAddress: `0x${string}
 
 export function buildIntentDomain(chainId: number, contractAddress: `0x${string}`): EIP712Domain {
   return {
-    name: "GoldenRaccoonExecutionIntent",
+    name: "CryptaraExecutionIntent",
     version: "1",
     chainId,
     verifyingContract: contractAddress,
@@ -171,7 +171,7 @@ export function assertDomainMatch(domain: EIP712Domain, expectedChainId: number,
   if (domain.verifyingContract.toLowerCase() !== expectedContract.toLowerCase()) {
     throw new Error(`Domain verifyingContract mismatch: expected ${expectedContract}, got ${domain.verifyingContract}`);
   }
-  if (domain.name !== "GoldenRaccoonPolicy" && domain.name !== "GoldenRaccoonExecutionIntent") {
+  if (domain.name !== "CryptaraPolicy" && domain.name !== "CryptaraExecutionIntent") {
     throw new Error(`Unknown domain name: ${domain.name}`);
   }
 }

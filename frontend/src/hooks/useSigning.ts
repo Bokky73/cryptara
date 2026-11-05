@@ -7,14 +7,14 @@ import type { EIP712Domain, SignedPolicyPayload, ExecutionIntentPayload, SignedP
 import { getPolicyTypedData, getIntentTypedData, hashPolicyPayload, hashIntentPayload } from "@/server/security/eip712";
 
 const DEFAULT_POLICY_DOMAIN: EIP712Domain = {
-  name: "GoldenRaccoonPolicy",
+  name: "CryptaraPolicy",
   version: "1",
   chainId: 48816,
   verifyingContract: "0x0000000000000000000000000000000000000000",
 };
 
 const DEFAULT_INTENT_DOMAIN: EIP712Domain = {
-  name: "GoldenRaccoonExecutionIntent",
+  name: "CryptaraExecutionIntent",
   version: "1",
   chainId: 48816,
   verifyingContract: "0x0000000000000000000000000000000000000000",

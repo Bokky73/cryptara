@@ -1,6 +1,6 @@
 # Feature flags
 
-Golden Raccoon uses a typed, server-side feature-flag system to gate network
+Cryptara uses a typed, server-side feature-flag system to gate network
 and execution capabilities. Flags are **not** client-controlled: client-side
 `NEXT_PUBLIC_*` values are presentation-only, and every gate is enforced in the
 server route handler.

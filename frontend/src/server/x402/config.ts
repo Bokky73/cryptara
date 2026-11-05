@@ -91,7 +91,7 @@ export function getX402RouteConfig(config = getX402RuntimeConfig()): RouteConfig
         payTo: config.payTo,
       },
     ],
-    description: "Golden Raccoon premium deep scan for AI Risk Report",
+    description: "Cryptara premium deep scan for AI Risk Report",
     mimeType: "application/json",
   };
 }

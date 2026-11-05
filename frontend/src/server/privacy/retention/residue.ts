@@ -1,5 +1,5 @@
 /**
- * Residue check for Golden Raccoon wallet erasure.
+ * Residue check for Cryptara wallet erasure.
  *
  * After an erasure workflow completes, this module scans every in-memory store
  * and (optionally) Postgres to assert that no wallet identity survived.
@@ -55,19 +55,19 @@ function leak(store: string, field: string, value: string, id?: string): Residue
 // ---------------------------------------------------------------------------
 
 type MemoryStore = typeof globalThis & {
-  __goldenRaccoonAgentRuns?: Array<{ id?: string; walletAddress?: string }>;
-  __goldenRaccoonRecommendations?: Array<{ id?: string; walletAddress?: string }>;
-  __goldenRaccoonApprovals?: Array<{ id?: string; walletAddress?: string }>;
-  __goldenRaccoonUserRules?: Array<{ walletAddress?: string }>;
-  __goldenRaccoonAlertRules?: Array<{ id?: string; walletAddress?: string }>;
-  __goldenRaccoonAlertObservations?: Array<{ id?: string; walletAddress?: string }>;
-  __goldenRaccoonAlerts?: Array<{ id?: string; walletAddress?: string }>;
-  __goldenRaccoonAlertDeliveries?: Array<{ id?: string; walletAddress?: string }>;
-  __goldenRaccoonWatchlistEntries?: Array<{ id?: string; walletAddress?: string }>;
-  __goldenRaccoonWatchlistScanRuns?: Array<{ id?: string; walletAddress?: string }>;
-  __goldenRaccoonDiscoveryAlerts?: Array<{ id?: string; walletAddress?: string }>;
-  __goldenRaccoonTransactions?: Array<{ id?: string; hash?: string; walletAddress?: string | null; sourceAccount?: string | null }>;
-  __goldenRaccoonX402PaymentReceipts?: Array<{ id?: string; walletAddress?: string | null; payer?: string | null }>;
+  __cryptaraAgentRuns?: Array<{ id?: string; walletAddress?: string }>;
+  __cryptaraRecommendations?: Array<{ id?: string; walletAddress?: string }>;
+  __cryptaraApprovals?: Array<{ id?: string; walletAddress?: string }>;
+  __cryptaraUserRules?: Array<{ walletAddress?: string }>;
+  __cryptaraAlertRules?: Array<{ id?: string; walletAddress?: string }>;
+  __cryptaraAlertObservations?: Array<{ id?: string; walletAddress?: string }>;
+  __cryptaraAlerts?: Array<{ id?: string; walletAddress?: string }>;
+  __cryptaraAlertDeliveries?: Array<{ id?: string; walletAddress?: string }>;
+  __cryptaraWatchlistEntries?: Array<{ id?: string; walletAddress?: string }>;
+  __cryptaraWatchlistScanRuns?: Array<{ id?: string; walletAddress?: string }>;
+  __cryptaraDiscoveryAlerts?: Array<{ id?: string; walletAddress?: string }>;
+  __cryptaraTransactions?: Array<{ id?: string; hash?: string; walletAddress?: string | null; sourceAccount?: string | null }>;
+  __cryptaraX402PaymentReceipts?: Array<{ id?: string; walletAddress?: string | null; payer?: string | null }>;
 };
 
 /**
@@ -87,17 +87,17 @@ export function checkErasureResidue(
 
   // ── Hard-delete tables: no matching row should exist ─────────────────
   const hardDeleteChecks: Array<[keyof MemoryStore, string]> = [
-    ["__goldenRaccoonAgentRuns", "agent_runs"],
-    ["__goldenRaccoonRecommendations", "recommendations"],
-    ["__goldenRaccoonApprovals", "approvals"],
-    ["__goldenRaccoonUserRules", "user_rules"],
-    ["__goldenRaccoonAlertRules", "alert_rules"],
-    ["__goldenRaccoonAlertObservations", "alert_observations"],
-    ["__goldenRaccoonAlerts", "alerts"],
-    ["__goldenRaccoonAlertDeliveries", "alert_deliveries"],
-    ["__goldenRaccoonWatchlistEntries", "watchlist_entries"],
-    ["__goldenRaccoonWatchlistScanRuns", "watchlist_scan_runs"],
-    ["__goldenRaccoonDiscoveryAlerts", "discovery_alerts"],
+    ["__cryptaraAgentRuns", "agent_runs"],
+    ["__cryptaraRecommendations", "recommendations"],
+    ["__cryptaraApprovals", "approvals"],
+    ["__cryptaraUserRules", "user_rules"],
+    ["__cryptaraAlertRules", "alert_rules"],
+    ["__cryptaraAlertObservations", "alert_observations"],
+    ["__cryptaraAlerts", "alerts"],
+    ["__cryptaraAlertDeliveries", "alert_deliveries"],
+    ["__cryptaraWatchlistEntries", "watchlist_entries"],
+    ["__cryptaraWatchlistScanRuns", "watchlist_scan_runs"],
+    ["__cryptaraDiscoveryAlerts", "discovery_alerts"],
   ];
 
   for (const [key, tableName] of hardDeleteChecks) {
@@ -112,7 +112,7 @@ export function checkErasureResidue(
 
   // ── Anonymize tables: walletAddress and payer must be NULL / empty ────
   {
-    const list = store.__goldenRaccoonTransactions;
+    const list = store.__cryptaraTransactions;
     if (list) {
       for (const tx of list) {
         const id = tx.id ?? tx.hash;
@@ -127,7 +127,7 @@ export function checkErasureResidue(
   }
 
   {
-    const list = store.__goldenRaccoonX402PaymentReceipts;
+    const list = store.__cryptaraX402PaymentReceipts;
     if (list) {
       for (const rec of list) {
         if (walletMatches(rec.walletAddress, canonical)) {

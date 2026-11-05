@@ -1,4 +1,4 @@
-# Golden Raccoon — Provider Failure Runbooks
+# Cryptara — Provider Failure Runbooks
 
 > Issue #18: V2 Execution Observability, Audit Logs, and Provider Failure Runbooks
 

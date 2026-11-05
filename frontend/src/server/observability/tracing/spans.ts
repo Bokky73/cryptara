@@ -4,7 +4,7 @@ import type { ProviderAdapterResult } from "@/server/providers/adapter";
 import { extractResultCode, redactSpanAttributes } from "./redact";
 import { noopSpan } from "./noop";
 
-const TRACER_NAME = "golden-raccoon";
+const TRACER_NAME = "cryptara";
 
 function toSpanAttributes(attributes: Record<string, unknown>): Record<string, string | number | boolean> {
   const redacted = redactSpanAttributes(attributes);

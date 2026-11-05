@@ -1,5 +1,5 @@
 /**
- * Full erasure workflow for Golden Raccoon.
+ * Full erasure workflow for Cryptara.
  *
  * Walks every product table that contains wallet identity (declared in
  * retention/policy.ts), applies the correct strategy (delete or anonymize),
@@ -52,19 +52,19 @@ export interface ErasureReport {
 // ---------------------------------------------------------------------------
 
 type MemoryStore = typeof globalThis & {
-  __goldenRaccoonAgentRuns?: Array<{ walletAddress: string }>;
-  __goldenRaccoonRecommendations?: Array<{ walletAddress: string }>;
-  __goldenRaccoonApprovals?: Array<{ walletAddress: string; network?: string }>;
-  __goldenRaccoonUserRules?: Array<{ walletAddress: string }>;
-  __goldenRaccoonAlertRules?: Array<{ walletAddress: string }>;
-  __goldenRaccoonAlertObservations?: Array<{ walletAddress: string }>;
-  __goldenRaccoonAlerts?: Array<{ walletAddress: string }>;
-  __goldenRaccoonAlertDeliveries?: Array<{ walletAddress: string }>;
-  __goldenRaccoonWatchlistEntries?: Array<{ walletAddress: string }>;
-  __goldenRaccoonWatchlistScanRuns?: Array<{ walletAddress: string }>;
-  __goldenRaccoonDiscoveryAlerts?: Array<{ walletAddress: string }>;
-  __goldenRaccoonTransactions?: Array<{ walletAddress?: string | null; sourceAccount?: string; network?: string; chainFamily?: string }>;
-  __goldenRaccoonX402PaymentReceipts?: Array<{ walletAddress?: string | null; payer?: string | null; network?: string; chainFamily?: string }>;
+  __cryptaraAgentRuns?: Array<{ walletAddress: string }>;
+  __cryptaraRecommendations?: Array<{ walletAddress: string }>;
+  __cryptaraApprovals?: Array<{ walletAddress: string; network?: string }>;
+  __cryptaraUserRules?: Array<{ walletAddress: string }>;
+  __cryptaraAlertRules?: Array<{ walletAddress: string }>;
+  __cryptaraAlertObservations?: Array<{ walletAddress: string }>;
+  __cryptaraAlerts?: Array<{ walletAddress: string }>;
+  __cryptaraAlertDeliveries?: Array<{ walletAddress: string }>;
+  __cryptaraWatchlistEntries?: Array<{ walletAddress: string }>;
+  __cryptaraWatchlistScanRuns?: Array<{ walletAddress: string }>;
+  __cryptaraDiscoveryAlerts?: Array<{ walletAddress: string }>;
+  __cryptaraTransactions?: Array<{ walletAddress?: string | null; sourceAccount?: string; network?: string; chainFamily?: string }>;
+  __cryptaraX402PaymentReceipts?: Array<{ walletAddress?: string | null; payer?: string | null; network?: string; chainFamily?: string }>;
 };
 
 function walletMatches(fieldWallet: string | undefined | null, targetWallet: string): boolean {
@@ -119,28 +119,28 @@ export function eraseWalletDataFromMemory(input: EraseWalletInput): {
   }
 
   // ── Hard-delete tables (no network scope) ──────────────────────────────
-  tables.push(eraseList("__goldenRaccoonAgentRuns", "agent_runs"));
-  tables.push(eraseList("__goldenRaccoonRecommendations", "recommendations"));
-  tables.push(eraseList("__goldenRaccoonUserRules", "user_rules"));
-  tables.push(eraseList("__goldenRaccoonAlertRules", "alert_rules"));
-  tables.push(eraseList("__goldenRaccoonAlertObservations", "alert_observations"));
-  tables.push(eraseList("__goldenRaccoonAlerts", "alerts"));
-  tables.push(eraseList("__goldenRaccoonAlertDeliveries", "alert_deliveries"));
-  tables.push(eraseList("__goldenRaccoonWatchlistEntries", "watchlist_entries"));
-  tables.push(eraseList("__goldenRaccoonWatchlistScanRuns", "watchlist_scan_runs"));
-  tables.push(eraseList("__goldenRaccoonDiscoveryAlerts", "discovery_alerts"));
+  tables.push(eraseList("__cryptaraAgentRuns", "agent_runs"));
+  tables.push(eraseList("__cryptaraRecommendations", "recommendations"));
+  tables.push(eraseList("__cryptaraUserRules", "user_rules"));
+  tables.push(eraseList("__cryptaraAlertRules", "alert_rules"));
+  tables.push(eraseList("__cryptaraAlertObservations", "alert_observations"));
+  tables.push(eraseList("__cryptaraAlerts", "alerts"));
+  tables.push(eraseList("__cryptaraAlertDeliveries", "alert_deliveries"));
+  tables.push(eraseList("__cryptaraWatchlistEntries", "watchlist_entries"));
+  tables.push(eraseList("__cryptaraWatchlistScanRuns", "watchlist_scan_runs"));
+  tables.push(eraseList("__cryptaraDiscoveryAlerts", "discovery_alerts"));
 
   // ── Approvals (chain-scoped) ──────────────────────────────────────────
   {
-    const list = store.__goldenRaccoonApprovals;
+    const list = store.__cryptaraApprovals;
     if (list) {
       const before = list.length;
-      store.__goldenRaccoonApprovals = list.filter(
+      store.__cryptaraApprovals = list.filter(
         (r) =>
           !walletMatches(r.walletAddress, canonicalWallet) ||
           !networkMatches(r.network, network, chainFamily, chainFamily),
       );
-      const rowsAffected = before - store.__goldenRaccoonApprovals.length;
+      const rowsAffected = before - store.__cryptaraApprovals.length;
       tables.push({ table: "approvals", action: rowsAffected > 0 ? "deleted" : "skipped", rowsAffected, strategy: "delete" });
     } else {
       tables.push({ table: "approvals", action: "skipped", rowsAffected: 0, strategy: "delete" });
@@ -149,7 +149,7 @@ export function eraseWalletDataFromMemory(input: EraseWalletInput): {
 
   // ── Transactions (anonymize: NULL wallet identity) ────────────────────
   {
-    const list = store.__goldenRaccoonTransactions;
+    const list = store.__cryptaraTransactions;
     let rowsAffected = 0;
     if (list) {
       for (const tx of list) {
@@ -168,7 +168,7 @@ export function eraseWalletDataFromMemory(input: EraseWalletInput): {
 
   // ── X402 payment receipts (anonymize) ─────────────────────────────────
   {
-    const list = store.__goldenRaccoonX402PaymentReceipts;
+    const list = store.__cryptaraX402PaymentReceipts;
     let rowsAffected = 0;
     if (list) {
       for (const rec of list) {

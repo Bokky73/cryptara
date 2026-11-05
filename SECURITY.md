@@ -10,7 +10,7 @@
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Golden Raccoon takes security seriously. If you discover a vulnerability, please
+Cryptara takes security seriously. If you discover a vulnerability, please
 report it privately so the maintainers can assess and fix it before disclosure.
 
 ### Private reporting channels (in preferred order)
@@ -22,7 +22,7 @@ report it privately so the maintainers can assess and fix it before disclosure.
    If the repository does not show a private-reporting button, the feature may
    not be enabled by the organization. In that case use option 2 below.
 
-2. **Email**: `security@goldenraccoon.xyz`
+2. **Email**: `security@cryptara.xyz`
    > ⚠️ **Maintainer action required:** Replace the email address above with
    > the actual security contact **before the repository goes public**. If
    > GitHub private vulnerability reporting is enabled in the organisation
@@ -44,7 +44,7 @@ assessment within **5 business days**.
 ## Scope
 
 - `frontend/` — Next.js client application
-- `backend/contracts/` — EVM smart contracts (GoldRaccoonVault)
+- `backend/contracts/` — EVM smart contracts (CryptaraVault)
 - `soroban/contracts/` — Soroban smart contracts (Risk Registry)
 - `scripts/` — Deployment, smoke-test, and monitoring scripts
 

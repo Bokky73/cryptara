@@ -7,7 +7,7 @@ const documentSchema = shape({ schemaVersion: literal("1"),
   scores: shape({ buyRisk: number, confidence: number }), verdict: text, summary: text, topReasons: array(text),
   evidence: array(shape({ label: text, status: text, checkedAt: optional(text) })), missingData: array(shape({ field: text, impact: text })),
   freshness: shape({ generatedAt: text, staleAt: text, sourceCheckedAt: array(text) }), expiresAt: text,
-  product: shape({ name: literal("Golden Raccoon"), version: text }), notices: shape({ informationOnly: literal(true), providerCorrectnessNotProven: literal(true) }) });
+  product: shape({ name: literal("Cryptara"), version: text }), notices: shape({ informationOnly: literal(true), providerCorrectnessNotProven: literal(true) }) });
 export const publicSnapshotSchema = shape({ id: text, schemaVersion: literal("1"), canonicalHash: text, createdAt: text, expiresAt: text, document: documentSchema });
 export const snapshotSchema = shape({ snapshot: publicSnapshotSchema });
 export type Snapshot = ReturnType<typeof publicSnapshotSchema>;

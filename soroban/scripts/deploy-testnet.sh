@@ -21,8 +21,8 @@ if [ "${1:-}" != "--no-wasm" ]; then
   echo -e "${BLUE}Installing WASM target for reproducible build...${NC}"
   rustup target add wasm32-unknown-unknown 2>&1
   echo -e "${BLUE}Building optimized WASM (locked)${NC}"
-  cargo build --locked --release --target wasm32-unknown-unknown --package golden-raccoon-risk-registry 2>&1
-  WASM_PATH="target/wasm32-unknown-unknown/release/golden_raccoon_risk_registry.wasm"
+  cargo build --locked --release --target wasm32-unknown-unknown --package cryptara-risk-registry 2>&1
+  WASM_PATH="target/wasm32-unknown-unknown/release/cryptara_risk_registry.wasm"
   echo -e "${GREEN}WASM built: $WASM_PATH${NC}"
   echo "WASM size: $(wc -c < "$WASM_PATH") bytes"
   echo "SHA256:    $(sha256sum "$WASM_PATH" | cut -d' ' -f1)"
@@ -46,7 +46,7 @@ echo "Admin address: $ADMIN_ADDRESS"
 echo ""
 
 # Deploy contract
-WASM_PATH="target/wasm32-unknown-unknown/release/golden_raccoon_risk_registry.wasm"
+WASM_PATH="target/wasm32-unknown-unknown/release/cryptara_risk_registry.wasm"
 echo -e "${BLUE}Deploying contract...${NC}"
 CONTRACT_ID=$(soroban contract deploy \
   --network "$NETWORK" \

@@ -2,7 +2,7 @@ import { ethers } from "hardhat";
 
 async function main() {
   const [deployer] = await ethers.getSigners();
-  console.log(`Deploying GoldRaccoonTimelock with deployer: ${deployer.address}`);
+  console.log(`Deploying CryptaraTimelock with deployer: ${deployer.address}`);
 
   // Example signers - in production these would be hardware-backed multisig participants
   const signers = process.env.TIMELOCK_SIGNERS
@@ -23,12 +23,12 @@ async function main() {
   console.log(`Delay window: [${minDelay}, ${maxDelay}]`);
   console.log(`Emergency admin: ${emergencyAdmin}`);
 
-  const Timelock = await ethers.getContractFactory("GoldRaccoonTimelock");
+  const Timelock = await ethers.getContractFactory("CryptaraTimelock");
   const timelock = await Timelock.deploy(uniqueSigners.slice(0, 3), threshold, minDelay, maxDelay, emergencyAdmin);
   await timelock.waitForDeployment();
 
   const address = await timelock.getAddress();
-  console.log(`GoldRaccoonTimelock deployed to ${address}`);
+  console.log(`CryptaraTimelock deployed to ${address}`);
   console.log(`Threshold: ${await timelock.threshold()}`);
   console.log(`Min delay: ${await timelock.minDelay()}`);
   console.log(`Max delay: ${await timelock.maxDelay()}`);
@@ -37,10 +37,10 @@ async function main() {
   console.log(`Network: ${network.name} (chainId: ${network.chainId})`);
 
   // Also deploy PolicyV2 implementation for reference
-  const PolicyV2 = await ethers.getContractFactory("GoldRaccoonPolicyV2");
+  const PolicyV2 = await ethers.getContractFactory("CryptaraPolicyV2");
   const policyV2 = await PolicyV2.deploy();
   await policyV2.waitForDeployment();
-  console.log(`GoldRaccoonPolicyV2 implementation deployed to ${await policyV2.getAddress()}`);
+  console.log(`CryptaraPolicyV2 implementation deployed to ${await policyV2.getAddress()}`);
   console.log(`V2 version: ${await policyV2.getV2Version()}`);
 
   console.log("Governance deployment complete.");

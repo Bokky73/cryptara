@@ -171,7 +171,7 @@ function buildSoroban() {
 
   const wasmPath = join(
     root,
-    "soroban/target/wasm32v1-none/release/golden_raccoon_audit_registry.wasm",
+    "soroban/target/wasm32v1-none/release/cryptara_audit_registry.wasm",
   );
 
   if (!existsSync(wasmPath)) {
@@ -233,7 +233,7 @@ function deployEvm(network, config, dryRun) {
 
   const artifactPath = join(
     contractsDir,
-    "artifacts/contracts/GoldenRaccoonAudit.sol/GoldenRaccoonAudit.json",
+    "artifacts/contracts/CryptaraAudit.sol/CryptaraAudit.json",
   );
 
   if (!existsSync(artifactPath)) {

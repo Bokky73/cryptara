@@ -15,9 +15,9 @@ export async function installMockStellarWallet(
       network: walletNetwork,
       walletName: "Freighter (e2e)",
     };
-    window.localStorage.setItem("golden-raccoon:selected-wallet-family:v1", "stellar");
+    window.localStorage.setItem("cryptara:selected-wallet-family:v1", "stellar");
     window.localStorage.setItem(
-      "golden-raccoon:stellar-display-session:v1",
+      "cryptara:stellar-display-session:v1",
       JSON.stringify({
         version: 1,
         walletId: "freighter",

@@ -12,7 +12,7 @@ export type AlertRuleDefault = {
 };
 
 /**
- * The Golden Raccoon default rule set. Defaults intentionally leave
+ * The Cryptara default rule set. Defaults intentionally leave
  * `observationKey` undefined so they act as catch-alls for the trigger type
  * (e.g. every onchain:0x… key under the wallet will be evaluated against the
  * rule). Users can add narrower, observationKey-bound rules via the API.

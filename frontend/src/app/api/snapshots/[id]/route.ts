@@ -35,7 +35,7 @@ export async function GET(
     return secureHeaders(new Response(`${JSON.stringify(result.snapshot, null, 2)}\n`, {
       headers: {
         "Content-Type": "application/json; charset=utf-8",
-        "Content-Disposition": `attachment; filename="golden-raccoon-${id}.json"`,
+        "Content-Disposition": `attachment; filename="cryptara-${id}.json"`,
       },
     }));
   }

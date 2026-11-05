@@ -12,8 +12,8 @@ export type RestoredStellarSession = {
   network: StellarNetworkId;
 };
 
-export const SELECTED_WALLET_FAMILY_KEY = "golden-raccoon:selected-wallet-family:v1";
-export const STELLAR_DISPLAY_SESSION_KEY = "golden-raccoon:stellar-display-session:v1";
+export const SELECTED_WALLET_FAMILY_KEY = "cryptara:selected-wallet-family:v1";
+export const STELLAR_DISPLAY_SESSION_KEY = "cryptara:stellar-display-session:v1";
 
 export function isWalletFamily(value: unknown): value is WalletFamily {
   return value === "evm" || value === "stellar";

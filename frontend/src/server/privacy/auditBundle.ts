@@ -144,7 +144,7 @@ export function buildAuditBundle(input: BuildAuditBundleInput): AuditBundle {
   return {
     version: AUDIT_BUNDLE_VERSION,
     generatedAt: new Date().toISOString(),
-    product: { name: "golden-raccoon", version: input.productVersion },
+    product: { name: "cryptara", version: input.productVersion },
     scope: {
       walletHash: hashWalletIdentifier(input.walletAddress),
       chainFamily: input.chainFamily,

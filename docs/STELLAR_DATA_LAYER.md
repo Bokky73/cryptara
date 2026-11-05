@@ -34,7 +34,7 @@ replace Horizon without changing portfolio scoring.
 
 ## Durable contract events
 
-`GoldenRaccoonEventIngestor` requests only configured contract IDs and event
+`CryptaraEventIngestor` requests only configured contract IDs and event
 topics. It discards system events, failed contract calls, unrelated contracts,
 and unrelated topics before persistence.
 

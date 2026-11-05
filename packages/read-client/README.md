@@ -1,4 +1,4 @@
-# Golden Raccoon read client
+# Cryptara read client
 
 Private ESM TypeScript package, usable from Node 22+ and modern browsers. It has
 no runtime dependencies and exposes only GET requests. Install/build separately:
@@ -11,7 +11,7 @@ npm run build
 ```
 
 ```ts
-import { createReadClient } from "@golden-raccoon/read-client";
+import { createReadClient } from "@cryptara/read-client";
 const client = createReadClient({ baseUrl: "https://your-deployment.example" });
 const page = await client.history.transactions({ limit: 25 }, {
   signal: AbortSignal.timeout(5000),

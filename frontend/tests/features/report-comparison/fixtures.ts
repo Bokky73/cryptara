@@ -63,7 +63,7 @@ export function buildDocument(overrides: DocumentOverrides = {}): RiskSnapshotDo
       staleAt: FUTURE,
     },
     expiresAt: overrides.expiresAt ?? FUTURE,
-    product: { name: "Golden Raccoon", version: overrides.productVersion ?? "0.1.0" },
+    product: { name: "Cryptara", version: overrides.productVersion ?? "0.1.0" },
     notices: { informationOnly: true, providerCorrectnessNotProven: true },
   };
 }

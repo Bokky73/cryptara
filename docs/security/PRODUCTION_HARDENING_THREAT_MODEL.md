@@ -68,8 +68,8 @@
 
 | Field | Value |
 |---|---|
-| **Attack scenario** | An attacker deploys a counterfeit token contract or policy contract that mimics the legitimate one. Users or agents interact with the fake contract, believing it is the authorised Golden Raccoon contract. |
-| **Affected component(s)** | `frontend/src/server/agents/onchain/` — contract analysis; `backend/contracts/contracts/GoldRaccoonPolicy.sol` — the legitimate policy; `soroban/contracts/policy/src/lib.rs` — the legitimate Soroban policy. |
+| **Attack scenario** | An attacker deploys a counterfeit token contract or policy contract that mimics the legitimate one. Users or agents interact with the fake contract, believing it is the authorised Cryptara contract. |
+| **Affected component(s)** | `frontend/src/server/agents/onchain/` — contract analysis; `backend/contracts/contracts/CryptaraPolicy.sol` — the legitimate policy; `soroban/contracts/policy/src/lib.rs` — the legitimate Soroban policy. |
 | **Impact** | Users approve allowances on a malicious contract, agents produce risk scores based on fake onchain data, or policy-gated withdrawals are bypassed. |
 | **Existing mitigations** | 1. Policy contracts (EVM and Soroban) are deployed at known addresses and version-stamped (`VERSION = "1.0.0"`). 2. `hashPolicyDecision` and `hashIntent` bind commitments to the chain ID (EVM) or ledger sequence (Soroban), preventing cross-domain replay. 3. The vault contracts reference an explicit `policy` address set at construction. 4. The risk registry contract authorises specific publisher addresses. |
 | **Residual risk** | **MEDIUM**. There is no on-chain registry of "known-good" contract addresses that the frontend verifies before interacting. Users must independently verify the policy address. |

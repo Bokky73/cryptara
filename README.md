@@ -1,21 +1,21 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/Golden%20Raccoon-🦝-f59e0b?style=for-the-badge&labelColor=1a1a2e&color=f59e0b">
-  <img alt="Golden Raccoon" src="https://img.shields.io/badge/Golden%20Raccoon-🦝-f59e0b?style=for-the-badge&labelColor=white&color=f59e0b">
+  <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/Cryptara-f59e0b?style=for-the-badge&labelColor=1a1a2e&color=f59e0b">
+  <img alt="Cryptara" src="https://img.shields.io/badge/Cryptara-f59e0b?style=for-the-badge&labelColor=white&color=f59e0b">
 </picture>
 
-# Golden Raccoon 🦝
+# Cryptara
 
 **Web3 risk intelligence — understand any token before you trade.**
 
 > 🎥 *Screenshot placeholder: add a GIF or image of the AI Risk Report UI here.*
 
-Golden Raccoon is an open-source, approval-only risk-intelligence platform that
+Cryptara is an open-source, approval-only risk-intelligence platform that
 analyses blockchain tokens across **EVM** and **Stellar** networks. Enter a
 contract address, asset identifier, or DexScreener link and receive a structured
 AI Risk Report with scores, evidence, and suggested actions — **no financial
 advice, just data-driven signals.**
 
-👉 **[Live demo](https://golden-raccoon.vercel.app)** (testnet) — try it without
+👉 **[Live demo](https://cryptara.vercel.app)** (testnet) — try it without
 setting up a local environment.
 
 | Feature | Status |
@@ -38,8 +38,8 @@ setting up a local environment.
 
 ```sh
 # Prerequisites: Node.js 22+, npm 10+, Rust 1.84+
-git clone https://github.com/Drago-Labs/golden-raccoon.git
-cd golden-raccoon
+git clone https://github.com/Drago-Labs/cryptara.git
+cd cryptara
 
 npm install
 npm install --prefix frontend
@@ -75,12 +75,12 @@ soroban/  (Rust Soroban contracts)
 └── contracts/risk-registry/ — Non-custodial publication registry
 
 backend/contracts/  (EVM Solidity contracts)
-└── GoldRaccoonVault.sol — Audit-log vault (prototype)
+└── CryptaraVault.sol — Audit-log vault (prototype)
 ```
 
 ### Local Development
 
-For information on how to bootstrap and run Golden Raccoon locally, please see [Local Development](docs/LOCAL_DEVELOPMENT.md).
+For information on how to bootstrap and run Cryptara locally, please see [Local Development](docs/LOCAL_DEVELOPMENT.md).
 
 ### Agent pipeline
 
@@ -119,7 +119,7 @@ Stellar Testnet, Stellar Pubnet
 
 ### 🚫 No auto-execute
 
-Golden Raccoon never signs or sends transactions on behalf of a user. Every
+Cryptara never signs or sends transactions on behalf of a user. Every
 blockchain action requires explicit user approval through their connected
 wallet. Auto-execute is disabled at every level — code, policy, and deployment.
 

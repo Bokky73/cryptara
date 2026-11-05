@@ -13,7 +13,7 @@ import { assertExternalFetchAllowed, isPrivateOrLocalHost } from "@/server/secur
 import { PACKAGE_PROVENANCE_LIMITS } from "./limits";
 import type { TagMatch } from "./schema";
 
-const USER_AGENT = "golden-raccoon-package-provenance (research tool, read-only, no auth)";
+const USER_AGENT = "cryptara-package-provenance (research tool, read-only, no auth)";
 
 export function parseGithubOwnerRepo(declaredRepository: string | null): { owner: string; repo: string } | null {
   if (!declaredRepository) return null;

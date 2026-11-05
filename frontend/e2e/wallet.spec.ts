@@ -3,7 +3,7 @@ import { test, expect } from "./fixtures/test";
 test.describe("Wallet connection", () => {
   test("loads landing page with branding", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Golden Raccoon" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Cryptara" })).toBeVisible();
   });
 
   test("shows connect wallet button on dashboard", async ({ page }) => {

@@ -10,7 +10,7 @@ import { ThemeProvider } from "@/theme/ThemeProvider";
 import { THEME_STORAGE_KEY } from "@/theme/useTheme";
 
 export const metadata: Metadata = {
-  title: "Golden Raccoon | AI Crypto Guardian",
+  title: "Cryptara | AI Crypto Guardian",
   description: "Multi-agent crypto portfolio intelligence and user-authorized execution for GOAT Network.",
   icons: {
     icon: "/brand/logo.png",

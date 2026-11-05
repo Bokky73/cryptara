@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-/// @title GoldRaccoonTimelock
+/// @title CryptaraTimelock
 /// @notice Timelock controller for privileged policy contract changes.
 ///         Put contract upgrades and privileged parameter changes behind multi-party
 ///         authorization and a mandatory delay, with a published, verifiable pending-change queue.
-contract GoldRaccoonTimelock {
+contract CryptaraTimelock {
     struct Proposal {
         bytes32 id;
         address proposer;
@@ -130,7 +130,7 @@ contract GoldRaccoonTimelock {
         if (delaySecs < minDelay || delaySecs > maxDelay) revert InvalidDelay();
 
         bytes32 payloadHash = keccak256(payload);
-        bytes32 id = keccak256(abi.encodePacked("GOLDEN_RACCOON_TIMELOCK_V1", msg.sender, target, selector, payload, delaySecs, proposalCount));
+        bytes32 id = keccak256(abi.encodePacked("CRYPTARA_TIMELOCK_V1", msg.sender, target, selector, payload, delaySecs, proposalCount));
 
         if (proposals[id].createdAt != 0) revert ProposalAlreadyExecuted();
 

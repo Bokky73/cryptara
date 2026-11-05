@@ -1,6 +1,6 @@
 # Alert delivery adapters
 
-Golden Raccoon delivers triggered and recovered alerts through four channels:
+Cryptara delivers triggered and recovered alerts through four channels:
 
 | Channel | Behavior |
 | --- | --- |
