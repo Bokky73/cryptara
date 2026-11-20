@@ -31,8 +31,10 @@ soroban/target/
 # env and secrets
 .env
 .env.*
+!.env.example
 frontend/.env
 frontend/.env.*
+!frontend/.env.example
 backend/.env
 backend/.env.*
 backend/contracts/.env
