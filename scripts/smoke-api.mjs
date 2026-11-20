@@ -124,3 +124,42 @@ for (const check of checks) {
     console.log("Smoke test running in dev mode, expecting seeded environment.");
   }
 }
+
+// Security header assertions — verified on both the HTML root and the health API route.
+const REQUIRED_SECURITY_HEADERS = [
+  { key: "x-content-type-options", expected: "nosniff" },
+  { key: "x-frame-options", expected: "DENY" },
+  { key: "referrer-policy", expected: "strict-origin-when-cross-origin" },
+  { key: "strict-transport-security", startsWith: "max-age=" },
+  { key: "content-security-policy", contains: "default-src" },
+];
+
+const SECURITY_HEADER_PATHS = ["/", "/api/health"];
+
+for (const path of SECURITY_HEADER_PATHS) {
+  const res = await fetch(`${baseUrl}${path}`, { method: "GET" });
+
+  for (const rule of REQUIRED_SECURITY_HEADERS) {
+    const value = res.headers.get(rule.key) ?? "";
+
+    if (rule.expected !== undefined && value.toLowerCase() !== rule.expected.toLowerCase()) {
+      throw new Error(
+        `security-headers [${path}]: ${rule.key} expected "${rule.expected}", got "${value}"`
+      );
+    }
+
+    if (rule.startsWith !== undefined && !value.startsWith(rule.startsWith)) {
+      throw new Error(
+        `security-headers [${path}]: ${rule.key} expected to start with "${rule.startsWith}", got "${value}"`
+      );
+    }
+
+    if (rule.contains !== undefined && !value.includes(rule.contains)) {
+      throw new Error(
+        `security-headers [${path}]: ${rule.key} expected to contain "${rule.contains}", got "${value}"`
+      );
+    }
+  }
+
+  console.log(`smoke-api: security headers OK [${path}]`);
+}
