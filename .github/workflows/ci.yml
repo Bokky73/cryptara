@@ -53,6 +53,25 @@ jobs:
       - name: Run quality gate
         run: npm run quality:gate
 
+  shellcheck:
+    name: Shell script lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Shellcheck scripts/*.sh
+        run: shellcheck scripts/build-evm.sh scripts/build-soroban.sh scripts/deploy-policy-evm.sh scripts/deploy-policy-soroban.sh
+
+      - name: Shellcheck soroban/scripts/*.sh
+        run: shellcheck soroban/scripts/deploy-testnet.sh
+
+      - name: Bash syntax check
+        run: bash -n scripts/build-evm.sh scripts/build-soroban.sh scripts/deploy-policy-evm.sh scripts/deploy-policy-soroban.sh soroban/scripts/deploy-testnet.sh
+
   evm-contracts:
     name: EVM CryptaraVault
     runs-on: ubuntu-latest
@@ -78,6 +97,13 @@ jobs:
 
       - name: Test CryptaraVault
         run: npm test
+
+      - name: Dry-run EVM policy deployment
+        run: |
+          bash scripts/deploy-policy-evm.sh --dry-run base-sepolia release-manifests/latest.json 2>&1 || true
+        working-directory: ${{ github.workspace }}
+        env:
+          PRIVATE_KEY: "0x0000000000000000000000000000000000000000000000000000000000000001"
 
   soroban:
     name: Soroban workspace
@@ -121,6 +147,12 @@ jobs:
 
       - name: Reproducible WASM build
         run: stellar contract build --manifest-path soroban/Cargo.toml
+
+      - name: Dry-run Soroban policy deployment
+        run: |
+          bash scripts/deploy-policy-soroban.sh --dry-run testnet release-manifests/latest.json 2>&1 || true
+        env:
+          SOROBAN_SECRET_KEY: "SAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
   api-smoke:
     name: API smoke
