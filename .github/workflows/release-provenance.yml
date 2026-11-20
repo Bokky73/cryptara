@@ -1,0 +1,187 @@
+name: Release Provenance
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+env:
+  NODE_VERSION: "22"
+  STELLAR_CLI_VERSION: "26.1.0"
+
+jobs:
+  release-provenance:
+    name: Build, attest, and verify contract artifact provenance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/contracts/package-lock.json
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@1.93.0
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: soroban -> target
+          cache-targets: false
+          cache-on-failure: true
+
+      - name: Cache Stellar CLI
+        id: cache-stellar-cli
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/stellar
+          key: stellar-cli-${{ runner.os }}-${{ env.STELLAR_CLI_VERSION }}
+
+      - name: Install Stellar CLI
+        if: steps.cache-stellar-cli.outputs.cache-hit != 'true'
+        run: cargo install --locked stellar-cli --version ${{ env.STELLAR_CLI_VERSION }}
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install EVM contract dependencies
+        run: npm ci
+        working-directory: backend/contracts
+
+      # ── Build pass 1 ───────────────────────────────────────────────────────
+      - name: Build EVM contracts (pass 1)
+        run: bash scripts/build-evm.sh
+
+      - name: Build Soroban WASMs (pass 1)
+        run: bash scripts/build-soroban.sh
+
+      - name: Capture pass-1 hashes
+        id: pass1
+        run: |
+          set -euo pipefail
+          node_hash() {
+            node -e '
+              const fs=require("fs"),crypto=require("crypto");
+              const art=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+              const hex=String(art.bytecode||"").replace(/^0x/,"");
+              process.stdout.write(crypto.createHash("sha256").update(Buffer.from(hex,"hex")).digest("hex"));
+            ' "$1"
+          }
+          P1_POLICY="$(node_hash backend/contracts/artifacts/contracts/CryptaraPolicy.sol/CryptaraPolicy.json)"
+          P1_VAULT="$(node_hash  backend/contracts/artifacts/contracts/CryptaraVault.sol/CryptaraVault.json)"
+          P1_AUDIT="$(node_hash  backend/contracts/artifacts/contracts/CryptaraAudit.sol/CryptaraAudit.json)"
+          P1_WASM_POLICY="$(sha256sum soroban/target/wasm32v1-none/release/cryptara_policy.wasm | awk '{print $1}')"
+          P1_WASM_VAULT="$(sha256sum  soroban/target/wasm32v1-none/release/cryptara_vault.wasm  | awk '{print $1}')"
+          echo "policy=$P1_POLICY"           >> "$GITHUB_OUTPUT"
+          echo "vault=$P1_VAULT"             >> "$GITHUB_OUTPUT"
+          echo "audit=$P1_AUDIT"             >> "$GITHUB_OUTPUT"
+          echo "wasm_policy=$P1_WASM_POLICY" >> "$GITHUB_OUTPUT"
+          echo "wasm_vault=$P1_WASM_VAULT"   >> "$GITHUB_OUTPUT"
+
+      # ── Build pass 2 (determinism check) ──────────────────────────────────
+      - name: Clean artifacts for pass 2
+        run: |
+          set -euo pipefail
+          (cd backend/contracts && npx --no-install hardhat clean)
+          rm -rf soroban/target/wasm32v1-none/release
+
+      - name: Build EVM contracts (pass 2)
+        run: bash scripts/build-evm.sh
+
+      - name: Build Soroban WASMs (pass 2)
+        run: bash scripts/build-soroban.sh
+
+      - name: Verify double-build determinism
+        run: |
+          set -euo pipefail
+          node_hash() {
+            node -e '
+              const fs=require("fs"),crypto=require("crypto");
+              const art=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+              const hex=String(art.bytecode||"").replace(/^0x/,"");
+              process.stdout.write(crypto.createHash("sha256").update(Buffer.from(hex,"hex")).digest("hex"));
+            ' "$1"
+          }
+          check() {
+            local name="$1" pass1="$2" pass2="$3"
+            echo "$name: pass1=$pass1 pass2=$pass2"
+            if [ "$pass1" != "$pass2" ]; then
+              echo "ERROR: non-deterministic build detected for $name" >&2
+              exit 1
+            fi
+          }
+          check "CryptaraPolicy (EVM)" "${{ steps.pass1.outputs.policy }}" \
+            "$(node_hash backend/contracts/artifacts/contracts/CryptaraPolicy.sol/CryptaraPolicy.json)"
+          check "CryptaraVault (EVM)" "${{ steps.pass1.outputs.vault }}" \
+            "$(node_hash backend/contracts/artifacts/contracts/CryptaraVault.sol/CryptaraVault.json)"
+          check "CryptaraAudit (EVM)" "${{ steps.pass1.outputs.audit }}" \
+            "$(node_hash backend/contracts/artifacts/contracts/CryptaraAudit.sol/CryptaraAudit.json)"
+          check "cryptara_policy.wasm (Soroban)" "${{ steps.pass1.outputs.wasm_policy }}" \
+            "$(sha256sum soroban/target/wasm32v1-none/release/cryptara_policy.wasm | awk '{print $1}')"
+          check "cryptara_vault.wasm (Soroban)" "${{ steps.pass1.outputs.wasm_vault }}" \
+            "$(sha256sum soroban/target/wasm32v1-none/release/cryptara_vault.wasm | awk '{print $1}')"
+          echo "Double-build determinism: PASSED"
+
+      # ── Freeze and verify provenance manifest ─────────────────────────────
+      - name: Freeze release provenance manifest
+        run: npm run provenance:freeze -- --write --release
+
+      - name: Verify provenance manifest (artifact hashes)
+        run: npm run provenance:verify:artifacts -- --strict release-manifests/latest.json
+
+      - name: Verify build-level provenance (supply-chain predicates)
+        run: npm run provenance:verify
+
+      # ── GitHub Artifact Attestation ───────────────────────────────────────
+      - name: Attest EVM artifacts
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            backend/contracts/artifacts/contracts/CryptaraPolicy.sol/CryptaraPolicy.json
+            backend/contracts/artifacts/contracts/CryptaraVault.sol/CryptaraVault.json
+            backend/contracts/artifacts/contracts/CryptaraAudit.sol/CryptaraAudit.json
+
+      - name: Attest Soroban WASMs
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            soroban/target/wasm32v1-none/release/cryptara_policy.wasm
+            soroban/target/wasm32v1-none/release/cryptara_vault.wasm
+            soroban/target/wasm32v1-none/release/cryptara_risk_registry.wasm
+            soroban/target/wasm32v1-none/release/cryptara_audit_registry.wasm
+
+      - name: Attest provenance manifests
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: release-manifests/latest.json
+
+      # ── Upload manifests as release artifacts ─────────────────────────────
+      - name: Upload provenance manifests
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-provenance-${{ github.ref_name }}
+          path: release-manifests/
+          if-no-files-found: error
+
+      - name: Attach manifests to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            release-manifests/latest.json \
+            --clobber
