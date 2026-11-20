@@ -1,12 +1,54 @@
-# Logging and Observability
+# Logging & Observability Specification
 
-This project uses structured server-side logging with correlation ids.
+Cryptara enforces structured JSON logging and W3C distributed trace correlation across all server-side routes, background workers, and evaluation harnesses.
 
-- Logs are emitted as JSON records with fields: `ts`, `level`, `correlationId`, `module`, `message`, and `fields`.
-- A per-request correlation id is provided by `AsyncLocalStorage` and attached to records.
-- Sensitive values such as wallet addresses, tokens, and URL query strings are redacted before emission.
+## 1. Structured JSON Log Schema
 
-Developer notes:
-- Use the logger at `frontend/src/server/observability/logger/logger.ts`.
-- To ensure no raw `console` calls are reintroduced in server code run: `npm run logging-check` from the `frontend` folder.
-- Configure verbosity with `LOG_LEVEL` in your environment (default `info` in production).
+All logs must adhere to the standard schema:
+
+```typescript
+interface LogRecord {
+  ts: string;               // ISO 8601 UTC timestamp
+  level: "debug" | "info" | "warn" | "error";
+  service: string;          // e.g. "cryptara-frontend"
+  event: string;            // Dot-delimited event name (e.g. "scan.token.start")
+  requestId: string;        // Request UUID or correlation identifier
+  traceId?: string;         // W3C trace ID from traceparent
+  spanId?: string;          // W3C span ID
+  chainFamily?: "evm" | "stellar";
+  network?: string;         // e.g. "mainnet", "testnet"
+  durationMs?: number;      // Execution latency in milliseconds
+  errorCode?: string;       // Normalized error code on failure
+  fields?: Record<string, unknown>;
+}
+```
+
+## 2. Redaction & Privacy Guarantees
+
+In compliance with `docs/OPERATOR_PRIVACY_PROCEDURES.md`:
+- **Private keys, seeds, and bearer tokens** must NEVER be logged.
+- **x402 Authorization headers** and payment tokens are scrubbed.
+- **Sensitive query parameters** (API keys, session secrets) are redacted in URLs before logging.
+- `frontend/src/server/observability/redaction.ts` automatically strips forbidden fields.
+
+## 3. Usage Examples
+
+### Route Handler:
+```typescript
+import { getLogger } from "@/server/observability/logging";
+
+const logger = getLogger("api.scan");
+logger.info("Token scan requested", {
+  event: "scan.start",
+  chainFamily: "evm",
+  network: "mainnet",
+  tokenAddress: "0x...",
+});
+```
+
+## 4. Verification Gate
+
+To prevent forbidden `console.log` statements in server code, run:
+```bash
+npm --prefix frontend run logging-check
+```
