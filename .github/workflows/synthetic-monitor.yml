@@ -1,0 +1,105 @@
+name: Synthetic Monitor
+
+on:
+  schedule:
+    # Every 15 minutes. Override MONITOR_BASE_URL repo variable to activate on forks.
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Override MONITOR_BASE_URL for this run'
+        required: false
+
+concurrency:
+  group: synthetic-monitor
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+  # Number of consecutive failures before a webhook alert fires
+  ALERT_CONSECUTIVE_THRESHOLD: "2"
+
+jobs:
+  synthetic-monitor:
+    name: Synthetic production monitor
+    runs-on: ubuntu-latest
+    # No-op cleanly on forks where MONITOR_BASE_URL is not configured
+    if: ${{ vars.MONITOR_BASE_URL != '' || github.event.inputs.base_url != '' }}
+    env:
+      MONITOR_BASE_URL: ${{ github.event.inputs.base_url || vars.MONITOR_BASE_URL }}
+      SMOKE_BASE_URL: ${{ github.event.inputs.base_url || vars.MONITOR_BASE_URL }}
+      STELLAR_TESTNET_RPC_URL: ${{ vars.STELLAR_TESTNET_RPC_URL || '' }}
+      STELLAR_TESTNET_RPC_FALLBACK_URLS: ${{ vars.STELLAR_TESTNET_RPC_FALLBACK_URLS || '' }}
+      STELLAR_PUBNET_RPC_URL: ${{ vars.STELLAR_PUBNET_RPC_URL || '' }}
+      STELLAR_PUBNET_RPC_FALLBACK_URLS: ${{ vars.STELLAR_PUBNET_RPC_FALLBACK_URLS || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Run production health monitor
+        id: health
+        run: node scripts/monitor-production.mjs
+
+      - name: Run Stellar RPC failover check
+        id: stellar
+        run: node scripts/check-stellar-rpc.mjs
+
+      - name: Emit alert on failure
+        if: failure()
+        env:
+          ALERT_WEBHOOK_URL: ${{ secrets.MONITOR_ALERT_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+
+          HEALTH_OUTCOME="${{ steps.health.outcome }}"
+          STELLAR_OUTCOME="${{ steps.stellar.outcome }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          FAILED_CHECKS=""
+          if [ "$HEALTH_OUTCOME" = "failure" ]; then
+            FAILED_CHECKS="production-health"
+          fi
+          if [ "$STELLAR_OUTCOME" = "failure" ]; then
+            FAILED_CHECKS="${FAILED_CHECKS:+$FAILED_CHECKS, }stellar-rpc"
+          fi
+
+          PAYLOAD=$(jq -n \
+            --arg text "🚨 *Cryptara synthetic monitor failure*" \
+            --arg checks "$FAILED_CHECKS" \
+            --arg env "$MONITOR_BASE_URL" \
+            --arg run_url "$RUN_URL" \
+            --arg runbook "https://github.com/${{ github.repository }}/blob/main/docs/RUNBOOKS.md" \
+            --arg slo "https://github.com/${{ github.repository }}/blob/main/docs/SLO_ERROR_BUDGETS.md" \
+            '{
+              text: $text,
+              attachments: [{
+                color: "danger",
+                fields: [
+                  { title: "Failed checks", value: $checks, short: true },
+                  { title: "Environment", value: $env, short: true },
+                  { title: "CI run", value: $run_url, short: false },
+                  { title: "Runbook", value: $runbook, short: false },
+                  { title: "SLO / Error Budgets", value: $slo, short: false }
+                ]
+              }]
+            }')
+
+          if [ -z "${ALERT_WEBHOOK_URL:-}" ]; then
+            echo "MONITOR_ALERT_WEBHOOK_URL is not set; printing alert payload to log instead."
+            echo "$PAYLOAD"
+          else
+            curl -fsSL -X POST \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" \
+              "$ALERT_WEBHOOK_URL"
+          fi
