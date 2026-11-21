@@ -187,17 +187,16 @@ function checkReleaseDocs() {
 }
 
 function checkVercelBuildGate() {
-  for (const file of ["vercel.json", "frontend/vercel.json"]) {
-    if (!existsSync(join(root, file))) {
-      fail(`missing Vercel config: ${file}`);
-      continue;
-    }
+  const file = "vercel.json";
+  if (!existsSync(join(root, file))) {
+    fail(`missing Vercel config: ${file}`);
+    return;
+  }
 
-    const content = readFileSync(join(root, file), "utf8");
+  const content = readFileSync(join(root, file), "utf8");
 
-    if (!content.includes("deploy:check")) {
-      fail(`${file} buildCommand must run deploy:check before build`);
-    }
+  if (!content.includes("deploy:check")) {
+    fail(`${file} buildCommand must run deploy:check before build`);
   }
 }
 

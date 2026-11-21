@@ -5,6 +5,9 @@ on:
     - cron: '0 2 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   drill:
     runs-on: ubuntu-latest
@@ -27,8 +30,8 @@ jobs:
       PGHOST: localhost
       PGPORT: 5432
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
         with:
           node-version: 22
       - name: Create databases
@@ -38,19 +41,16 @@ jobs:
       - name: Seed source database
         run: |
           psql -d source -f frontend/src/server/storage/schema.sql
-          # Seed data - adjust to actual schema
-          psql -d source -c "INSERT INTO wallets (id) VALUES (1) ON CONFLICT DO NOTHING;"
-          psql -d source -c "INSERT INTO agent_runs (id) VALUES (1) ON CONFLICT DO NOTHING;"
-          psql -d source -c "INSERT INTO agent_results (id) VALUES (1) ON CONFLICT DO NOTHING;"
-          psql -d source -c "INSERT INTO recommendations (id) VALUES (1) ON CONFLICT DO NOTHING;"
-          psql -d source -c "INSERT INTO user_rules (id) VALUES (1) ON CONFLICT DO NOTHING;"
-          psql -d source -c "INSERT INTO approvals (id) VALUES (1) ON CONFLICT DO NOTHING;"
-          psql -d source -c "INSERT INTO transactions (id) VALUES (1) ON CONFLICT DO NOTHING;"
-          psql -d source -c "INSERT INTO x402_payment_receipts (id) VALUES (1) ON CONFLICT DO NOTHING;"
-          psql -d source -c "INSERT INTO token_identities (id) VALUES (1) ON CONFLICT DO NOTHING;"
-          psql -d source -c "INSERT INTO source_snapshots (id) VALUES (1) ON CONFLICT DO NOTHING;"
+          psql -d source -f scripts/backup/seed-fixture.sql
       - name: Run backup drill
         env:
           SOURCE_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/source
           TARGET_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/target
         run: node scripts/backup/drill.mjs --source-url "$SOURCE_DATABASE_URL" --target-url "$TARGET_DATABASE_URL"
+      - name: Upload drill summary report
+        if: always()
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: backup-drill-summary
+          path: backups/drill-summary.json
+          if-no-files-found: warn
