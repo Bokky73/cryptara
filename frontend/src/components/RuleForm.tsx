@@ -283,6 +283,7 @@ export function RuleForm({
           <div role="radiogroup" aria-labelledby={`${formId}-preset-heading`} className="mt-4 grid gap-3 sm:grid-cols-3">
             {presets.map((preset) => {
               const selected = rules.profileId === preset.id;
+              const limits = preset.limits;
 
               return (
                 <button
@@ -291,12 +292,21 @@ export function RuleForm({
                   role="radio"
                   aria-checked={selected}
                   onClick={() => applyPreset(preset)}
-                  className={`min-h-11 rounded-lg border p-3 text-left transition ${
-                    selected ? "border-[#d9a441] bg-[#d9a441]/10" : "border-white/10 hover:border-white/30"
+                  className={`min-h-11 rounded-xl border p-4 text-left transition ${
+                    selected ? "border-[#d9a441] bg-[#d9a441]/10 ring-1 ring-[#d9a441]/40" : "border-white/10 bg-white/4 hover:border-white/30"
                   }`}
                 >
-                  <span className="block text-sm font-semibold">{preset.label}</span>
-                  <span className="mt-1 block text-xs text-white/56">{preset.summary}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="block text-sm font-semibold text-white">{preset.label}</span>
+                    {selected && <span className="rounded-full bg-[#d9a441]/20 px-2 py-0.5 text-[10px] font-bold text-[#f2c86d]">Active</span>}
+                  </div>
+                  <span className="mt-1 block text-xs text-white/60">{preset.summary}</span>
+                  <div className="mt-3 border-t border-white/8 pt-2 text-[11px] text-white/50 space-y-0.5">
+                    <div>• Buy Risk: &le; {limits.maxBuyRisk}/100</div>
+                    <div>• Max trade: {limits.maxTradePercent}% (${limits.maxTradeValueUsd})</div>
+                    <div>• Max slippage: {(limits.maxSlippageBps / 100).toFixed(2)}% ({limits.maxSlippageBps} bps)</div>
+                    <div>• Stable reserve: &ge; {limits.minStableReservePercent}%</div>
+                  </div>
                 </button>
               );
             })}
@@ -339,15 +349,25 @@ export function RuleForm({
                       onChange={(event) =>
                         update(field.key, Number(event.target.value) as UserRule[typeof field.key])
                       }
-                      className="h-11 w-full rounded-md border border-white/15 bg-black/30 px-3 text-sm"
+                      className="h-11 w-full rounded-md border border-white/15 bg-black/30 px-3 text-sm text-white outline-none focus:border-[#d9a441]"
                     />
-                    <span aria-hidden className="w-10 text-right text-sm text-white/56">
-                      {field.unit}
+                    <span aria-hidden className="w-16 text-right text-xs text-white/60">
+                      {field.unit === "bps" ? `${Number(rules[field.key] ?? 0)} bps (${(Number(rules[field.key] ?? 0) / 100).toFixed(2)}%)` : field.unit}
                     </span>
                   </div>
                   <p id={hintId} className="mt-1 text-xs text-white/48">
                     {field.hint}
                   </p>
+                  {field.key === "maxSlippageBps" && Number(rules[field.key] ?? 0) > 300 && (
+                    <p className="mt-1 text-xs text-amber-300">
+                      ⚠️ High slippage warning: &gt; 3.00% (300 bps) increases vulnerability to sandwich attacks.
+                    </p>
+                  )}
+                  {field.key === "maxBuyRisk" && Number(rules[field.key] ?? 0) > 80 && (
+                    <p className="mt-1 text-xs text-amber-300">
+                      ⚠️ Elevated risk warning: scores &gt; 80 allow highly speculative or unverified contracts.
+                    </p>
+                  )}
                   {issue ? (
                     <p id={`${inputId}-error`} className="mt-1 text-xs text-red-300">
                       {issue}
@@ -356,6 +376,32 @@ export function RuleForm({
                 </div>
               );
             })}
+          </div>
+        </section>
+
+        <section aria-label="Plain-English Strategy Summary" className="rounded-2xl border border-[#d9a441]/30 bg-[#d9a441]/8 p-5">
+          <div className="flex items-center gap-2 text-sm font-semibold text-[#f2c86d]">
+            <span>Plain-English Rule Summary</span>
+          </div>
+          <div className="mt-3 grid gap-2 text-xs text-white/80 leading-relaxed">
+            <p>
+              • <strong>Buy Risk Ceiling:</strong> Only tokens with Buy Risk score &le; <strong>{rules.maxBuyRisk}/100</strong> are eligible for recommendation.
+            </p>
+            <p>
+              • <strong>Trade Sizing:</strong> Single trades capped at <strong>{rules.maxTradePercent}%</strong> of portfolio value (max <strong>${rules.maxTradeValueUsd?.toLocaleString()}</strong>), with a 24h rolling limit of <strong>${rules.maxDailyValueUsd?.toLocaleString()}</strong>.
+            </p>
+            <p>
+              • <strong>Execution &amp; Slippage:</strong> Slippage tolerance is set to <strong>{((rules.maxSlippageBps ?? 100) / 100).toFixed(2)}%</strong> ({rules.maxSlippageBps} bps) across <strong>{rules.allowedChains.length}</strong> permitted chain{rules.allowedChains.length === 1 ? "" : "s"}.
+            </p>
+            <p>
+              • <strong>Portfolio Safeguards:</strong> At least <strong>{rules.minStableReservePercent}%</strong> must remain in stablecoins; meme asset exposure cannot exceed <strong>{rules.maxMemeExposurePercent}%</strong>.
+            </p>
+            <p>
+              • <strong>Liquidity Minimum:</strong> Pools must hold at least <strong>${rules.minLiquidityUsd?.toLocaleString()}</strong> in verified pool liquidity.
+            </p>
+            <p className="text-[11px] text-[#f2c86d]/80 pt-1 border-t border-white/8">
+              • <strong>Non-Custodial Invariant:</strong> Every transaction proposal requires explicit wallet approval; server-side signing is disabled.
+            </p>
           </div>
         </section>
 
