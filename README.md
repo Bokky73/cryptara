@@ -17,7 +17,7 @@ Cryptara is an open-source, approval-only risk-intelligence platform that
 analyses blockchain tokens across **EVM** and **Stellar** networks. Enter a
 contract address, asset identifier, or DexScreener link and receive a structured
 AI Risk Report with scores, evidence, and suggested actions — **no financial
-advice, just data-driven signals.**
+advice, just data-driven signals.** See our [Risk Scoring Methodology](docs/RISK_SCORING_METHODOLOGY.md) for full calculation details.
 
 👉 **[Live demo](https://cryptara.vercel.app)** (testnet) — try it without
 setting up a local environment.
