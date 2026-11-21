@@ -181,12 +181,20 @@ function getPaymentChainId(paymentRequirement: PaymentRequired | null) {
   return Number.isInteger(chainId) ? chainId : null;
 }
 
+const SAMPLE_TOKENS = [
+  { label: "USDC (Ethereum)", chain: "ethereum", query: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", tag: "EVM Bluechip" },
+  { label: "AERO (Base)", chain: "base", query: "0x940181a94A35A4569E4529A3CDfB74e38FD98631", tag: "Base DEX" },
+  { label: "XLM (Stellar)", chain: "stellar-testnet", query: "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN", tag: "Stellar Classic" },
+  { label: "Risky MEME (Demo)", chain: "base", query: "MEME", tag: "High Risk" },
+];
+
 export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: string }) {
   const queryErrorId = useId();
   const { address, chainId, isConnected } = useAccount();
   const { data: walletClient } = useWalletClient();
   const publicClient = usePublicClient();
   const { switchChainAsync } = useSwitchChain();
+  const [showOnboarding, setShowOnboarding] = useState(true);
   const [query, setQuery] = useState(initialQuery || "MEME");
   const [chain, setChain] = useState("base");
   const [walletAddress, setWalletAddress] = useState("");
@@ -394,6 +402,26 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
     <div className="space-y-5">
       <LiveRegion message={statusMessage} politeness={scanError ? "assertive" : "polite"} />
       <section className="glass-panel rounded-lg p-5">
+          {showOnboarding ? (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#d9a441]/25 bg-[#d9a441]/8 p-3 text-xs text-white/80">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold text-[#f2c86d]">How Cryptara works:</span>
+                <span>1. No wallet needed to scan</span>
+                <span className="text-white/30">•</span>
+                <span>2. 5 deterministic evaluation agents</span>
+                <span className="text-white/30">•</span>
+                <span>3. Approval-only action plan</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowOnboarding(false)}
+                className="text-[11px] text-white/50 hover:text-white"
+                aria-label="Dismiss guide"
+              >
+                Dismiss
+              </button>
+            </div>
+          ) : null}
           <h1 className="text-3xl font-semibold tracking-tight">Scan token</h1>
           <div className="mt-5 grid gap-3 lg:grid-cols-[9rem_1fr_auto_auto]">
             <select
@@ -439,6 +467,26 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
             placeholder="Optional wallet address for portfolio exposure"
             className="mt-3 h-12 w-full rounded-full input-surface h-12 rounded-full border px-5 text-sm outline-none transition"
           />
+
+          {/* Quick-try sample token chips */}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-white/46">Try an example:</span>
+            {SAMPLE_TOKENS.map((sample) => (
+              <button
+                key={sample.label}
+                type="button"
+                onClick={() => {
+                  setChain(sample.chain);
+                  setQuery(sample.query);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/72 transition hover:border-[#d9a441]/40 hover:bg-white/10 hover:text-white"
+              >
+                <span>{sample.label}</span>
+                <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] text-[#f2c86d]">{sample.tag}</span>
+              </button>
+            ))}
+          </div>
+
           <div className="mt-3 text-xs text-white/42">Free Trial is free. Detailed Scan costs {paymentTerms?.priceUsd ?? "$0.99"}.</div>
       </section>
 
