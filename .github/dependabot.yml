@@ -1,5 +1,9 @@
 version: 2
 updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
@@ -7,18 +11,32 @@ updates:
     directory: /
     schedule: { interval: weekly }
     groups:
-      root-runtime: { dependency-type: production }
-      root-tooling: { dependency-type: development }
-  - package-ecosystem: npm
-    directory: /frontend
-    schedule: { interval: weekly }
+      root-runtime:
+        patterns: ["*"]
+
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
     groups:
-      frontend-runtime: { dependency-type: production }
-      frontend-tooling: { dependency-type: development }
-  - package-ecosystem: npm
-    directory: /backend/contracts
-    schedule: { interval: weekly }
+      frontend-runtime:
+        patterns: ["*"]
+        exclude-patterns: ["@types/*", "eslint*", "prettier*"]
+      frontend-tooling:
+        patterns: ["@types/*", "eslint*", "prettier*", "playwright*"]
+
+  - package-ecosystem: "npm"
+    directory: "/backend/contracts"
+    schedule:
+      interval: "weekly"
     groups:
+      evm-tooling:
+        patterns: ["*"]
+
+  - package-ecosystem: "npm"
+    directory: "/packages/read-client"
+    schedule:
+      interval: "weekly"
       evm-runtime: { dependency-type: production }
       evm-tooling: { dependency-type: development }
   - package-ecosystem: npm
@@ -30,4 +48,18 @@ updates:
     directory: /soroban
     schedule: { interval: weekly }
     groups:
-      soroban-locked: { patterns: ["*"] }
+      client-tooling:
+        patterns: ["*"]
+
+  - package-ecosystem: "cargo"
+    directory: "/soroban"
+    schedule:
+      interval: "weekly"
+    groups:
+      soroban-locked:
+        patterns: ["soroban-sdk"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
