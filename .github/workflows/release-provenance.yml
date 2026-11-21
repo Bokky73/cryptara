@@ -46,7 +46,7 @@ jobs:
 
       - name: Cache Stellar CLI
         id: cache-stellar-cli
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cargo/bin/stellar
           key: stellar-cli-${{ runner.os }}-${{ env.STELLAR_CLI_VERSION }}
