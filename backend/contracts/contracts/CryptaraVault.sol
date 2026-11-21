@@ -19,6 +19,7 @@ contract CryptaraVault is ReentrancyGuard {
 
     event Deposited(address indexed user, address indexed token, uint256 amount);
     event Withdrawn(address indexed user, address indexed token, uint256 amount, address indexed recipient);
+    event UserWithdrawn(address indexed user, address indexed token, uint256 amount);
 
     error NotAgent();
     error ZeroAmount();
@@ -55,6 +56,18 @@ contract CryptaraVault is ReentrancyGuard {
 
         balances[msg.sender][token] += received;
         emit Deposited(msg.sender, token, received);
+    }
+
+    /// @notice Trustless escape hatch: withdraw your own balance directly.
+    /// @dev Independent of agent liveness and policy pause state.
+    function userWithdraw(address token, uint256 amount) external nonReentrant {
+        if (amount == 0) revert ZeroAmount();
+        if (balances[msg.sender][token] < amount) revert InsufficientBalance();
+
+        balances[msg.sender][token] -= amount;
+
+        IERC20(token).safeTransfer(msg.sender, amount);
+        emit UserWithdrawn(msg.sender, token, amount);
     }
 
     function withdraw(

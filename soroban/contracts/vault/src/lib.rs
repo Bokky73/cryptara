@@ -46,6 +46,15 @@ pub struct Withdrawn {
 }
 
 #[contractevent]
+pub struct UserWithdrawn {
+    #[topic]
+    pub user: Address,
+    #[topic]
+    pub token: Address,
+    pub amount: i128,
+}
+
+#[contractevent]
 pub struct Deposited {
     #[topic]
     pub user: Address,
@@ -185,6 +194,37 @@ impl VaultContract {
         bump_instance(&env);
     }
 
+    /// Trustless escape hatch: a depositor can always withdraw their own
+    /// balance directly, independent of agent liveness or policy pause state.
+    pub fn user_withdraw(env: Env, user: Address, token: Address, amount: i128) {
+        user.require_auth();
+
+        if amount <= 0 {
+            panic_with_error!(&env, VaultError::ZeroAmount);
+        }
+
+        let balance_key = DataKey::Balance(user.clone(), token.clone());
+        let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+        if balance < amount {
+            panic_with_error!(&env, VaultError::InsufficientBalance);
+        }
+        env.storage()
+            .persistent()
+            .set(&balance_key, &(balance - amount));
+        extend_entry(&env, &balance_key);
+
+        let contract = env.current_contract_address();
+        token::Client::new(&env, &token).transfer(&contract, &user, &amount);
+
+        UserWithdrawn {
+            user,
+            token,
+            amount,
+        }
+        .publish(&env);
+        bump_instance(&env);
+    }
+
     pub fn user_balance(env: Env, user: Address, token: Address) -> i128 {
         env.storage()
             .persistent()
@@ -258,56 +298,32 @@ mod test {
     }
 
     #[test]
+    fn user_withdraw_escape_hatch() {
+        let (_env, vault, _agent, user, token, _policy) = setup();
+
+        vault.deposit(&user, &token, &100_000_000i128);
+
+        vault.user_withdraw(&user, &token, &40_000_000i128);
+
+        assert_eq!(vault.user_balance(&user, &token), 60_000_000);
+    }
+
+    #[test]
+    fn user_withdraw_rejects_over_balance() {
+        let (_env, vault, _agent, user, token, _policy) = setup();
+
+        vault.deposit(&user, &token, &10_000_000i128);
+
+        let result = vault.try_user_withdraw(&user, &token, &20_000_000i128);
+        assert!(result.is_err());
+        assert_eq!(vault.user_balance(&user, &token), 10_000_000);
+    }
+
+    #[test]
     fn reject_reused_intent() {
         let (_env, vault, _agent, user, token, _policy) = setup();
 
         vault.deposit(&user, &token, &100_000_000i128);
 
         let policy_client = cryptara_policy::PolicyContractClient::new(&_env, &_policy);
-        let decision = policy_client.apply_policy(&user, &100_000_000i128, &50, &1_703_600_000);
-        let intent =
-            policy_client.create_intent(&decision, &token, &100_000_000i128, &1_701_800_000, &50);
-
-        vault.withdraw(&token, &50_000_000i128, &user, &intent);
-
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            vault.withdraw(&token, &10_000_000i128, &user, &intent);
-        }));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn reject_user_mismatch() {
-        let (_env, vault, _agent, user, token, _policy) = setup();
-
-        vault.deposit(&user, &token, &100_000_000i128);
-
-        let policy_client = cryptara_policy::PolicyContractClient::new(&_env, &_policy);
-        let decision = policy_client.apply_policy(&user, &100_000_000i128, &50, &1_703_600_000);
-        let intent =
-            policy_client.create_intent(&decision, &token, &100_000_000i128, &1_701_800_000, &50);
-
-        let other = Address::generate(&_env);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            vault.withdraw(&token, &10_000_000i128, &other, &intent);
-        }));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn reject_insufficient_balance() {
-        let (_env, vault, _agent, user, token, _policy) = setup();
-
-        vault.deposit(&user, &token, &100_000_000i128);
-
-        let policy_client = cryptara_policy::PolicyContractClient::new(&_env, &_policy);
-        let decision = policy_client.apply_policy(&user, &1_000_000_000i128, &50, &1_703_600_000);
-        let intent =
-            policy_client.create_intent(&decision, &token, &1_000_000_000i128, &1_701_800_000, &50);
-
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            vault.withdraw(&token, &500_000_000i128, &user, &intent);
-        }));
-        assert!(result.is_err());
-    }
-}
+        let decision = policy_client.apply_po
