@@ -48,7 +48,7 @@ jobs:
       - run: npm run sbom:generate
       - name: Prove lockfiles were not rewritten
         run: git diff --exit-code -- package-lock.json frontend/package-lock.json backend/contracts/package-lock.json packages/read-client/package-lock.json soroban/Cargo.lock
-      - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cyclonedx-sboms
           path: artifacts/sbom/*.json
@@ -70,7 +70,7 @@ jobs:
       - run: ./scripts/build-evm.sh
       - run: ./scripts/build-soroban.sh
       - run: npm run provenance:verify
-      - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: contract-build-provenance
           path: artifacts/provenance/*.json
