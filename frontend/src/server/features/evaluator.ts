@@ -233,6 +233,24 @@ export function getFeatureEnvironment(): FeatureEnvironment {
 }
 
 /**
+ * Sanitized snapshot of active flag states for health/ops endpoints. Never
+ * exposes raw env values or identifiers — only the resolved decision shape.
+ */
+export function getActiveFeatureStates(): Array<{
+  key: FeatureFlagKey;
+  enabled: boolean;
+  reason: FeatureDecisionReason;
+}> {
+  const environment = getFeatureEnvironment();
+  const parsed = validateFeatureConfig().parsed;
+  const identifier = createHash("sha256").update("ops-health").digest("hex");
+  return (Object.keys(featureFlagRegistry) as FeatureFlagKey[]).map((key) => {
+    const decision = evaluateFeature(key, { identifier, environment }, parsed);
+    return { key, enabled: decision.enabled, reason: decision.reason };
+  });
+}
+
+/**
  * Route-facing gate. Evaluates the flag against a hashed identifier (never the
  * raw value), records an audit event, and returns the decision. Routes use the
  * returned `enabled` boolean to fail closed with a disabled response.
@@ -253,10 +271,12 @@ export function gateFeature(
   });
   recordFeatureFlagEvaluation({
     key,
-    decision,
+    enabled: decision.enabled,
+    reason: decision.reason,
     environment,
     network: options?.network,
-    correlationId: options?.correlationId ?? `feature_${key}`,
+    correlationId: options?.correlationId,
+    rolloutBucket: decision.rolloutBucket,
   });
   return decision;
 }
