@@ -4,6 +4,12 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
     groups:
       root-runtime:
         patterns: ["*"]
@@ -31,6 +37,16 @@ updates:
     directory: "/packages/read-client"
     schedule:
       interval: "weekly"
+      evm-runtime: { dependency-type: production }
+      evm-tooling: { dependency-type: development }
+  - package-ecosystem: npm
+    directory: /packages/read-client
+    schedule: { interval: weekly }
+    groups:
+      read-client-tooling: { dependency-type: development }
+  - package-ecosystem: cargo
+    directory: /soroban
+    schedule: { interval: weekly }
     groups:
       client-tooling:
         patterns: ["*"]

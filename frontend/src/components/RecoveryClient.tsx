@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, CircleAlert, Loader2, Lock, RotateCcw, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
+import { CheckCircle2, CircleAlert, Download, FileText, Loader2, Lock, RotateCcw, ShieldAlert, ShieldCheck, Trash2, AlertTriangle } from "lucide-react";
 import type { RecoveryChain, RecoveryIncidentMode, RecoveryList, RecoveryNetworkFreshness, RecoveryRequest, RecoveryType } from "@/server/types";
 import { RECOVERY_RULES_VERSION } from "@/server/types";
+import { AuditExportButton } from "@/components/AuditExportButton";
 
 type RecoveryAction = {
   type: RecoveryType;
@@ -145,6 +146,22 @@ function resolveEndpoint(action: RecoveryAction): string {
 export function RecoveryClient({ initialWallet }: { initialWallet?: string }) {
   const [state, setState] = useState<RecoveryState>(() => ({ ...INITIAL_STATE, wallet: initialWallet ?? "" }));
   const [confirmPrompt, setConfirmPrompt] = useState<RecoveryRequest | null>(null);
+  const [showEraseDialog, setShowEraseDialog] = useState(false);
+  const [erasing, setErasing] = useState(false);
+  const [erasureReceipt, setErasureReceipt] = useState<{
+    ok: boolean;
+    deletedAt: string;
+    walletAddress: string;
+    receipt?: {
+      sha256?: string;
+      body?: {
+        receiptId?: string;
+        totalDeleted?: number;
+        totalAnonymized?: number;
+        residueCheckPassed?: boolean;
+      };
+    };
+  } | null>(null);
 
   const setPartial = useCallback((patch: Partial<RecoveryState>) => {
     setState((current) => ({ ...current, ...patch }));
@@ -326,6 +343,35 @@ export function RecoveryClient({ initialWallet }: { initialWallet?: string }) {
     }
   }, [refresh, setPartial, state.adminToken, state.incidentMode, state.wallet]);
 
+  const executeErasure = useCallback(async () => {
+    if (!state.wallet) return;
+    setErasing(true);
+    setPartial({ error: null });
+    try {
+      const isEvm = state.wallet.startsWith("0x");
+      const res = await fetch("/api/wallet-privacy/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          walletAddress: state.wallet,
+          chainFamily: isEvm ? "evm" : "stellar",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPartial({ error: data.error ?? "Wallet data erasure failed." });
+        return;
+      }
+      setErasureReceipt(data);
+      setShowEraseDialog(false);
+      void refresh(state.wallet);
+    } catch (err) {
+      setPartial({ error: err instanceof Error ? err.message : "Erasure request failed." });
+    } finally {
+      setErasing(false);
+    }
+  }, [refresh, setPartial, state.wallet]);
+
   const incidentActive = Boolean(state.incidentMode?.enabled);
   const records = state.list?.requests ?? [];
   const staleCount = state.list?.staleCount ?? records.filter((record) => record.status === "stale").length;
@@ -413,6 +459,12 @@ export function RecoveryClient({ initialWallet }: { initialWallet?: string }) {
         </div>
       </section>
 
+      {/* ZONE 1: EMERGENCY PAUSE & REVERSIBLE CONTROLS */}
+      <div className="flex items-center gap-2 border-b border-white/10 pb-2">
+        <span className="rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30 px-2.5 py-0.5 text-xs font-semibold">Zone 1</span>
+        <h2 className="text-lg font-semibold text-white">Emergency Pause &amp; Allowance Controls (Reversible)</h2>
+      </div>
+
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {RECOVERY_ACTIONS.map((action) => {
           const Icon = action.icon;
@@ -486,6 +538,67 @@ export function RecoveryClient({ initialWallet }: { initialWallet?: string }) {
         </section>
       ) : null}
 
+      {/* ZONE 2: EXPORT MY DATA (SIGNED AUDIT BUNDLE) */}
+      <section className="rounded-2xl border border-white/10 bg-white/6 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-purple-400/20 text-purple-300 border border-purple-400/30 px-2.5 py-0.5 text-xs font-semibold">Zone 2</span>
+              <h2 className="text-lg font-semibold text-white">Export My Data (Signed Audit Bundle)</h2>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-white/60 max-w-2xl">
+              Generate and download a verifiable, cryptographically signed JSON audit bundle. Contains your agent decisions, approval transitions, and transaction lifecycle while redacting sensitive private material.
+            </p>
+          </div>
+          <div>
+            <AuditExportButton />
+          </div>
+        </div>
+      </section>
+
+      {/* ZONE 3: REVOKE & ERASE WALLET DATA (DESTRUCTIVE) */}
+      <section className="rounded-2xl border border-red-500/30 bg-red-950/20 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-red-400/20 text-red-300 border border-red-400/30 px-2.5 py-0.5 text-xs font-semibold">Zone 3</span>
+              <h2 className="text-lg font-semibold text-red-200">Revoke &amp; Erase Wallet Data (Destructive)</h2>
+            </div>
+            <p className="mt-2 text-sm leading-6 text-white/60 max-w-2xl">
+              Permanently delete all indexed scans, cached watchlist entries, strategy preferences, and authorization records linked to this wallet. This action is irreversible. Audit logs will be irreversibly anonymized according to GDPR retention standards.
+            </p>
+          </div>
+          <div>
+            <button
+              type="button"
+              disabled={!state.wallet || erasing}
+              onClick={() => setShowEraseDialog(true)}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-red-400/40 bg-red-500/20 px-4 text-sm font-semibold text-red-200 transition hover:bg-red-500/30 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Trash2 className="h-4 w-4" />
+              Erase wallet data
+            </button>
+          </div>
+        </div>
+
+        {erasureReceipt ? (
+          <div className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-950/30 p-4 text-xs text-white/80">
+            <div className="flex items-center gap-2 font-semibold text-emerald-300">
+              <CheckCircle2 className="h-4 w-4" />
+              Erasure Receipt Verified
+            </div>
+            <div className="mt-2 grid gap-1 font-mono text-[11px] text-white/60">
+              <div>Wallet: {erasureReceipt.walletAddress}</div>
+              <div>Deleted at: {erasureReceipt.deletedAt}</div>
+              {erasureReceipt.receipt?.sha256 ? <div>Receipt SHA-256: {erasureReceipt.receipt.sha256}</div> : null}
+              {erasureReceipt.receipt?.body?.receiptId ? <div>Receipt ID: {erasureReceipt.receipt.body.receiptId}</div> : null}
+              {typeof erasureReceipt.receipt?.body?.totalDeleted === "number" ? <div>Records deleted: {erasureReceipt.receipt.body.totalDeleted}</div> : null}
+              {typeof erasureReceipt.receipt?.body?.totalAnonymized === "number" ? <div>Records anonymized: {erasureReceipt.receipt.body.totalAnonymized}</div> : null}
+            </div>
+          </div>
+        ) : null}
+      </section>
+
       {records.length > 0 ? (
         <section>
           <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-2">
@@ -554,6 +667,75 @@ export function RecoveryClient({ initialWallet }: { initialWallet?: string }) {
       </section>
 
       {confirmPrompt ? <ConfirmHashDialog record={confirmPrompt} onConfirm={handleConfirmSubmit} onCancel={handleConfirmCancel} /> : null}
+      {showEraseDialog ? (
+        <EraseConfirmationDialog
+          wallet={state.wallet}
+          onConfirm={executeErasure}
+          onCancel={() => setShowEraseDialog(false)}
+          busy={erasing}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function EraseConfirmationDialog({
+  wallet,
+  onConfirm,
+  onCancel,
+  busy,
+}: {
+  wallet: string;
+  onConfirm: () => Promise<void>;
+  onCancel: () => void;
+  busy: boolean;
+}) {
+  const [input, setInput] = useState("");
+  const last4 = wallet.slice(-4);
+  const isValid = input.trim() === "ERASE" || input.trim() === last4;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-5 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="erase-dialog-title">
+      <div className="w-full max-w-md rounded-[28px] border border-red-500/30 bg-[#141010] p-6 shadow-2xl">
+        <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-red-400">
+          <AlertTriangle className="h-4 w-4" />
+          Destructive Action
+        </div>
+        <h2 id="erase-dialog-title" className="mt-2 text-xl font-semibold text-white">Permanently erase wallet data</h2>
+        <p className="mt-2 text-sm leading-6 text-white/70">
+          You are about to irreversibly erase all local and persistent data for wallet <span className="font-mono text-white font-semibold">{wallet.slice(0, 6)}…{last4}</span>.
+        </p>
+        <p className="mt-2 text-xs text-white/50">
+          To confirm, type <strong className="text-red-300 font-mono">ERASE</strong> or the last 4 characters (<strong className="text-red-300 font-mono">{last4}</strong>) below:
+        </p>
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Type ERASE or last 4 digits"
+          className="mt-4 h-11 w-full rounded-xl border border-red-500/30 bg-black/40 px-4 font-mono text-sm text-white outline-none focus:border-red-400"
+          autoFocus
+        />
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="h-10 rounded-full border border-white/10 px-4 text-sm text-white/64 transition hover:text-white"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!isValid || busy}
+            onClick={() => void onConfirm()}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-red-600 px-5 text-sm font-semibold text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            Confirm Erase
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -317,6 +317,37 @@ export function AutoModeOnboarding() {
         </StatusPill>
       </div>
 
+      {/* 3-Step Non-Custodial Safety Walkthrough */}
+      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+          <div className="flex items-center gap-2 text-xs font-semibold text-[#f2c86d]">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#d9a441]/20 text-xs font-bold text-[#f2c86d]">1</span>
+            Set Hard Caps
+          </div>
+          <p className="mt-2 text-xs leading-5 text-white/60">
+            Bound daily USD spend, maximum trade % and slippage limit to your onchain policy hash.
+          </p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+          <div className="flex items-center gap-2 text-xs font-semibold text-[#f2c86d]">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#d9a441]/20 text-xs font-bold text-[#f2c86d]">2</span>
+            Verify in Sandbox
+          </div>
+          <p className="mt-2 text-xs leading-5 text-white/60">
+            Multi-agent pipeline simulates every trade first. Missing or stale signals halt automatically.
+          </p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+          <div className="flex items-center gap-2 text-xs font-semibold text-[#f2c86d]">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#d9a441]/20 text-xs font-bold text-[#f2c86d]">3</span>
+            Instant Kill-Switch
+          </div>
+          <p className="mt-2 text-xs leading-5 text-white/60">
+            Server cannot custody private keys. Revoke or cancel authorization with 1 click anytime.
+          </p>
+        </div>
+      </div>
+
       {snapshot ? (
         <div className="mt-4">
           <AutoModeGuardrailPanel

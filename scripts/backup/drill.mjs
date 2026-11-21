@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { readFile, mkdir, readdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -56,6 +56,18 @@ console.log(`\nBackup time: ${backupTime}ms`);
 console.log(`Restore time: ${restoreTime}ms`);
 console.log(`Verify time: ${verifyTime}ms`);
 console.log(`Total time: ${totalTime}ms`);
+
+const summary = {
+  status: totalTime <= rtoMs ? 'PASSED' : 'FAILED',
+  backupTimeMs: backupTime,
+  restoreTimeMs: restoreTime,
+  verifyTimeMs: verifyTime,
+  totalTimeMs: totalTime,
+  rtoMs,
+  backupFile: path.basename(backupFile),
+  timestamp: new Date().toISOString(),
+};
+await writeFile(path.join(values.backupDir, 'drill-summary.json'), JSON.stringify(summary, null, 2));
 
 if (totalTime > rtoMs) {
   console.error(`Recovery objective exceeded: ${totalTime}ms > ${rtoMs}ms`);
