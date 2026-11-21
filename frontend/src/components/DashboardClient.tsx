@@ -15,10 +15,16 @@ import { LiveRegion } from "@/components/a11y/LiveRegion";
 import { captureOfflinePortfolio, captureOfflineScan } from "@/lib/offlineStore";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 
+import { SkeletonCard } from "@/components/layout/Skeleton";
+
 // These panels only mount after analysis or an explicit transaction action.
 // Keep their dependencies out of the dashboard's initial synchronous graph.
 function PanelLoading() {
-  return <div role="status" aria-live="polite" className="min-h-24 rounded-lg border border-white/10 p-4">Loading panel…</div>;
+  return (
+    <div role="status" aria-live="polite" className="w-full">
+      <SkeletonCard className="min-h-48" />
+    </div>
+  );
 }
 
 const AgentResultPanel = dynamic(() => import("@/components/AgentResultPanel").then(module => module.AgentResultPanel), { loading: PanelLoading });
