@@ -1,5 +1,7 @@
 import type { AgentResult } from "@/server/types";
 
+import { currentTraceparent } from "./tracing";
+
 export type StructuredAgentLog = {
   runId?: string;
   agent: AgentResult["agent"];
@@ -9,6 +11,7 @@ export type StructuredAgentLog = {
   errorCode?: string;
   sourceCount: number;
   message: string;
+  traceparent?: string;
 };
 
 export function redactSecrets(value: unknown): string {
@@ -43,5 +46,6 @@ export function createAgentLog(result: AgentResult, message = "agent_result"): S
     errorCode: firstSource?.errorCode,
     sourceCount: result.sources.length,
     message: redactSecrets(message),
+    traceparent: currentTraceparent(),
   };
 }
