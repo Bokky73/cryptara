@@ -8,12 +8,34 @@
 
 use soroban_sdk::{Bytes, BytesN, Env};
 
-use crate::{PendingChange, Proposal};
+use crate::{PendingChange, Proposal, DOMAIN_SEPARATOR};
 
 /// Re-hash a payload to verify the pending queue payload hash.
 pub fn verify_payload_hash(env: &Env, payload: &Bytes, expected: &BytesN<32>) -> bool {
     let hash: BytesN<32> = env.crypto().keccak256(payload).into();
     &hash == expected
+}
+
+/// Deterministically bind a proposal to its domain, contract address, nonce,
+/// target, selector and payload hash so proposals cannot collide or be
+/// replayed across contracts or networks.
+///
+/// `sha256(DOMAIN_SEPARATOR || contract_address || nonce || target || selector || payload_hash)`
+pub fn proposal_digest(
+    env: &Env,
+    nonce: u64,
+    target_contract: &soroban_sdk::Address,
+    function_selector: &Bytes,
+    payload_hash: &BytesN<32>,
+) -> BytesN<32> {
+    let mut preimage = Bytes::new(env);
+    preimage.extend_from_slice(DOMAIN_SEPARATOR.as_bytes());
+    preimage.extend_from_array(&env.current_contract_address().to_string().into_bytes());
+    preimage.extend_from_array(&nonce.to_be_bytes());
+    preimage.extend_from_array(&target_contract.to_string().into_bytes());
+    preimage.append(function_selector);
+    preimage.extend_from_array(&payload_hash.to_array());
+    env.crypto().sha256(&preimage).into()
 }
 
 /// Whether a proposal is still pending (not executed, not cancelled).

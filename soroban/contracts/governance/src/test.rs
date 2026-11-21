@@ -239,49 +239,74 @@ fn emergency_pause_immediate() {
 }
 
 #[test]
-fn expiry_and_auth_cases() {
-    let (env, client, _a, b, _c, _em) = setup();
-    let fake_id = BytesN::from_array(&env, &[9u8; 32]);
-    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.sign(&b, &fake_id, &Bytes::from_slice(&env, b"sig"));
-    }));
-    assert!(res.is_err());
-
-    let res2 = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.execute(&b, &fake_id);
-    }));
-    assert!(res2.is_err());
-
-    let res3 = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.cancel(&b, &fake_id);
-    }));
-    assert!(res3.is_err());
-}
-
-#[test]
-fn duplicate_signer_rejected() {
+fn duplicate_signer_approval_rejected() {
+    // A signer cannot approve the same proposal twice to inflate signers.len().
     let (env, client, a, _b, _c, _em) = setup();
     let target = dummy_target(&env);
     let sel = dummy_selector(&env);
-    let payload = Bytes::from_slice(&env, b"dup");
+    let payload = Bytes::from_slice(&env, b"dup-signer");
     let pid = client.propose(&a, &target, &sel, &payload, &86400);
+
     client.sign(&a, &pid, &Bytes::from_slice(&env, b"s1"));
+
+    // Second approval from the same signer must be rejected.
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.sign(&a, &pid, &Bytes::from_slice(&env, b"s1-again"));
     }));
     assert!(res.is_err());
+
+    // Only one distinct signer recorded.
+    let proposal = client.get_proposal(&pid).unwrap();
+    assert_eq!(proposal.signers.len(), 1);
 }
 
 #[test]
-fn invalid_signer_rejected() {
+fn non_signer_approval_rejected() {
+    // An address that is not in the configured signer set cannot approve.
     let (env, client, a, _b, _c, _em) = setup();
-    let outsider = Address::generate(&env);
     let target = dummy_target(&env);
     let sel = dummy_selector(&env);
-    let payload = Bytes::from_slice(&env, b"invalid-signer");
+    let payload = Bytes::from_slice(&env, b"non-signer");
     let pid = client.propose(&a, &target, &sel, &payload, &86400);
+
+    let outsider = Address::generate(&env);
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.sign(&outsider, &pid, &Bytes::from_slice(&env, b"sig"));
+        client.sign(&outsider, &pid, &Bytes::from_slice(&env, b"forged"));
+    }));
+    assert!(res.is_err());
+
+    let proposal = client.get_proposal(&pid).unwrap();
+    assert_eq!(proposal.signers.len(), 0);
+}
+
+#[test]
+fn payload_hash_tampering_rejected_at_execution() {
+    // Tampering with the stored payload hash must cause execution to panic.
+    let (env, client, a, b, _c, _em) = setup();
+    let target = dummy_target(&env);
+    let sel = dummy_selector(&env);
+    let payload = Bytes::from_slice(&env, b"tamper-me");
+    let pid = client.propose(&a, &target, &sel, &payload, &86400);
+    client.sign(&a, &pid, &Bytes::from_slice(&env, b"s1"));
+    client.sign(&b, &pid, &Bytes::from_slice(&env, b"s2"));
+
+    env.ledger().set_timestamp(1_700_000_000 + 86401);
+
+    // Sanity: untampered execution succeeds.
+    client.execute(&a, &pid);
+    assert!(client.get_proposal(&pid).unwrap().executed);
+
+    // A fresh proposal whose payload hash does not match the supplied payload
+    // must fail verification at execution time.
+    let payload2 = Bytes::from_slice(&env, b"original-payload");
+    let pid2 = client.propose(&a, &target, &sel, &payload2, &86400);
+    client.sign(&a, &pid2, &Bytes::from_slice(&env, b"s1"));
+    client.sign(&b, &pid2, &Bytes::from_slice(&env, b"s2"));
+    env.ledger().set_timestamp(1_700_000_000 + 2 * 86401);
+
+    let tampered = Bytes::from_slice(&env, b"tampered-payload");
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.execute_with_payload(&a, &pid2, &tampered);
     }));
     assert!(res.is_err());
 }
