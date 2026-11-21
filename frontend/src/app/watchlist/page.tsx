@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getScanNetwork } from "@/lib/scanNetworks";
 import { listWatchlistEntries, listWatchlistScanRuns, ensureStorageReady } from "@/server/storage";
-import { WatchlistAddForm, WatchlistRemoveButton, WatchlistRescanButton, WatchlistExportButton, WatchlistImportForm } from "@/components/WatchlistClient";
+import { WatchlistAddForm, WatchlistRemoveButton, WatchlistRescanButton, WatchlistExportButton, WatchlistImportForm, WatchlistManager } from "@/components/WatchlistClient";
 import type { DiscoveryClassification, RiskLevel, WatchlistEntry, WatchlistScanRun } from "@/server/types";
 
 export const dynamic = "force-dynamic";
@@ -188,49 +188,7 @@ export default async function WatchlistPage({
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
-            {/* Unscanned entries section */}
-            {unscannedEntries.length > 0 && (
-              <div>
-                <h3 className="mb-2 text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
-                  Not yet scanned ({unscannedEntries.length})
-                </h3>
-                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                  {unscannedEntries.map(({ entry, totalRuns }) => (
-                    <WatchlistEntryCard
-                      key={entry.id}
-                      entry={entry}
-                      totalRuns={totalRuns}
-                      wallet={wallet}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Scanned entries section */}
-            {scannedEntries.length > 0 && (
-              <div>
-                <h3 className="mb-2 text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
-                  Scanned entries ({scannedEntries.length})
-                  {staleEntries.length > 0 && (
-                    <span className="ml-2 text-amber-400">· {staleEntries.length} have stale data</span>
-                  )}
-                </h3>
-                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                  {scannedEntries.map(({ entry, recentRuns, totalRuns }) => (
-                    <WatchlistEntryCard
-                      key={entry.id}
-                      entry={entry}
-                      recentRuns={recentRuns}
-                      totalRuns={totalRuns}
-                      wallet={wallet}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          <WatchlistManager items={watchlistData} wallet={wallet} />
         )}
       </section>
 
