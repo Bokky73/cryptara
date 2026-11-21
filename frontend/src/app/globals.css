@@ -25,7 +25,8 @@ body { background: var(--color-bg); color: var(--color-fg); font-family: Inter, 
 .glass-panel { border: 1px solid var(--color-glass-border); background: var(--color-glass-bg); box-shadow: inset 0 1px 0 var(--color-glass-highlight), 0 24px 80px var(--color-glass-shadow); backdrop-filter: blur(22px); }
 .gold-line { background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-brand) 85%, transparent), transparent); }
 html[data-offline-locked="true"] button:not([data-offline-allow]), html[data-offline-locked="true"] input, html[data-offline-locked="true"] select, html[data-offline-locked="true"] textarea, html[data-offline-locked="true"] summary, html[data-offline-locked="true"] a[href^="/api"], html[data-offline-locked="true"] [data-state-changing] { cursor: not-allowed !important; opacity: 0.48 !important; pointer-events: none !important; }
-select:focus, :focus-visible { outline: 3px solid var(--color-focus); outline-offset: 2px; border-radius: 4px; }
+select:focus, :focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; border-radius: var(--radius-sm, 4px); }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; border-radius: var(--radius-sm, 4px); }
 .skip-link { position: absolute; top: -100%; left: 0.75rem; z-index: 100; padding: 0.75rem 1.25rem; border-radius: 9999px; background: var(--color-brand); color: var(--color-fg-inverse); font-size: 0.875rem; font-weight: 600; text-decoration: none; transition: top 0.15s ease; }
 .skip-link:focus-visible, .skip-link:focus { top: 0.75rem; outline: 3px solid var(--color-fg); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; } }

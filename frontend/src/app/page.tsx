@@ -56,6 +56,24 @@ export default function Home() {
               View Agents
             </Link>
           </div>
+
+          <div className="mt-6 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-white/46">Try instant scan:</span>
+            {[
+              { label: "USDC (Ethereum)", href: "/scan?query=0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48&chain=ethereum" },
+              { label: "AERO (Base)", href: "/scan?query=0x940181a94A35A4569E4529A3CDfB74e38FD98631&chain=base" },
+              { label: "XLM (Stellar)", href: "/scan?query=USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN&chain=stellar-testnet" },
+              { label: "High Risk Demo", href: "/scan?query=MEME&chain=base" },
+            ].map((chip) => (
+              <Link
+                key={chip.label}
+                href={chip.href}
+                className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/72 transition hover:border-[#d9a441]/40 hover:bg-white/10 hover:text-white"
+              >
+                {chip.label}
+              </Link>
+            ))}
+          </div>
           <div className="mt-12 grid max-w-2xl gap-3 sm:grid-cols-3">
             {[
               ["Observe", "Wallet and market signals"],

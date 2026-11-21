@@ -1,0 +1,48 @@
+name: Scheduled Data Retention Purge
+
+on:
+  schedule:
+    # Run daily at 02:00 UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run in dry-run mode (logs without deleting)'
+        required: false
+        type: boolean
+        default: false
+      batch_size:
+        description: 'Batch size for deletion statements'
+        required: false
+        default: '500'
+
+permissions:
+  contents: read
+
+jobs:
+  retention-purge:
+    name: Execute Data Retention Purge
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Retention Purge
+        run: |
+          echo "Starting retention purge (DRY_RUN=${{ github.event.inputs.dry_run || 'false' }})..."
+          node scripts/retention-purge.mjs
+        env:
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          PURGE_BATCH_SIZE: ${{ github.event.inputs.batch_size || '500' }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}

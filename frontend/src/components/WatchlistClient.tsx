@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { CheckSquare, Square, RotateCw, Trash2, Download, Layers, TrendingUp, TrendingDown, Minus, AlertTriangle } from "lucide-react";
+import type { WatchlistEntry, WatchlistScanRun } from "@/server/types";
 
 export function WatchlistAddForm({ wallet }: { wallet: string }) {
   const [error, setError] = useState<string | null>(null);
@@ -372,3 +374,340 @@ export function WatchlistImportForm({ wallet }: { wallet: string }) {
     </div>
   );
 }
+
+export type WatchlistRowItem = {
+  entry: WatchlistEntry;
+  recentRuns?: WatchlistScanRun[];
+  totalRuns?: number;
+};
+
+export function WatchlistManager({
+  items,
+  wallet,
+}: {
+  items: WatchlistRowItem[];
+  wallet: string;
+}) {
+  const [filter, setFilter] = useState<string>("all");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkProcessing, setBulkProcessing] = useState(false);
+  const [bulkStatus, setBulkStatus] = useState<string | null>(null);
+
+  // Filter computation
+  const filteredItems = items.filter(({ entry }) => {
+    if (filter === "all") return true;
+    if (filter === "high_risk") {
+      return (
+        (entry.latestScore !== undefined && entry.latestScore >= 60) ||
+        entry.latestClassification === "risky" ||
+        entry.latestClassification === "scam"
+      );
+    }
+    if (filter === "stellar") return entry.chain?.startsWith("stellar");
+    if (filter === "evm") return !entry.chain?.startsWith("stellar");
+    if (filter === "stale") return entry.latestStatus === "stale" || entry.latestStatus === "failed";
+    return true;
+  });
+
+  const highRiskCount = items.filter(
+    ({ entry }) =>
+      (entry.latestScore !== undefined && entry.latestScore >= 60) ||
+      entry.latestClassification === "risky" ||
+      entry.latestClassification === "scam"
+  ).length;
+  const stellarCount = items.filter(({ entry }) => entry.chain?.startsWith("stellar")).length;
+  const evmCount = items.filter(({ entry }) => !entry.chain?.startsWith("stellar")).length;
+  const staleCount = items.filter(
+    ({ entry }) => entry.latestStatus === "stale" || entry.latestStatus === "failed"
+  ).length;
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selectedIds.size === filteredItems.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredItems.map((i) => i.entry.id)));
+    }
+  };
+
+  // Bulk actions
+  const handleBulkRescan = async () => {
+    if (selectedIds.size === 0 || bulkProcessing) return;
+    setBulkProcessing(true);
+    setBulkStatus(`Rescanning ${selectedIds.size} assets...`);
+    try {
+      for (const id of Array.from(selectedIds)) {
+        await fetch(`/api/watchlist/${encodeURIComponent(id)}/rescan`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ walletAddress: wallet }),
+        }).catch(() => null);
+      }
+      window.location.href = `/watchlist?wallet=${encodeURIComponent(wallet)}&rescanned=${selectedIds.size}`;
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
+
+  const handleBulkRemove = async () => {
+    if (selectedIds.size === 0 || bulkProcessing) return;
+    setBulkProcessing(true);
+    setBulkStatus(`Removing ${selectedIds.size} assets...`);
+    try {
+      for (const id of Array.from(selectedIds)) {
+        await fetch("/api/watchlist", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "remove", entryId: id, walletAddress: wallet }),
+        }).catch(() => null);
+      }
+      window.location.href = `/watchlist?wallet=${encodeURIComponent(wallet)}&removed=${selectedIds.size}`;
+    } finally {
+      setBulkProcessing(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Collection filter pills */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setFilter("all")}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition ${
+              filter === "all"
+                ? "bg-[#d9a441] text-black"
+                : "border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white"
+            }`}
+          >
+            All <span className="opacity-75">({items.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilter("high_risk")}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition ${
+              filter === "high_risk"
+                ? "bg-red-500 text-white"
+                : "border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white"
+            }`}
+          >
+            High Risk <span className="opacity-75">({highRiskCount})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilter("stellar")}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition ${
+              filter === "stellar"
+                ? "bg-[#7b61ff] text-white"
+                : "border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white"
+            }`}
+          >
+            Stellar Assets <span className="opacity-75">({stellarCount})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilter("evm")}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition ${
+              filter === "evm"
+                ? "bg-[#627eea] text-white"
+                : "border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white"
+            }`}
+          >
+            EVM Tokens <span className="opacity-75">({evmCount})</span>
+          </button>
+          {staleCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilter("stale")}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                filter === "stale"
+                  ? "bg-amber-500 text-black"
+                  : "border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white"
+              }`}
+            >
+              Stale / Degraded <span className="opacity-75">({staleCount})</span>
+            </button>
+          )}
+        </div>
+
+        {filteredItems.length > 0 && (
+          <button
+            type="button"
+            onClick={toggleAll}
+            className="text-xs text-white/60 hover:text-white"
+          >
+            {selectedIds.size === filteredItems.length ? "Deselect all" : "Select all"}
+          </button>
+        )}
+      </div>
+
+      {/* Grid of items */}
+      {filteredItems.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-white/10 p-8 text-center text-sm text-white/50">
+          No assets match the active collection filter.
+        </div>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          {filteredItems.map(({ entry, recentRuns, totalRuns }) => {
+            const isSelected = selectedIds.has(entry.id);
+            // Calculate risk delta
+            let riskDelta: number | null = null;
+            if (entry.latestScore !== undefined && recentRuns && recentRuns.length >= 2) {
+              const prev = recentRuns[1]?.score;
+              if (prev !== undefined) riskDelta = entry.latestScore - prev;
+            }
+
+            return (
+              <div
+                key={entry.id}
+                tabIndex={0}
+                role="checkbox"
+                aria-checked={isSelected}
+                onKeyDown={(e) => {
+                  if (e.key === " ") {
+                    e.preventDefault();
+                    toggleSelect(entry.id);
+                  }
+                }}
+                onClick={() => toggleSelect(entry.id)}
+                className={`relative cursor-pointer rounded-xl border p-4 transition ${
+                  isSelected
+                    ? "border-[#d9a441] bg-[#d9a441]/10"
+                    : "border-slate-800 bg-slate-950/60 hover:border-slate-600"
+                }`}
+              >
+                {/* Top bar with selection check and chain */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {isSelected ? (
+                      <CheckSquare className="h-4 w-4 text-[#d9a441]" />
+                    ) : (
+                      <Square className="h-4 w-4 text-white/30" />
+                    )}
+                    <span className="font-semibold text-white">
+                      {entry.symbol || entry.tokenName || entry.contractAddress?.slice(0, 8) || "Asset"}
+                    </span>
+                  </div>
+                  <span className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] uppercase text-white/60">
+                    {entry.chain}
+                  </span>
+                </div>
+
+                {/* Sub title / address */}
+                <div className="mt-1 truncate text-xs text-white/50 font-mono">
+                  {entry.contractAddress || entry.assetKey || entry.identityKey}
+                </div>
+
+                {/* Metrics & Badges */}
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="rounded bg-white/8 px-2 py-0.5 text-white">
+                    Score: <span className="font-semibold">{entry.latestScore ?? "—"}</span>
+                  </span>
+
+                  {/* Risk Delta Badge */}
+                  {riskDelta !== null ? (
+                    <span
+                      className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium ${
+                        riskDelta > 0
+                          ? "bg-red-500/15 text-red-300 border border-red-500/25"
+                          : riskDelta < 0
+                          ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/25"
+                          : "bg-white/5 text-white/60 border border-white/10"
+                      }`}
+                    >
+                      {riskDelta > 0 ? (
+                        <TrendingUp className="h-3 w-3" />
+                      ) : riskDelta < 0 ? (
+                        <TrendingDown className="h-3 w-3" />
+                      ) : (
+                        <Minus className="h-3 w-3" />
+                      )}
+                      {riskDelta > 0 ? `+${riskDelta}%` : `${riskDelta}%`} vs last
+                    </span>
+                  ) : (
+                    <span className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-white/40">
+                      baseline
+                    </span>
+                  )}
+
+                  {/* Staleness badge */}
+                  {(entry.latestStatus === "stale" || entry.latestStatus === "failed") && (
+                    <span className="inline-flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-300">
+                      <AlertTriangle className="h-2.5 w-2.5" />
+                      Stale
+                    </span>
+                  )}
+                </div>
+
+                {/* Single item actions (stop propagation) */}
+                <div className="mt-3 flex items-center gap-2 border-t border-white/5 pt-2" onClick={(e) => e.stopPropagation()}>
+                  <WatchlistRescanButton entryId={entry.id} wallet={wallet} />
+                  <WatchlistRemoveButton entryId={entry.id} wallet={wallet} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Sticky Bulk Action Bar */}
+      {selectedIds.size > 0 && (
+        <aside
+          role="region"
+          aria-label="Bulk actions"
+          className="fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full border border-[#d9a441]/40 bg-black/90 px-6 py-3 shadow-2xl backdrop-blur-md"
+        >
+          <span className="text-xs font-semibold text-[#f2c86d]">
+            {selectedIds.size} selected
+          </span>
+          <div className="h-4 w-px bg-white/20" />
+          <button
+            type="button"
+            disabled={bulkProcessing}
+            onClick={handleBulkRescan}
+            className="inline-flex items-center gap-1.5 rounded-full bg-[#d9a441]/20 px-3 py-1 text-xs font-medium text-[#f2c86d] hover:bg-[#d9a441]/30 disabled:opacity-50"
+          >
+            <RotateCw className="h-3 w-3" />
+            Rescan Selected
+          </button>
+          <a
+            href={`/api/watchlist/export?wallet=${encodeURIComponent(wallet)}&format=csv`}
+            className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
+          >
+            <Download className="h-3 w-3" />
+            Export CSV
+          </a>
+          <button
+            type="button"
+            disabled={bulkProcessing}
+            onClick={handleBulkRemove}
+            className="inline-flex items-center gap-1.5 rounded-full bg-red-500/20 px-3 py-1 text-xs font-medium text-red-300 hover:bg-red-500/30 disabled:opacity-50"
+          >
+            <Trash2 className="h-3 w-3" />
+            Remove
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+            className="text-xs text-white/50 hover:text-white"
+          >
+            Clear
+          </button>
+          {bulkStatus && (
+            <span className="text-xs text-amber-300 animate-pulse">{bulkStatus}</span>
+          )}
+        </aside>
+      )}
+    </div>
+  );
+}
+
