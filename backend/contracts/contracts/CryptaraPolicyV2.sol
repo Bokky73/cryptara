@@ -27,4 +27,31 @@ contract CryptaraPolicyV2 is CryptaraPolicy {
     function getTimelock() external view returns (address) {
         return timelock;
     }
+
+    /// @notice Atomically consume a policy intent on behalf of the registered vault/executor.
+    /// @dev Enforces the per-user daily spend cap and flips `executed = true` in a single call.
+    ///      Only the registered vault/executor may invoke this; reverts deterministically otherwise.
+    function consumeIntent(bytes32 intentHash, address user, address token, uint256 amount)
+        external
+        override
+    {
+        require(msg.sender == vault, "PolicyV2: caller not vault");
+        require(user != address(0), "PolicyV2: zero user");
+        require(amount > 0, "PolicyV2: zero amount");
+
+        Intent storage intent = intents[intentHash];
+        require(intent.user == user, "PolicyV2: intent user mismatch");
+        require(intent.token == token, "PolicyV2: intent token mismatch");
+        require(intent.amount == amount, "PolicyV2: intent amount mismatch");
+        require(!intent.executed, "PolicyV2: intent already executed");
+
+        _rollDailySpend(user);
+        uint256 newSpend = dailySpend[user] + amount;
+        require(newSpend <= maxDailySpend, "PolicyV2: daily spend exceeded");
+
+        dailySpend[user] = newSpend;
+        intent.executed = true;
+
+        emit IntentConsumed(intentHash, user, token, amount);
+    }
 }

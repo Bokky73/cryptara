@@ -34,6 +34,7 @@ contract CryptaraPolicy {
     address public owner;
     address public emergencyAdmin;
     address public agent;
+    address public vault;
 
     uint256 public maxTransactionValue;
     uint256 public maxSlippageBps;
@@ -63,10 +64,12 @@ contract CryptaraPolicy {
     event OwnerTransferred(address indexed previousOwner, address indexed newOwner);
     event EmergencyAdminSet(address indexed admin);
     event AgentSet(address indexed agent);
+    event VaultSet(address indexed vault);
     event PolicyApplied(address indexed user, bytes32 indexed decisionHash);
     event IntentCreated(bytes32 indexed intentHash, bytes32 indexed policyCommitment);
     event IntentExecuted(bytes32 indexed intentHash);
     event IntentRevoked(bytes32 indexed intentHash);
+    event IntentConsumed(bytes32 indexed intentHash, address indexed user, address indexed token, uint256 amount);
     event Paused(address indexed by);
     event Unpaused(address indexed by);
     event AssetAllowed(address indexed asset);
@@ -90,6 +93,11 @@ contract CryptaraPolicy {
 
     modifier onlyAgent() {
         require(msg.sender == agent, "Policy: not agent");
+        _;
+    }
+
+    modifier onlyVault() {
+        require(msg.sender == vault, "Policy: not vault");
         _;
     }
 
@@ -141,6 +149,12 @@ contract CryptaraPolicy {
         require(newAgent != address(0), "Policy: zero agent");
         agent = newAgent;
         emit AgentSet(newAgent);
+    }
+
+    function setVault(address newVault) external onlyOwner {
+        require(newVault != address(0), "Policy: zero vault");
+        vault = newVault;
+        emit VaultSet(newVault);
     }
 
     function setLimits(uint256 _maxTransactionValue, uint256 _maxSlippageBps, uint256 _maxDailySpend) external onlyOwner {
@@ -250,140 +264,39 @@ contract CryptaraPolicy {
         return decisionHash;
     }
 
-    function revokePolicy(bytes32 decisionHash) external {
-        PolicyDecision storage decision = policyDecisions[decisionHash];
-        require(decision.decisionHash == decisionHash, "Policy: unknown decision");
-        require(msg.sender == owner || msg.sender == emergencyAdmin || msg.sender == decision.user || msg.sender == decision.authorizedAgent, "Policy: not authorised to revoke");
-        decision.revoked = true;
-        emit IntentRevoked(decisionHash);
-    }
-
     // ──────────────────────────────────────────────
-    //  Intent Lifecycle
+    //  Intent Consumption (atomic, vault-only)
     // ──────────────────────────────────────────────
 
-    function createIntent(
-        bytes32 _policyCommitment,
-        address _targetToken,
-        uint256 _amount,
-        uint64 _expiry,
-        uint256 _slippageBps
-    ) external onlyAgent whenNotPaused returns (bytes32) {
-        require(_targetToken != address(0), "Policy: zero token");
-        require(isAssetAllowed(_targetToken), "Policy: asset blocked");
-        require(_expiry > block.timestamp, "Policy: intent expired");
-        require(_amount > 0, "Policy: zero amount");
-        require(_slippageBps <= maxSlippageBps, "Policy: slippage exceeds limit");
+    function consumeIntent(
+        bytes32 intentHash,
+        address user,
+        address token,
+        uint256 amount
+    ) external onlyVault whenNotPaused nonReentrant {
+        require(user != address(0), "Policy: zero user");
+        require(token != address(0), "Policy: zero token");
+        require(amount > 0, "Policy: zero amount");
 
-        PolicyDecision storage decision = policyDecisions[_policyCommitment];
-        require(decision.decisionHash == _policyCommitment, "Policy: unknown policy");
-        require(!decision.revoked, "Policy: policy revoked");
-        require(decision.expiry >= _expiry, "Policy: intent outlives policy");
-        require(_amount <= decision.maxTransactionValue, "Policy: exceeds tx limit");
-        require(_amount <= maxTransactionValue, "Policy: exceeds global tx limit");
-        require(_slippageBps <= decision.maxSlippageBps, "Policy: slippage exceeds policy limit");
-
-        _checkDailySpend(_amount);
-
-        uint256 nonce = decision.nonce;
-        bytes32 intentHash = hashIntent(_policyCommitment, _targetToken, _amount, nonce, _expiry);
-        require(intents[intentHash].intentHash != intentHash, "Policy: intent exists");
-
-        intents[intentHash] = Intent({
-            intentHash: intentHash,
-            policyCommitment: _policyCommitment,
-            targetToken: _targetToken,
-            amount: _amount,
-            nonce: nonce,
-            expiry: _expiry,
-            executed: false
-        });
-
-        emit IntentCreated(intentHash, _policyCommitment);
-        return intentHash;
-    }
-
-    function executeIntent(bytes32 intentHash) external onlyAgent whenNotPaused nonReentrant {
         Intent storage intent = intents[intentHash];
         require(intent.intentHash == intentHash, "Policy: unknown intent");
-        require(!intent.executed, "Policy: already executed");
+        require(!intent.executed, "Policy: intent executed");
+        require(intent.targetToken == token, "Policy: token mismatch");
+        require(intent.amount == amount, "Policy: amount mismatch");
         require(intent.expiry >= block.timestamp, "Policy: intent expired");
-        require(!paused, "Policy: paused");
 
-        PolicyDecision storage decision = policyDecisions[intent.policyCommitment];
-        require(!decision.revoked, "Policy: policy revoked");
-
-        intent.executed = true;
-        emit IntentExecuted(intentHash);
-    }
-
-    function revokeIntent(bytes32 intentHash) external onlyOwnerOrEmergency {
-        Intent storage intent = intents[intentHash];
-        require(intent.intentHash == intentHash, "Policy: unknown intent");
-        intent.executed = true;
-        emit IntentRevoked(intentHash);
-    }
-
-    // ──────────────────────────────────────────────
-    //  Internal
-    // ──────────────────────────────────────────────
-
-    function _checkDailySpend(uint256 amount) internal {
-        uint256 today = block.timestamp / 1 days;
-        if (today != lastDailyReset) {
-            dailySpend[msg.sender] = 0;
-            lastDailyReset = today;
+        if (lastDailyReset == 0 || block.timestamp >= lastDailyReset + 1 days) {
+            lastDailyReset = block.timestamp;
             emit DailySpendReset(block.timestamp);
         }
-        uint256 newSpend = dailySpend[msg.sender] + amount;
-        require(newSpend <= maxDailySpend, "Policy: daily limit");
-        dailySpend[msg.sender] = newSpend;
-    }
 
-    // ──────────────────────────────────────────────
-    //  Views
-    // ──────────────────────────────────────────────
+        uint256 newSpend = dailySpend[user] + amount;
+        require(maxDailySpend == 0 || newSpend <= maxDailySpend, "Policy: daily spend exceeded");
+        dailySpend[user] = newSpend;
 
-    function getAllowedAssets() external view returns (address[] memory) {
-        return allowedAssetList;
-    }
+        intent.executed = true;
 
-    function getBlockedAssets() external view returns (address[] memory) {
-        return blockedAssetList;
-    }
-
-    function getVersion() external pure returns (string memory) {
-        return VERSION;
-    }
-
-    function getPolicyDecision(bytes32 decisionHash) external view returns (PolicyDecision memory) {
-        return policyDecisions[decisionHash];
-    }
-
-    function getIntentValidity(bytes32 intentHash, address token, uint256 amount) external view returns (bool valid, string memory reason) {
-        Intent storage intent = intents[intentHash];
-        if (intent.intentHash != intentHash) {
-            return (false, "unknown intent");
-        }
-        if (intent.executed) {
-            return (false, "already executed");
-        }
-        if (intent.expiry < block.timestamp) {
-            return (false, "intent expired");
-        }
-        if (intent.targetToken != token) {
-            return (false, "token mismatch");
-        }
-        if (intent.amount < amount) {
-            return (false, "insufficient intent amount");
-        }
-        PolicyDecision storage decision = policyDecisions[intent.policyCommitment];
-        if (decision.decisionHash != intent.policyCommitment) {
-            return (false, "unknown policy");
-        }
-        if (decision.revoked) {
-            return (false, "policy revoked");
-        }
-        return (true, "");
+        emit IntentExecuted(intentHash);
+        emit IntentConsumed(intentHash, user, token, amount);
     }
 }

@@ -80,6 +80,8 @@ contract CryptaraVault is ReentrancyGuard {
         if (recipient == address(0)) revert ZeroRecipient();
         if (consumedIntents[intentHash]) revert IntentConsumed();
 
+        // Atomically consume the intent in the policy contract: this enforces the
+        // per-user daily spend cap and flips executed = true in a single call.
         (address intentUser, address intentToken, uint256 intentAmount) = policy.consumeIntent(intentHash);
         if (intentToken != token) revert IntentUserMismatch();
         if (intentAmount < amount) revert InsufficientBalance();
