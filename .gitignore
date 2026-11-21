@@ -31,8 +31,10 @@ soroban/target/
 # env and secrets
 .env
 .env.*
+!.env.example
 frontend/.env
 frontend/.env.*
+!frontend/.env.example
 backend/.env
 backend/.env.*
 backend/contracts/.env
@@ -53,3 +55,8 @@ yarn-error.log*
 
 # local git backups
 .git-frontend-backup/
+
+# patch and scratch scripts
+patch_*.py
+scratch_*.json
+

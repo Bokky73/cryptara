@@ -60,6 +60,9 @@ export function AlertHistoryList({ initialData }: { initialData?: AlertResponse 
   const [data, setData] = useState<AlertResponse | null>(initialData ?? null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [severityFilter, setSeverityFilter] = useState<"all" | "critical" | "warning" | "info" | "unacknowledged">("all");
   const [error, setError] = useState<string | null>(null);
   const [deliveryRows, setDeliveryRows] = useState<Record<string, DeliveryAuditRow[]>>({});
   const [retryBusyId, setRetryBusyId] = useState<string | null>(null);
@@ -132,6 +135,42 @@ export function AlertHistoryList({ initialData }: { initialData?: AlertResponse 
     } : current);
   }
 
+  async function acknowledgeBatch(idsToAcknowledge: string[]) {
+    if (!address || idsToAcknowledge.length === 0) return;
+    setBatchBusy(true);
+    setError(null);
+    try {
+      await Promise.all(
+        idsToAcknowledge.map((id) =>
+          fetch(`/api/alerts/alerts/${id}/acknowledge`, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+          })
+        )
+      );
+      const ackSet = new Set(idsToAcknowledge);
+      setData((current) => current ? {
+        ...current,
+        alerts: current.alerts.map((alert) => ackSet.has(alert.id) ? { ...alert, status: "acknowledged", acknowledgedAt: new Date().toISOString() } : alert),
+        counts: {
+          ...current.counts,
+          triggered: Math.max(0, current.counts.triggered - idsToAcknowledge.length),
+          acknowledged: current.counts.acknowledged + idsToAcknowledge.length,
+        },
+      } : current);
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        idsToAcknowledge.forEach((id) => next.delete(id));
+        return next;
+      });
+    } catch {
+      setError("Failed to batch acknowledge some alerts.");
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
   async function retryDelivery(deliveryId: string, alertId: string) {
     setRetryBusyId(deliveryId);
     setError(null);
@@ -170,8 +209,19 @@ export function AlertHistoryList({ initialData }: { initialData?: AlertResponse 
     );
   }
 
-  const recent = data.alerts.slice(0, visibleCount);
-  const hasMore = data.alerts.length > recent.length;
+  const filteredAlerts = (data?.alerts ?? []).filter((alert) => {
+    if (severityFilter === "all") return true;
+    if (severityFilter === "critical") return alert.severity === "critical";
+    if (severityFilter === "warning") return alert.severity === "high" || alert.severity === "medium";
+    if (severityFilter === "info") return alert.severity === "low";
+    if (severityFilter === "unacknowledged") return alert.status === "triggered";
+    return true;
+  });
+
+  const recent = filteredAlerts.slice(0, visibleCount);
+  const hasMore = filteredAlerts.length > recent.length;
+  const triggeredInView = recent.filter((a) => a.status === "triggered");
+  const allTriggeredSelected = triggeredInView.length > 0 && triggeredInView.every((a) => selectedIds.has(a.id));
 
   return (
     <section className="space-y-4">
@@ -187,63 +237,162 @@ export function AlertHistoryList({ initialData }: { initialData?: AlertResponse 
         </div>
       </header>
 
+      {/* Severity Filter Tabs & Batch Action Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 p-2.5">
+        <div className="flex flex-wrap gap-1 text-xs">
+          {(
+            [
+              { id: "all", label: "All" },
+              { id: "critical", label: "Critical" },
+              { id: "warning", label: "Warning" },
+              { id: "info", label: "Info" },
+              { id: "unacknowledged", label: `Unacknowledged (${data.counts.triggered})` },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setSeverityFilter(tab.id)}
+              className={`rounded-lg px-3 py-1.5 font-medium transition ${
+                severityFilter === tab.id
+                  ? "bg-[#d9a441] text-black font-semibold shadow-sm"
+                  : "text-white/64 hover:bg-white/5 hover:text-white"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {triggeredInView.length > 0 ? (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (allTriggeredSelected) {
+                  setSelectedIds((prev) => {
+                    const next = new Set(prev);
+                    triggeredInView.forEach((a) => next.delete(a.id));
+                    return next;
+                  });
+                } else {
+                  setSelectedIds((prev) => {
+                    const next = new Set(prev);
+                    triggeredInView.forEach((a) => next.add(a.id));
+                    return next;
+                  });
+                }
+              }}
+              className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-white/72 transition hover:text-white"
+            >
+              {allTriggeredSelected ? "Deselect view" : "Select unacknowledged"}
+            </button>
+
+            {selectedIds.size > 0 ? (
+              <button
+                type="button"
+                disabled={batchBusy}
+                onClick={() => void acknowledgeBatch(Array.from(selectedIds))}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/20 border border-emerald-400/40 px-3 py-1 text-xs font-semibold text-emerald-200 transition hover:bg-emerald-500/30 disabled:opacity-50"
+              >
+                <Check className="h-3 w-3" />
+                Acknowledge selected ({selectedIds.size})
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
       {error ? <p className="text-sm text-red-200">{error}</p> : null}
 
       <div className="space-y-2">
         {recent.length === 0 ? (
           <div className="glass-panel rounded-lg border border-white/10 p-5 text-sm text-white/58">
-            No alerts have been triggered yet for this wallet. Default rules are seeded; future agent runs will evaluate them.
+            No alerts found matching the current filter.
           </div>
         ) : null}
         {recent.map((alert) => {
           const isOpen = expandedId === alert.id;
           const tone = alert.status === "triggered" ? severityTones[alert.severity] : statusTones[alert.status];
+          const isTriggered = alert.status === "triggered";
+          const isCriticalUnack = isTriggered && alert.severity === "critical";
 
           return (
-            <article key={alert.id} className={`rounded-2xl border p-4 ${tone}`}>
-              <button
-                type="button"
-                onClick={() => setExpandedId(isOpen ? null : alert.id)}
-                className="flex w-full items-start justify-between gap-3 text-left"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.14em] opacity-75">
-                    <span>{alert.triggerType}</span>
-                    <span>·</span>
-                    <span>{alert.observationKey || "catch-all"}</span>
-                  </div>
-                  <h3 className="mt-1 text-base font-semibold">{alert.message}</h3>
-                  <div className="mt-1 text-xs opacity-65">
-                    {new Date(alert.triggeredAt).toLocaleString()} · {alert.deliverySummary?.delivered?.length ?? 0}/{alert.deliveryCount} channels delivered
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {alert.status === "triggered" ? (
-                    <button
-                      type="button"
-                      disabled={busyId === alert.id}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void acknowledge(alert.id);
-                      }}
-                      className="inline-flex h-8 items-center gap-1 rounded-full border border-white/10 bg-black/20 px-2.5 text-xs font-medium text-white/72 transition hover:text-white"
-                    >
-                      <Check className="h-3.5 w-3.5" />
-                      Acknowledge
-                    </button>
-                  ) : null}
-                  <ChevronRight className={`h-4 w-4 transition ${isOpen ? "rotate-90" : ""}`} />
-                </div>
-              </button>
+            <article key={alert.id} className={`rounded-2xl border p-4 ${tone} transition`}>
+              <div className="flex items-start gap-3">
+                {isTriggered ? (
+                  <input
+                    type="checkbox"
+                    aria-label={`Select alert ${alert.id}`}
+                    checked={selectedIds.has(alert.id)}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setSelectedIds((prev) => {
+                        const next = new Set(prev);
+                        if (checked) next.add(alert.id);
+                        else next.delete(alert.id);
+                        return next;
+                      });
+                    }}
+                    className="mt-1 h-4 w-4 rounded border-white/20 bg-black/40 text-[#d9a441] focus:ring-[#d9a441]"
+                  />
+                ) : null}
 
-              {isOpen ? (
-                <AlertDetail
-                  alert={alert}
-                  deliveries={deliveryRows[alert.id]}
-                  retryBusyId={retryBusyId}
-                  onRetry={(deliveryId) => void retryDelivery(deliveryId, alert.id)}
-                />
-              ) : null}
+                <div className="min-w-0 flex-1">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedId(isOpen ? null : alert.id)}
+                    className="flex w-full items-start justify-between gap-3 text-left"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.14em] opacity-75">
+                        <span>{alert.triggerType}</span>
+                        <span>·</span>
+                        <span>{alert.observationKey || "catch-all"}</span>
+                        {isCriticalUnack ? (
+                          <span
+                            role="status"
+                            aria-live="polite"
+                            className="inline-flex items-center gap-1 rounded-full border border-red-500/50 bg-red-500/20 px-2 py-0.5 text-[10px] font-bold text-red-200 animate-pulse tracking-wide"
+                          >
+                            CRITICAL UNACKNOWLEDGED
+                          </span>
+                        ) : null}
+                      </div>
+                      <h3 className="mt-1 text-base font-semibold">{alert.message}</h3>
+                      <div className="mt-1 text-xs opacity-65">
+                        {new Date(alert.triggeredAt).toLocaleString()} · {alert.deliverySummary?.delivered?.length ?? 0}/{alert.deliveryCount} channels delivered
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {alert.status === "triggered" ? (
+                        <button
+                          type="button"
+                          disabled={busyId === alert.id}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void acknowledge(alert.id);
+                          }}
+                          className="inline-flex h-8 items-center gap-1 rounded-full border border-white/10 bg-black/20 px-2.5 text-xs font-medium text-white/72 transition hover:text-white"
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                          Acknowledge
+                        </button>
+                      ) : null}
+                      <ChevronRight className={`h-4 w-4 transition ${isOpen ? "rotate-90" : ""}`} />
+                    </div>
+                  </button>
+
+                  {isOpen ? (
+                    <AlertDetail
+                      alert={alert}
+                      deliveries={deliveryRows[alert.id]}
+                      retryBusyId={retryBusyId}
+                      onRetry={(deliveryId) => void retryDelivery(deliveryId, alert.id)}
+                    />
+                  ) : null}
+                </div>
+              </div>
             </article>
           );
         })}

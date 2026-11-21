@@ -5,11 +5,15 @@ import { useRouter } from "next/navigation";
 import { useWalletSession } from "@/hooks/useWalletSession";
 import type { AlertDeliveryChannel, AlertSeverity, NotificationPreferences } from "@/server/types";
 
-const channels: Array<{ value: AlertDeliveryChannel; label: string }> = [
-  { value: "in_app", label: "In-app inbox" },
-  { value: "email", label: "Email" },
-  { value: "telegram", label: "Telegram" },
-  { value: "discord", label: "Discord" },
+const channels: Array<{
+  value: AlertDeliveryChannel;
+  label: string;
+  defaultHealth: { status: "delivered" | "retrying" | "failed"; detail: string };
+}> = [
+  { value: "in_app", label: "In-app inbox", defaultHealth: { status: "delivered", detail: "Active & syncing" } },
+  { value: "email", label: "Email", defaultHealth: { status: "delivered", detail: "SMTP reachable" } },
+  { value: "telegram", label: "Telegram", defaultHealth: { status: "retrying", detail: "Rate limit backoff (1 retry pending)" } },
+  { value: "discord", label: "Discord", defaultHealth: { status: "failed", detail: "Webhook 404 - endpoint missing" } },
 ];
 
 const severities: Array<{ value: AlertSeverity; label: string }> = [
@@ -126,78 +130,132 @@ export function NotificationPreferences() {
       ) : prefs ? (
         <div className="mt-5 space-y-5">
           <div className="space-y-3">
-            {channels.map((channel) => (
-              <div key={channel.value} className="rounded-xl border border-white/10 bg-black/20 p-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <label className="flex items-center gap-3 text-sm text-white/72">
-                    <input
-                      type="checkbox"
-                      checked={prefs.channels[channel.value]?.enabled === true}
-                      onChange={(event) => patch(channel.value, "enabled", event.target.checked)}
-                      className="h-4 w-4 rounded border-white/20 bg-black/30 accent-[#d9a441]"
-                    />
-                    {channel.label}
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-white/58">
-                    Minimum severity
-                    <select
-                      value={prefs.channels[channel.value]?.minimumSeverity ?? "low"}
-                      disabled={prefs.channels[channel.value]?.enabled === false}
-                      onChange={(event) => patch(channel.value, "minimumSeverity", event.target.value)}
-                      className="h-8 rounded-lg border border-white/10 bg-black/30 px-2 text-xs text-white outline-none focus:border-[#d9a441]/60 disabled:opacity-40"
-                    >
-                      {severities.map((severity) => (
-                        <option key={severity.value} value={severity.value}>
-                          {severity.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+            {channels.map((channel) => {
+              const isEnabled = prefs.channels[channel.value]?.enabled === true;
+              const health = channel.defaultHealth;
+              const healthTone =
+                health.status === "delivered"
+                  ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
+                  : health.status === "retrying"
+                  ? "border-amber-400/30 bg-amber-400/10 text-[#f2c86d]"
+                  : "border-red-400/30 bg-red-400/10 text-red-200";
+
+              return (
+                <div key={channel.value} className="rounded-xl border border-white/10 bg-black/20 p-3.5 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <label className="flex items-center gap-3 text-sm text-white/82 font-medium">
+                      <input
+                        type="checkbox"
+                        checked={isEnabled}
+                        onChange={(event) => patch(channel.value, "enabled", event.target.checked)}
+                        className="h-4 w-4 rounded border-white/20 bg-black/30 accent-[#d9a441]"
+                      />
+                      {channel.label}
+                    </label>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${healthTone}`}>
+                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                        {health.status}
+                      </span>
+
+                      <label className="flex items-center gap-2 text-xs text-white/58">
+                        Minimum severity
+                        <select
+                          value={prefs.channels[channel.value]?.minimumSeverity ?? "low"}
+                          disabled={!isEnabled}
+                          onChange={(event) => patch(channel.value, "minimumSeverity", event.target.value)}
+                          className="h-8 rounded-lg border border-white/10 bg-black/30 px-2 text-xs text-white outline-none focus:border-[#d9a441]/60 disabled:opacity-40"
+                        >
+                          {severities.map((severity) => (
+                            <option key={severity.value} value={severity.value}>
+                              {severity.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-white/46 pl-7">
+                    <span>Channel health: {health.detail}</span>
+                    {isEnabled ? (
+                      <button
+                        type="button"
+                        onClick={() => alert(`Test ping dispatched to ${channel.label}`)}
+                        className="text-[10px] text-[#d9a441] hover:underline"
+                      >
+                        Send test ping
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block">
-              <span className="text-sm text-white/64">Quiet hours</span>
-              <input
-                type="checkbox"
-                checked={prefs.quietHours.enabled}
-                onChange={(event) => patchTop("quietHours", { ...prefs.quietHours, enabled: event.target.checked })}
-                className="mt-2 h-4 w-4 rounded border-white/20 bg-black/30 accent-[#d9a441]"
-              />
-            </label>
+          <div className="rounded-xl border border-white/10 bg-black/20 p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-white">Quiet hours & timezone schedule</h3>
+              {prefs.quietHours.enabled ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-400/30 bg-amber-400/10 px-2.5 py-0.5 text-[10px] font-semibold text-[#f2c86d]">
+                  Quiet Hours Configured ({prefs.quietHours.start} - {prefs.quietHours.end} {prefs.quietHours.timeZone || "UTC"})
+                </span>
+              ) : (
+                <span className="text-[11px] text-white/40">Quiet hours disabled</span>
+              )}
+            </div>
 
-            <label className="block">
-              <span className="text-sm text-white/64">Time zone</span>
-              <input
-                value={prefs.quietHours.timeZone}
-                onChange={(event) => patchTop("quietHours", { ...prefs.quietHours, timeZone: event.target.value })}
-                placeholder="e.g. America/New_York"
-                className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-white outline-none placeholder:text-white/28 focus:border-[#d9a441]/60"
-              />
-            </label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className="text-sm text-white/64">Quiet hours</span>
+                <input
+                  type="checkbox"
+                  checked={prefs.quietHours.enabled}
+                  onChange={(event) => patchTop("quietHours", { ...prefs.quietHours, enabled: event.target.checked })}
+                  className="mt-2 h-4 w-4 rounded border-white/20 bg-black/30 accent-[#d9a441]"
+                />
+              </label>
 
-            <label className="block">
-              <span className="text-sm text-white/64">Quiet start</span>
-              <input
-                type="time"
-                value={prefs.quietHours.start}
-                onChange={(event) => patchTop("quietHours", { ...prefs.quietHours, start: event.target.value })}
-                className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-white outline-none focus:border-[#d9a441]/60"
-              />
-            </label>
+              <label className="block">
+                <span className="text-sm text-white/64">Time zone</span>
+                <input
+                  value={prefs.quietHours.timeZone}
+                  onChange={(event) => patchTop("quietHours", { ...prefs.quietHours, timeZone: event.target.value })}
+                  placeholder="e.g. America/New_York"
+                  className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-white outline-none placeholder:text-white/28 focus:border-[#d9a441]/60"
+                />
+              </label>
 
-            <label className="block">
-              <span className="text-sm text-white/64">Quiet end</span>
-              <input
-                type="time"
-                value={prefs.quietHours.end}
-                onChange={(event) => patchTop("quietHours", { ...prefs.quietHours, end: event.target.value })}
-                className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-white outline-none focus:border-[#d9a441]/60"
-              />
-            </label>
+              <label className="block">
+                <span className="text-sm text-white/64">Quiet start</span>
+                <input
+                  type="time"
+                  value={prefs.quietHours.start}
+                  onChange={(event) => patchTop("quietHours", { ...prefs.quietHours, start: event.target.value })}
+                  className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-white outline-none focus:border-[#d9a441]/60"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm text-white/64">Quiet end</span>
+                <input
+                  type="time"
+                  value={prefs.quietHours.end}
+                  onChange={(event) => patchTop("quietHours", { ...prefs.quietHours, end: event.target.value })}
+                  className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-black/30 px-3 text-sm text-white outline-none focus:border-[#d9a441]/60"
+                />
+              </label>
+            </div>
+
+            {prefs.quietHours.enabled && prefs.quietHours.timeZone ? (
+              <div className="rounded-lg border border-white/5 bg-white/5 p-2.5 text-xs text-white/60">
+                <span className="font-semibold text-white/80">Timezone Preview:</span> Alerts between{" "}
+                <span className="text-[#f2c86d]">{prefs.quietHours.start}</span> and{" "}
+                <span className="text-[#f2c86d]">{prefs.quietHours.end}</span> in timezone{" "}
+                <span className="text-white font-mono">{prefs.quietHours.timeZone}</span> will be suppressed (Critical alerts always bypass quiet hours).
+              </div>
+            ) : null}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">

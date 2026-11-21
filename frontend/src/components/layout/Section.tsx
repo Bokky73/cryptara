@@ -23,14 +23,14 @@ export function Section({
 }) {
   return (
     <section
-      className={`min-w-0 rounded-lg border border-white/10 bg-white/5 p-4 sm:p-5 ${className}`}
+      className={`min-w-0 rounded-[var(--radius-lg,8px)] border border-[var(--color-border)] bg-[var(--color-glass-bg)] p-4 sm:p-5 ${className}`}
     >
       {title ? (
         <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
           <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-white">{title}</h2>
+            <h2 className="text-sm font-semibold text-[var(--color-fg)]">{title}</h2>
             {description ? (
-              <p className="mt-1 text-xs leading-5 text-white/60">{description}</p>
+              <p className="mt-1 text-xs leading-5 text-[var(--color-fg-muted)]">{description}</p>
             ) : null}
           </div>
           {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}

@@ -1,0 +1,35 @@
+# Version control
+.git
+.gitignore
+
+# Node dependencies (copied via lockfile in Docker build stages)
+node_modules
+frontend/node_modules
+backend/contracts/node_modules
+
+# Next.js build cache
+frontend/.next
+
+# Rust / Soroban build artifacts (not needed in app image)
+soroban/target
+
+# Test and local tooling
+frontend/playwright-report
+frontend/test-results
+frontend/coverage
+
+# Local env files (secrets must come from runtime env / Docker secrets)
+.env
+.env.*
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# CI and editor
+.github
+.vscode
+.idea
+
+# Release manifests and local dev outputs
+release-manifests
+artifacts/provenance
