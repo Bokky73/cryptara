@@ -230,6 +230,76 @@ jobs:
             frontend/test-results/
           if-no-files-found: warn
 
+  db-migrations:
+    name: DB migrations & schema drift
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'push' ||
+      contains(toJSON(github.event.pull_request.files.*.filename), 'db/') ||
+      contains(toJSON(github.event.pull_request.files.*.filename), 'frontend/src/server/storage/') ||
+      contains(toJSON(github.event.pull_request.files.*.filename), 'scripts/')
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: cryptara
+          POSTGRES_PASSWORD: cryptara
+          POSTGRES_DB: cryptara_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cryptara"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://cryptara:cryptara@localhost:5432/cryptara_test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Forward migrations
+        run: node scripts/migrate.mjs
+
+      - name: Validation SQL assertions
+        run: |
+          psql "$DATABASE_URL" <<'SQL'
+            -- migration_history table must exist and have at least one row
+            DO $$
+            BEGIN
+              IF (SELECT COUNT(*) FROM migration_history) = 0 THEN
+                RAISE EXCEPTION 'No migrations recorded in migration_history';
+              END IF;
+            END;
+            $$;
+          SQL
+
+      - name: Schema drift check
+        run: node scripts/schema-drift-check.mjs
+
+      - name: Rollback and re-apply idempotency check
+        run: |
+          set -euo pipefail
+          MIGRATIONS_DIR="db/migrations"
+          # Apply all down migrations in reverse order
+          for f in $(ls "$MIGRATIONS_DIR"/*.down.sql | sort -r); do
+            echo "Rolling back: $f"
+            psql "$DATABASE_URL" -f "$f"
+          done
+          # Re-apply forward migrations
+          node scripts/migrate.mjs
+          echo "Rollback and re-apply cycle passed."
+
   artifact-provenance:
     name: Contract artifact provenance
     runs-on: ubuntu-latest
