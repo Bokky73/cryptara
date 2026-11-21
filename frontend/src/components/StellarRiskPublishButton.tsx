@@ -190,10 +190,76 @@ export function StellarRiskPublishButton({
   const showStartButton = stage === "idle" || stage === "failed";
   const isSimulating = stage === "simulating";
   const previewExpired = preview && now > preview.expiresAt;
+  const isTestnet = networkId.includes("testnet");
+
+  // Determine current active step (1-4)
+  const currentStep =
+    stage === "idle" ? 1 :
+    stage === "simulating" || stage === "preview_ready" ? 1 :
+    stage === "signing" ? 2 :
+    stage === "submitting" ? 3 :
+    4;
+
+  const steps = [
+    { num: 1, label: "Preview Payload" },
+    { num: 2, label: "Sign in Wallet" },
+    { num: 3, label: "Submit to Soroban" },
+    { num: 4, label: "Verify On-Chain Hash" },
+  ];
 
   return (
-    <div className="mt-4 space-y-3">
-      <Link href="/insights/storage-lifetime" className="inline-flex rounded-full border border-white/15 px-4 py-2 text-sm text-white/70">Inspect contract storage lifetime</Link>
+    <div className="mt-4 space-y-4">
+      {/* 4-Step Stepper Header */}
+      <div className="rounded-xl border border-white/10 bg-black/40 p-3">
+        <div className="grid grid-cols-4 gap-2">
+          {steps.map((s) => {
+            const isDone = currentStep > s.num || stage === "success";
+            const isActive = currentStep === s.num && stage !== "success";
+
+            return (
+              <div key={s.num} className="flex flex-col items-center text-center">
+                <div
+                  className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold transition ${
+                    isDone
+                      ? "bg-emerald-500 text-black"
+                      : isActive
+                      ? "bg-[#d9a441] text-black ring-2 ring-[#d9a441]/40"
+                      : "border border-white/20 bg-white/5 text-white/40"
+                  }`}
+                >
+                  {isDone ? "✓" : s.num}
+                </div>
+                <span
+                  className={`mt-1 text-[10px] font-medium leading-tight ${
+                    isDone
+                      ? "text-emerald-300"
+                      : isActive
+                      ? "text-[#f2c86d]"
+                      : "text-white/40"
+                  }`}
+                >
+                  {s.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <Link href="/insights/storage-lifetime" className="inline-flex rounded-full border border-white/15 px-3 py-1 text-xs text-white/70 hover:text-white">
+          Inspect contract storage lifetime
+        </Link>
+        <span
+          className={`rounded-full px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider ${
+            isTestnet
+              ? "border border-amber-400/40 bg-amber-400/15 text-amber-300"
+              : "border border-purple-400/40 bg-purple-400/15 text-purple-200"
+          }`}
+        >
+          {isTestnet ? "Stellar Testnet" : "Stellar Pubnet"}
+        </span>
+      </div>
       {/* Preview button */}
       {showStartButton && (
         <button
@@ -225,12 +291,20 @@ export function StellarRiskPublishButton({
 
           <div className="grid gap-2 text-sm">
             <div className="flex items-center justify-between rounded-md bg-black/24 px-3 py-2">
-              <span className="text-white/60">Asset</span>
+              <span className="text-white/60">Asset ID</span>
+              <span className="font-mono text-xs text-white" title={preview.assetId || assetKey}>{preview.assetId || assetKey}</span>
+            </div>
+            <div className="flex items-center justify-between rounded-md bg-black/24 px-3 py-2">
+              <span className="text-white/60">Asset Label</span>
               <span className="font-mono text-white">{preview.assetLabel}</span>
             </div>
             <div className="flex items-center justify-between rounded-md bg-black/24 px-3 py-2">
-              <span className="text-white/60">Score / Verdict</span>
-              <span className="font-mono text-white">{preview.score} / {preview.verdict}</span>
+              <span className="text-white/60">Score / Confidence</span>
+              <span className="font-mono text-white">{preview.score}/100 · 9500 bps (95%)</span>
+            </div>
+            <div className="flex items-center justify-between rounded-md bg-black/24 px-3 py-2">
+              <span className="text-white/60">Verdict</span>
+              <span className="font-mono text-white uppercase text-emerald-300 font-semibold">{preview.verdict}</span>
             </div>
             <div className="flex items-center justify-between rounded-md bg-black/24 px-3 py-2">
               <span className="flex items-center gap-1 text-white/60"><Hash className="h-3 w-3" /> Report hash</span>
@@ -348,13 +422,20 @@ export function StellarRiskPublishButton({
           )}
 
           {verifyOutcome.hashMatch === false && (
-            <div className="flex items-start gap-2 rounded-md bg-red-900/20 px-3 py-2 text-xs text-red-200">
-              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-              <span>
-                Onchain report hash does not match the local report hash.
-                Expected <code className="font-mono">{shortHex(verifyOutcome.localReportHash ?? "", 6)}</code>,
-                got <code className="font-mono">{shortHex(verifyOutcome.onchainReportHash ?? "", 6)}</code>.
-              </span>
+            <div className="flex items-start gap-2 rounded-lg border-2 border-red-500 bg-red-950/80 p-4 text-xs text-red-200">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+              <div className="space-y-1">
+                <span className="font-bold text-red-100">
+                  CRITICAL INTEGRITY MISMATCH: On-chain hash does not match local report payload!
+                </span>
+                <p>
+                  Expected hash <code className="font-mono bg-black/40 px-1">{shortHex(verifyOutcome.localReportHash ?? "", 8)}</code>,
+                  but registry ledger returned <code className="font-mono bg-black/40 px-1">{shortHex(verifyOutcome.onchainReportHash ?? "", 8)}</code>.
+                </p>
+                <p className="text-white/70">
+                  <strong>Remediation:</strong> Do not rely on this on-chain record for automated execution. Check Soroban TTL diagnostics, re-canonicalize report JSON, and republish.
+                </p>
+              </div>
             </div>
           )}
         </div>
