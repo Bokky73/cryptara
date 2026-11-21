@@ -148,7 +148,7 @@ jobs:
 
       # ── GitHub Artifact Attestation ───────────────────────────────────────
       - name: Attest EVM artifacts
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             backend/contracts/artifacts/contracts/CryptaraPolicy.sol/CryptaraPolicy.json
@@ -156,7 +156,7 @@ jobs:
             backend/contracts/artifacts/contracts/CryptaraAudit.sol/CryptaraAudit.json
 
       - name: Attest Soroban WASMs
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             soroban/target/wasm32v1-none/release/cryptara_policy.wasm
@@ -165,7 +165,7 @@ jobs:
             soroban/target/wasm32v1-none/release/cryptara_audit_registry.wasm
 
       - name: Attest provenance manifests
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: release-manifests/latest.json
 
