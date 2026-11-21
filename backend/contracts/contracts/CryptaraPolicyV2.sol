@@ -45,11 +45,11 @@ contract CryptaraPolicyV2 is CryptaraPolicy {
         require(intent.amount == amount, "PolicyV2: intent amount mismatch");
         require(!intent.executed, "PolicyV2: intent already executed");
 
-        _rollDailySpend(user);
-        uint256 newSpend = dailySpend[user] + amount;
+        uint256 dayBucket = block.timestamp / 1 days;
+        uint256 newSpend = dailySpendByDay[user][dayBucket] + amount;
         require(newSpend <= maxDailySpend, "PolicyV2: daily spend exceeded");
 
-        dailySpend[user] = newSpend;
+        dailySpendByDay[user][dayBucket] = newSpend;
         intent.executed = true;
 
         emit IntentConsumed(intentHash, user, token, amount);

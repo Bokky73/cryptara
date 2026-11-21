@@ -41,8 +41,8 @@ contract CryptaraPolicy {
     uint256 public maxDailySpend;
 
     mapping(address => uint256) public userNonce;
-    mapping(address => uint256) public dailySpend;
-    uint256 public lastDailyReset;
+    // Per-user, per-day spend buckets: dailySpend[user][dayBucket]
+    mapping(address => mapping(uint256 => uint256)) public dailySpend;
 
     mapping(address => bool) public allowedAssets;
     mapping(address => bool) public blockedAssets;
@@ -75,7 +75,6 @@ contract CryptaraPolicy {
     event AssetAllowed(address indexed asset);
     event AssetBlocked(address indexed asset, bool blocked);
     event LimitsUpdated(uint256 maxTxValue, uint256 maxSlippageBps, uint256 maxDailySpend);
-    event DailySpendReset(uint256 timestamp);
 
     // ──────────────────────────────────────────────
     //  Modifiers
@@ -231,6 +230,18 @@ contract CryptaraPolicy {
     }
 
     // ──────────────────────────────────────────────
+    //  Daily Spend Helpers
+    // ──────────────────────────────────────────────
+
+    function currentDayBucket() public view returns (uint256) {
+        return block.timestamp / 1 days;
+    }
+
+    function getDailySpend(address user) public view returns (uint256) {
+        return dailySpend[user][currentDayBucket()];
+    }
+
+    // ──────────────────────────────────────────────
     //  Policy Application
     // ──────────────────────────────────────────────
 
@@ -247,12 +258,11 @@ contract CryptaraPolicy {
         uint256 nonce = userNonce[_user] + 1;
         userNonce[_user] = nonce;
 
-        bytes32 decisionHash = hashPolicyDecision(_user, agent, _maxTxValue, _maxSlippage, nonce, _expiry);
-
+        bytes32 decisionHash = hashPolicyDecision(_user, msg.sender, _maxTxValue, _maxSlippage, nonce, _expiry);
         policyDecisions[decisionHash] = PolicyDecision({
             decisionHash: decisionHash,
             user: _user,
-            authorizedAgent: agent,
+            authorizedAgent: msg.sender,
             maxTransactionValue: _maxTxValue,
             maxSlippageBps: _maxSlippage,
             nonce: nonce,
@@ -262,41 +272,5 @@ contract CryptaraPolicy {
 
         emit PolicyApplied(_user, decisionHash);
         return decisionHash;
-    }
-
-    // ──────────────────────────────────────────────
-    //  Intent Consumption (atomic, vault-only)
-    // ──────────────────────────────────────────────
-
-    function consumeIntent(
-        bytes32 intentHash,
-        address user,
-        address token,
-        uint256 amount
-    ) external onlyVault whenNotPaused nonReentrant {
-        require(user != address(0), "Policy: zero user");
-        require(token != address(0), "Policy: zero token");
-        require(amount > 0, "Policy: zero amount");
-
-        Intent storage intent = intents[intentHash];
-        require(intent.intentHash == intentHash, "Policy: unknown intent");
-        require(!intent.executed, "Policy: intent executed");
-        require(intent.targetToken == token, "Policy: token mismatch");
-        require(intent.amount == amount, "Policy: amount mismatch");
-        require(intent.expiry >= block.timestamp, "Policy: intent expired");
-
-        if (lastDailyReset == 0 || block.timestamp >= lastDailyReset + 1 days) {
-            lastDailyReset = block.timestamp;
-            emit DailySpendReset(block.timestamp);
-        }
-
-        uint256 newSpend = dailySpend[user] + amount;
-        require(maxDailySpend == 0 || newSpend <= maxDailySpend, "Policy: daily spend exceeded");
-        dailySpend[user] = newSpend;
-
-        intent.executed = true;
-
-        emit IntentExecuted(intentHash);
-        emit IntentConsumed(intentHash, user, token, amount);
     }
 }
