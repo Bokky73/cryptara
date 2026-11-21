@@ -16,6 +16,7 @@ contract CryptaraVault {
     IPolicyValidator public immutable policy;
     address public immutable agent;
     address public timelock;
+    address public pendingTimelock;
 
     mapping(address => mapping(address => uint256)) public balances;
     mapping(bytes32 => bool) public consumedIntents;
@@ -23,12 +24,20 @@ contract CryptaraVault {
     event Deposited(address indexed user, address indexed token, uint256 amount);
     event Withdrawn(address indexed user, address indexed token, uint256 amount, bytes32 indexed intentHash);
     event TimelockUpdated(address indexed oldTimelock, address indexed newTimelock);
+    event AdminTransferProposed(address indexed currentAdmin, address indexed pendingAdmin);
+    event AdminTransferAccepted(address indexed oldAdmin, address indexed newAdmin);
+    event AdminTransferCancelled(address indexed currentAdmin, address indexed cancelledPendingAdmin);
 
     constructor(address _policy, address _agent) {
         require(_policy != address(0), "Vault: zero policy");
         require(_agent != address(0), "Vault: zero agent");
         policy = IPolicyValidator(_policy);
         agent = _agent;
+    }
+
+    modifier onlyTimelock() {
+        require(msg.sender == timelock, "Vault: not timelock");
+        _;
     }
 
     function deposit(address token, uint256 amount) external {
@@ -69,6 +78,28 @@ contract CryptaraVault {
         address old = timelock;
         timelock = _timelock;
         emit TimelockUpdated(old, _timelock);
+    }
+
+    function proposeAdmin(address pending) external onlyTimelock {
+        require(pending != address(0), "Vault: zero pending admin");
+        require(pending != timelock, "Vault: already admin");
+        pendingTimelock = pending;
+        emit AdminTransferProposed(timelock, pending);
+    }
+
+    function acceptAdmin() external {
+        require(msg.sender == pendingTimelock, "Vault: not pending admin");
+        address old = timelock;
+        timelock = pendingTimelock;
+        pendingTimelock = address(0);
+        emit AdminTransferAccepted(old, timelock);
+    }
+
+    function cancelPendingAdmin() external onlyTimelock {
+        address cancelled = pendingTimelock;
+        require(cancelled != address(0), "Vault: no pending admin");
+        pendingTimelock = address(0);
+        emit AdminTransferCancelled(timelock, cancelled);
     }
 
     function userBalance(address user, address token) external view returns (uint256) {
