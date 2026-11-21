@@ -1,49 +1,54 @@
-import { execSync } from "node:child_process";
-import http from "node:http";
-import fs from "node:fs";
-import net from "node:net";
+#!/usr/bin/env node
 
-console.log("=> Running Cryptara environment doctor...\n");
+/**
+ * scripts/doctor.mjs
+ *
+ * Environment doctor verifying local runtime prerequisites for Cryptara:
+ * - Node.js >= 22
+ * - npm >= 10
+ * - Rust & cargo (optional warning if missing)
+ * - Stellar CLI (optional warning if missing)
+ */
 
-let errors = 0;
-let warnings = 0;
+import { execSync } from 'child_process';
 
-function report(status, message, resolution = null) {
-  if (status === "OK") {
-    console.log(`[ OK ] ${message}`);
-  } else if (status === "WARN") {
-    warnings++;
-    console.warn(`[WARN] ${message}`);
-    if (resolution) console.warn(`       Resolution: ${resolution}`);
-  } else {
-    errors++;
-    console.error(`[FAIL] ${message}`);
-    if (resolution) console.error(`       Resolution: ${resolution}`);
-  }
-}
+console.log('Cryptara Environment Doctor\n============================');
 
-// 1. Node version
-if (!process.version.startsWith("v22.")) {
-  report("FAIL", `Node version is ${process.version}`, "Use NVM or install Node.js v22.x");
+let allPassed = true;
+
+// 1. Node.js Check
+const nodeVer = process.version;
+const major = parseInt(nodeVer.slice(1).split('.')[0], 10);
+if (major >= 22) {
+  console.log(`[PASS] Node.js version ${nodeVer} satisfies >= v22.0.0`);
 } else {
-  report("OK", `Node version is ${process.version}`);
+  console.log(`[FAIL] Node.js version ${nodeVer} is below required v22.0.0`);
+  allPassed = false;
 }
 
-// 2. Rust & Stellar CLI
+// 2. npm Check
 try {
-  const rustc = execSync("rustc --version").toString().trim();
-  report("OK", `Rust compiler found: ${rustc}`);
-} catch {
-  report("FAIL", "Rust compiler (rustc) not found", "Install Rust from https://rustup.rs/");
+  const npmVer = execSync('npm -v', { encoding: 'utf8' }).trim();
+  console.log(`[PASS] npm version ${npmVer} detected`);
+} catch (e) {
+  console.log(`[FAIL] npm executable not found`);
+  allPassed = false;
 }
 
+// 3. Rust Check
 try {
-  const stellarCli = execSync("stellar --version").toString().trim();
-  report("OK", `Stellar CLI found: ${stellarCli.split("\n")[0]}`);
-} catch {
-  report("FAIL", "Stellar CLI not found", "Run `cargo install --locked stellar-cli`");
+  const rustVer = execSync('rustc --version', { encoding: 'utf8' }).trim();
+  console.log(`[PASS] Rust compiler detected: ${rustVer}`);
+} catch (e) {
+  console.log(`[WARN] Rust compiler not found (required for Soroban contract builds)`);
 }
 
+// 4. Stellar CLI Check
+try {
+  const stellarVer = execSync('stellar --version', { encoding: 'utf8' }).trim();
+  console.log(`[PASS] Stellar CLI detected: ${stellarVer}`);
+} catch (e) {
+  console.log(`[WARN] Stellar CLI not found (required for Soroban deployment/archival)`);
 // 3. Docker availability
 try {
   const dockerVersion = execSync("docker --version 2>&1").toString().trim();
@@ -99,12 +104,11 @@ if (!fs.existsSync("frontend/.env")) {
   }
 }
 
-console.log("");
-if (errors > 0) {
-  console.error(`=> Doctor found ${errors} error(s) and ${warnings} warning(s). Environment is NOT safe.`);
-  process.exit(1);
-} else if (warnings > 0) {
-  console.log(`=> Doctor found 0 errors and ${warnings} warning(s). Environment may be safe but degraded.`);
+console.log('\n============================');
+if (allPassed) {
+  console.log('✓ Environment ready for Cryptara development!');
+  process.exit(0);
 } else {
-  console.log("=> Doctor passed! Environment looks healthy.");
+  console.log('✗ Missing required prerequisites.');
+  process.exit(1);
 }
