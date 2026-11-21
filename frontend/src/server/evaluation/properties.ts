@@ -31,3 +31,36 @@ export function replayIsByteStable(transcript: AgentRunTranscript) {
   const second = replayTranscript(transcript).serialized;
   return first === second && first === canonicalJson(transcript.finalResult);
 }
+
+export function scoreWithinBounds(result: AgentResult) {
+  return result.riskScore >= 0 && result.riskScore <= 100;
+}
+
+export function confidenceWithinBounds(result: AgentResult) {
+  return result.confidence >= 0 && result.confidence <= 100;
+}
+
+export function liquidityDropDoesNotLowerRisk(before: AgentResult, after: AgentResult) {
+  const beforeLiquidity = before.metrics?.liquidityUsd;
+  const afterLiquidity = after.metrics?.liquidityUsd;
+
+  if (typeof beforeLiquidity !== "number" || typeof afterLiquidity !== "number") {
+    return true;
+  }
+
+  return afterLiquidity < beforeLiquidity ? after.riskScore >= before.riskScore : true;
+}
+
+export function honeypotFlipDoesNotLowerRisk(before: AgentResult, after: AgentResult) {
+  const beforeHoneypot = before.metrics?.honeypot === true;
+  const afterHoneypot = after.metrics?.honeypot === true;
+
+  return !beforeHoneypot && afterHoneypot ? after.riskScore >= before.riskScore : true;
+}
+
+export function tieBreakingIsDeterministic(results: AgentResult[]) {
+  const first = runDecisionAgent({ results }).recommendedAction;
+  const second = runDecisionAgent({ results: [...results].reverse() }).recommendedAction;
+
+  return first === second;
+}

@@ -21,6 +21,8 @@ type AgentOrchestrationInput = {
   identity?: AgentInputIdentity;
   portfolio?: PortfolioSnapshot;
   persistRun?: boolean;
+  /** Explicit evaluation timestamp; when omitted a single clock read is captured for the whole run. */
+  evaluatedAt?: string;
   discoveryContext?: {
     source?: string;
     metrics?: Record<string, unknown>;
@@ -35,6 +37,7 @@ type AgentOrchestrationResult = {
   decision: AgentResult;
   runRecord?: AgentRunRecord;
   runId: string;
+  evaluatedAt: string;
   partialStatus: ReturnType<typeof getRunPartialStatus>;
   transcript?: AgentRunTranscript;
 };
@@ -92,12 +95,13 @@ async function runWithRunMetadata(runId: string, deadline: number, agent: AgentR
   };
 }
 
-async function runTokenSpecialists(identity: ReturnType<typeof resolveTokenIdentity>, runId: string, deadline: number) {
+async function runTokenSpecialists(identity: ReturnType<typeof resolveTokenIdentity>, runId: string, deadline: number, evaluatedAt: string) {
   const [onchain, news, social] = await Promise.all([
     runWithRunMetadata(runId, deadline, "onchain", () =>
       runOnchainAgent({
         chain: identity.chain,
         contractAddress: identity.contractAddress,
+        evaluatedAt,
       }),
     ),
     runWithRunMetadata(runId, deadline, "news", () =>
@@ -107,6 +111,7 @@ async function runTokenSpecialists(identity: ReturnType<typeof resolveTokenIdent
         contractAddress: identity.contractAddress,
         websiteUrl: identity.websiteUrl,
         chain: identity.chain,
+        evaluatedAt,
       }),
     ),
     runWithRunMetadata(runId, deadline, "social", () =>
@@ -117,6 +122,7 @@ async function runTokenSpecialists(identity: ReturnType<typeof resolveTokenIdent
         websiteUrl: identity.websiteUrl,
         twitterUrl: identity.twitterUrl,
         telegramUrl: identity.telegramUrl,
+        evaluatedAt,
       }),
     ),
   ]);
@@ -140,6 +146,8 @@ function getDependencyGraph(mode: AgentRunMode) {
 export async function runAgentOrchestration(input: AgentOrchestrationInput): Promise<AgentOrchestrationResult> {
   const runId = createAgentRunId();
   const deadline = createRunDeadline();
+  // Capture a single evaluation timestamp for the whole run so replay is pure given input snapshots.
+  const evaluatedAt = input.evaluatedAt ?? new Date().toISOString();
   const chainFamily = input.identity?.chain?.startsWith("stellar") ? "stellar" : "evm";
   const network = input.identity?.chain ?? "legacy-evm";
   const recorder = createTranscriptRecorder({
@@ -147,7 +155,7 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
     chainFamily,
     network,
     assetIdentity: { asset: input.identity?.symbol ?? "portfolio" },
-    inputSnapshot: { mode: input.mode, walletAddress: input.walletAddress, identity: input.identity },
+    inputSnapshot: { mode: input.mode, walletAddress: input.walletAddress, identity: input.identity, evaluatedAt },
   }, { enabled: process.env.AGENT_REPLAY_RECORDING === "1" });
 
   return withSpan("agent.orchestration", { mode: input.mode, runId, chainFamily, network }, async () => {
@@ -156,7 +164,7 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
     const candidateInputs: AgentInputIdentity[] = [];
 
     if (input.mode === "portfolio_review" || input.mode === "holding_review" || input.mode === "execution_prepare") {
-      const portfolioResult = await runWithRunMetadata(runId, deadline, "portfolio", () => runPortfolioAgent(input.walletAddress), 8_000);
+      const portfolioResult = await runWithRunMetadata(runId, deadline, "portfolio", () => runPortfolioAgent(input.walletAddress, evaluatedAt), 8_000);
       results.push(portfolioResult);
       identityInput = identityInput ?? getRiskiestHolding(input.portfolio);
       candidateInputs.push(...getCandidateHoldings(input.portfolio));
@@ -171,10 +179,10 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
       for (const candidate of candidateInputs) {
         const candidateIdentity = resolveTokenIdentity(candidate);
 
-        results.push(...(await runTokenSpecialists(candidateIdentity, runId, deadline)));
+        results.push(...(await runTokenSpecialists(candidateIdentity, runId, deadline, evaluatedAt)));
       }
     } else if (identity && input.mode !== "execution_prepare") {
-      results.push(...(await runTokenSpecialists(identity, runId, deadline)));
+      results.push(...(await runTokenSpecialists(identity, runId, deadline, evaluatedAt)));
     }
 
     const isDeadlineSkipped = (result: AgentResult) =>
@@ -186,50 +194,47 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
         walletAddress: input.walletAddress,
         userAlreadyOwnsToken: input.mode === "portfolio_review" || input.mode === "holding_review" || input.mode === "execution_prepare",
         tokenSymbol: identity?.symbol,
+        evaluatedAt,
         discoveryContext: input.mode === "discovery_candidate"
           ? {
-              chainFamily: identity?.chainFamily,
-              discoverySource: input.discoveryContext?.source,
-              identityConfidence: identity?.confidence ?? 0,
-              identityConfidenceLabel: identity?.confidenceLabel ?? "low",
+              chainFamily: identity?.chain?.startsWith("stellar") ? "stellar" : "evm",
+              source: input.discoveryContext?.source,
               metrics: input.discoveryContext?.metrics,
             }
           : undefined,
       },
-      userRules,
     });
-    if (results.some(isDeadlineSkipped)) {
-      decision.rawSignals = {
-        ...(decision.rawSignals ?? {}),
-        orchestration: { ...createRunStepMetadata(runId, "decision"), outcome: "partial" },
-      };
-    }
+
     results.push(decision);
 
     if (input.mode === "execution_prepare") {
       const execution = await runWithRunMetadata(runId, deadline, "execution", () =>
         runExecutionAgent({
-          walletAddress: input.walletAddress,
-          identity,
           decision,
+          walletAddress: input.walletAddress,
           userRules,
+          evaluatedAt,
         }),
       );
       results.push(execution);
     }
 
     const partialStatus = getRunPartialStatus(results);
-    const runRecord = input.persistRun === false
-      ? undefined
-      : createAgentRunRecord({
-          runId,
-          mode: input.mode,
-          walletAddress: input.walletAddress,
-          identity,
-          results,
-          decision,
-          partialStatus,
-        });
+    const transcript = recorder.finalize({ results, decision });
+
+    let runRecord: AgentRunRecord | undefined;
+    if (input.persistRun) {
+      runRecord = createAgentRunRecord({
+        runId,
+        mode: input.mode,
+        walletAddress: input.walletAddress,
+        identity,
+        results,
+        decision,
+        partialStatus,
+        evaluatedAt,
+      });
+    }
 
     return {
       mode: input.mode,
@@ -239,8 +244,9 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
       decision,
       runRecord,
       runId,
+      evaluatedAt,
       partialStatus,
-      transcript: recorder.finish({ results, decision, partialStatus }),
+      transcript,
     };
   });
 }

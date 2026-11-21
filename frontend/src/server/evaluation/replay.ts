@@ -10,14 +10,20 @@ export type ReplaySnapshot = {
   chainFamily?: "evm" | "stellar";
   fixtureName?: string;
   migrationNote?: string;
+  evaluatedAt?: string;
 };
 
-export function createReplaySnapshot(result: AgentResult, sourceSnapshotHash: string): ReplaySnapshot {
+export function createReplaySnapshot(
+  result: AgentResult,
+  sourceSnapshotHash: string,
+  evaluatedAt?: string,
+): ReplaySnapshot {
   return {
     agent: result.agent,
     sourceSnapshotHash,
     riskScore: result.riskScore,
     recommendedAction: result.recommendedAction,
+    evaluatedAt,
   };
 }
 
@@ -25,6 +31,7 @@ export function createStellarReplaySnapshot(
   result: AgentResult,
   sourceSnapshotHash: string,
   fixtureName: string,
+  evaluatedAt?: string,
 ): ReplaySnapshot {
   return {
     agent: result.agent,
@@ -33,6 +40,7 @@ export function createStellarReplaySnapshot(
     recommendedAction: result.recommendedAction,
     chainFamily: "stellar",
     fixtureName,
+    evaluatedAt,
   };
 }
 
@@ -51,6 +59,32 @@ export function compareReplayTranscript(expected: AgentRunTranscript, replayed: 
   }
   const diff = diffTranscripts(expected, replayed);
   return { compatible: diff.identical, differences: diff.differences, migrationNote: diff.identical ? undefined : "Replay drift detected; review the stage and field diff before accepting a changed baseline." };
+}
+
+/**
+ * Canonicalize a replay snapshot into a stable, key-sorted JSON string.
+ * Object keys are sorted recursively and undefined values are dropped so that
+ * two replays of identical snapshot inputs produce byte-identical output.
+ */
+export function canonicalizeReplaySnapshot(snapshot: ReplaySnapshot): string {
+  return JSON.stringify(sortKeys(snapshot));
+}
+
+function sortKeys(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortKeys);
+  }
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(record).sort()) {
+      if (record[key] !== undefined) {
+        sorted[key] = sortKeys(record[key]);
+      }
+    }
+    return sorted;
+  }
+  return value;
 }
 
 /**
