@@ -58,22 +58,34 @@ function inspectLabel(value: string | undefined, field: string, warnings: string
   if ([...normalized].some((character) => CONFUSABLES[character])) warnings.push(`${field} contains homoglyph characters`);
 }
 
+/** Extract a bare address from a CAIP-19 / explorer URL / raw address input. */
+function extractAddress(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  const caip = trimmed.match(/^eip155:\d+\/erc20:(0x[0-9a-fA-F]{40})$/u);
+  if (caip) return caip[1];
+  const url = trimmed.match(/(0x[0-9a-fA-F]{40})/u);
+  if (url) return url[1];
+  return trimmed;
+}
+
 function candidateKey(candidate: CanonicalTokenCandidate): string | undefined {
   const family = getChainFamily(candidate.chain);
   const network = normalizeNetwork(candidate.network ?? candidate.chain, family);
   if (family === "evm") {
-    if (!candidate.contractAddress || !isAddress(candidate.contractAddress)) return undefined;
-    return `${network}:evm:${candidate.contractAddress.toLowerCase()}`;
+    const address = extractAddress(candidate.contractAddress);
+    if (!address || !isAddress(address)) return undefined;
+    return `eip155:${network}/erc20:${address.toLowerCase()}`;
   }
   if (candidate.assetKey && candidate.issuer) {
     if (!isStellarAccountAddress(candidate.issuer)) return undefined;
-    return `${network}:stellar:${canonicalClassicAssetKey(candidate.assetKey, candidate.issuer)}`;
+    return `stellar:${network}/asset:${canonicalClassicAssetKey(candidate.assetKey, candidate.issuer)}`;
   }
   if (candidate.contractAddress) {
     if (!isStellarContractAddress(candidate.contractAddress)) return undefined;
-    return `${network}:stellar:${canonicalizeAddress(candidate.contractAddress, "stellar")}`;
+    return `stellar:${network}/asset:${canonicalizeAddress(candidate.contractAddress, "stellar")}`;
   }
-  if (candidate.assetKey === "native" || candidate.symbol?.toUpperCase() === "XLM") return `${network}:stellar:native`;
+  if (candidate.assetKey === "native" || candidate.symbol?.toUpperCase() === "XLM") return `stellar:${network}/asset:native`;
   return undefined;
 }
 
@@ -106,6 +118,7 @@ export function resolveCanonicalTokenIdentity(input: CanonicalTokenInput): Canon
   const status: CanonicalIdentityStatus = ambiguous ? "ambiguous" : suspicious && !input.warningAcknowledged ? "rejected" : "resolved";
   const confidence = status === "resolved" ? (suspicious ? 0.62 : 0.94) : ambiguous ? 0.25 : 0.1;
   const network = normalizeNetwork(input.network ?? input.chain, family);
+  const evmAddress = family === "evm" ? extractAddress(input.contractAddress) : input.contractAddress;
   return {
     status,
     identityKey: key,
@@ -113,7 +126,7 @@ export function resolveCanonicalTokenIdentity(input: CanonicalTokenInput): Canon
     network,
     symbol: input.symbol?.normalize("NFKC").trim().toUpperCase(),
     tokenName: input.tokenName?.normalize("NFKC").trim(),
-    contractAddress: input.contractAddress ? canonicalizeAddress(input.contractAddress, family) : undefined,
+    contractAddress: evmAddress ? canonicalizeAddress(evmAddress, family) : undefined,
     issuer: input.issuer,
     assetKey: input.assetKey,
     confidence,

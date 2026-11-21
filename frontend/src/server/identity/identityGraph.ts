@@ -29,6 +29,57 @@ function addNode(nodes: IdentityGraphNode[], node: IdentityGraphNode | undefined
   nodes.push(node);
 }
 
+function addEdge(edges: IdentityGraphEdge[], edge: IdentityGraphEdge) {
+  if (edges.some((existing) => existing.from === edge.from && existing.to === edge.to && existing.relation === edge.relation)) {
+    return;
+  }
+
+  edges.push(edge);
+}
+
+const SAC_CONTRACT_PATTERN = /^C[A-Z2-7]{55}$/;
+const STELLAR_ISSUER_PATTERN = /^G[A-Z2-7]{55}$/;
+const STELLAR_ASSET_PATTERN = /^([A-Za-z0-9]{1,12}):(G[A-Z2-7]{55})$/;
+
+export function isSorobanSacContract(value?: string) {
+  return Boolean(value && SAC_CONTRACT_PATTERN.test(value.trim()));
+}
+
+/**
+ * Build a canonical CAIP-19-style identifier for a token.
+ * EVM: eip155:<chainId>/erc20:<lowercaseAddress>
+ * Stellar classic: stellar:<network>/asset:<code:issuer>
+ * Stellar SAC: stellar:<network>/asset:<sacContractId>
+ */
+export function buildCanonicalTokenId(input: AgentInputIdentity): string | undefined {
+  const family = getChainFamily(input.chain);
+  const contractValue = normalizeValue(input.contractAddress);
+  const chain = normalizeValue(input.chain)?.toLowerCase();
+
+  if (family === "evm" && contractValue) {
+    const address = canonicalizeAddress(contractValue, family).toLowerCase();
+    const chainId = chain?.replace(/^eip155:/, "");
+    return chainId ? `eip155:${chainId}/erc20:${address}` : `eip155/erc20:${address}`;
+  }
+
+  if (family === "stellar" && contractValue) {
+    const network = chain?.replace(/^stellar:/, "") ?? "stellar";
+    const assetMatch = contractValue.match(STELLAR_ASSET_PATTERN);
+    if (assetMatch) {
+      return `stellar:${network}/asset:${assetMatch[1].toUpperCase()}:${assetMatch[2]}`;
+    }
+    if (isSorobanSacContract(contractValue)) {
+      return `stellar:${network}/asset:${contractValue.trim()}`;
+    }
+    if (STELLAR_ISSUER_PATTERN.test(contractValue.trim())) {
+      const symbol = normalizeValue(input.symbol)?.toUpperCase();
+      return symbol ? `stellar:${network}/asset:${symbol}:${contractValue.trim()}` : undefined;
+    }
+  }
+
+  return undefined;
+}
+
 export function getSymbolCollisionRisk(symbol?: string, contractAddress?: string, chain?: string) {
   const normalized = symbol?.trim().toUpperCase();
   const collisionProne = Boolean(normalized && collisionProneSymbols.has(normalized));
@@ -84,6 +135,7 @@ export function buildTokenIdentityGraph(input: AgentInputIdentity) {
   const discord = normalizeValue(input.discordUrl);
   const coingecko = normalizeValue(input.coingeckoId);
   const coinmarketcap = normalizeValue(input.coinmarketcapId);
+  const canonicalId = buildCanonicalTokenId(input);
 
   addNode(nodes, contract ? { id: `contract:${contract}`, type: "contract", label: contract, confidence: "high" } : undefined);
   addNode(nodes, chain ? { id: `chain:${chain}`, type: "chain", label: chain, confidence: "high" } : undefined);
@@ -103,7 +155,7 @@ export function buildTokenIdentityGraph(input: AgentInputIdentity) {
     for (const node of nodes) {
       if (node.id === anchor.id) continue;
 
-      edges.push({
+      addEdge(edges, {
         from: anchor.id,
         to: node.id,
         relation: node.type === "social" || node.type === "website" ? "official_link" : node.type === "directory" ? "directory_reference" : node.type === "symbol" ? "weak_label" : "same_token",
@@ -111,9 +163,35 @@ export function buildTokenIdentityGraph(input: AgentInputIdentity) {
     }
   }
 
+  // Explicit cross-representation linking: a Stellar classic asset (CODE:ISSUER) and its
+  // wrapped Soroban SAC contract ID represent the same underlying asset. Link them only when
+  // the issuer is identical so distinct issuers sharing a ticker never conflate.
+  if (family === "stellar" && contractValue) {
+    const assetMatch = contractValue.match(STELLAR_ASSET_PATTERN);
+    const sacContract = assetMatch ? undefined : isSorobanSacContract(contractValue) ? contractValue.trim() : undefined;
+    const classicIssuer = assetMatch ? assetMatch[2] : STELLAR_ISSUER_PATTERN.test(contractValue.trim()) ? contractValue.trim() : undefined;
+
+    if (classicIssuer && symbol) {
+      const classicId = `stellar:asset:${symbol}:${classicIssuer}`;
+      addNode(nodes, { id: classicId, type: "contract", label: `${symbol}:${classicIssuer}`, confidence: "high" });
+      if (anchor) {
+        addEdge(edges, { from: anchor.id, to: classicId, relation: "same_token" });
+      }
+    }
+
+    if (sacContract) {
+      const sacId = `stellar:sac:${sacContract}`;
+      addNode(nodes, { id: sacId, type: "contract", label: sacContract, confidence: "high" });
+      if (anchor) {
+        addEdge(edges, { from: anchor.id, to: sacId, relation: "same_token" });
+      }
+    }
+  }
+
   return {
     nodes,
     edges,
+    canonicalId,
     collision: getSymbolCollisionRisk(symbol, contract, chain),
     officialLinks: verifyOfficialLinks(input),
   };
