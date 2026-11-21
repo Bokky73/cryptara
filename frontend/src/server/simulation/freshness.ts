@@ -6,6 +6,25 @@ const DEFAULT_CONFIG: SimulationFreshnessConfig = {
   maxElapsedMs: 300_000,
 };
 
+export type SimulationStaleCode =
+  | "SIMULATION_STALE"
+  | "SIMULATION_EXPIRED"
+  | "SIMULATION_BLOCK_DRIFT"
+  | "SIMULATION_LEDGER_DRIFT"
+  | "SIMULATION_QUOTE_EXPIRED"
+  | "SIMULATION_MISSING_TIMESTAMP"
+  | "SIMULATION_NOT_PASSED";
+
+export interface SimulationStaleError {
+  code: SimulationStaleCode;
+  message: string;
+  expiredAt?: string;
+}
+
+function stale(code: SimulationStaleCode, message: string, expiredAt?: string): SimulationFreshnessResult {
+  return { fresh: false, reason: message, code, expiredAt } as SimulationFreshnessResult;
+}
+
 export function checkSimulationFreshness(
   simulation: SimulationResultDetail,
   currentBlockNumber?: number,
@@ -17,23 +36,23 @@ export function checkSimulationFreshness(
   }
 
   if (simulation.status === "failed") {
-    return { fresh: false, reason: "Simulation failed and must be re-run before approval." };
+    return stale("SIMULATION_NOT_PASSED", "Simulation failed and must be re-run before approval.");
   }
 
   if (simulation.status === "unavailable") {
-    return { fresh: false, reason: "Simulation result is unavailable. Re-run simulation before proceeding." };
+    return stale("SIMULATION_NOT_PASSED", "Simulation result is unavailable. Re-run simulation before proceeding.");
   }
 
   if (simulation.status === "unsupported") {
-    return { fresh: false, reason: "Simulation is not supported for this transaction type or chain. Approval is blocked until simulation support is available." };
+    return stale("SIMULATION_NOT_PASSED", "Simulation is not supported for this transaction type or chain. Approval is blocked until simulation support is available.");
   }
 
   if (simulation.status === "pending") {
-    return { fresh: false, reason: "Simulation result is still pending. Wait for completion or re-run." };
+    return stale("SIMULATION_NOT_PASSED", "Simulation result is still pending. Wait for completion or re-run.");
   }
 
   if (simulation.status !== "passed") {
-    return { fresh: false, reason: "Simulation status is unrecognised. Re-run to verify." };
+    return stale("SIMULATION_NOT_PASSED", "Simulation status is unrecognised. Re-run to verify.");
   }
 
   const config = { ...DEFAULT_CONFIG, ...configOverrides };
@@ -43,7 +62,7 @@ export function checkSimulationFreshness(
     const simulatedAtMs = new Date(simulation.simulatedAt).getTime();
 
     if (Number.isNaN(simulatedAtMs)) {
-      return { fresh: false, reason: "Simulation timestamp is invalid. Re-run simulation." };
+      return stale("SIMULATION_MISSING_TIMESTAMP", "Simulation timestamp is invalid. Re-run simulation.");
     }
 
     const elapsedMs = now - simulatedAtMs;
@@ -51,17 +70,25 @@ export function checkSimulationFreshness(
     if (elapsedMs > config.maxElapsedMs) {
       const expiredAt = new Date(simulatedAtMs + config.maxElapsedMs).toISOString();
 
-      return { fresh: false, reason: `Simulation expired due to elapsed time. Results are valid for ${Math.round(config.maxElapsedMs / 60_000)} minutes. Re-run simulation.`, expiredAt };
+      return stale(
+        "SIMULATION_EXPIRED",
+        `Simulation expired due to elapsed time. Results are valid for ${Math.round(config.maxElapsedMs / 60_000)} minutes. Re-run simulation.`,
+        expiredAt,
+      );
     }
   } else {
-    return { fresh: false, reason: "Simulation timestamp is missing. Re-run simulation." };
+    return stale("SIMULATION_MISSING_TIMESTAMP", "Simulation timestamp is missing. Re-run simulation.");
   }
 
   if (simulation.quoteExpiry) {
     const quoteExpiryMs = new Date(simulation.quoteExpiry).getTime();
 
     if (!Number.isNaN(quoteExpiryMs) && now > quoteExpiryMs) {
-      return { fresh: false, reason: "The price quote embedded in this simulation has expired. Re-run to get a current quote.", expiredAt: simulation.quoteExpiry };
+      return stale(
+        "SIMULATION_QUOTE_EXPIRED",
+        "The price quote embedded in this simulation has expired. Re-run to get a current quote.",
+        simulation.quoteExpiry,
+      );
     }
   }
 
@@ -69,7 +96,10 @@ export function checkSimulationFreshness(
     const blockDiff = currentBlockNumber - simulation.blockNumber;
 
     if (blockDiff > config.maxBlockAge) {
-      return { fresh: false, reason: `Simulation ran ${blockDiff} blocks ago (max ${config.maxBlockAge}). Re-run to confirm state has not changed.` };
+      return stale(
+        "SIMULATION_BLOCK_DRIFT",
+        `Simulation ran ${blockDiff} blocks ago (max ${config.maxBlockAge}). Re-run to confirm state has not changed.`,
+      );
     }
   }
 
@@ -77,7 +107,10 @@ export function checkSimulationFreshness(
     const ledgerDiff = currentLedgerSeq - simulation.ledgerSeq;
 
     if (ledgerDiff > config.maxLedgerAge) {
-      return { fresh: false, reason: `Simulation ran ${ledgerDiff} ledgers ago (max ${config.maxLedgerAge}). Re-run to confirm state has not changed.` };
+      return stale(
+        "SIMULATION_LEDGER_DRIFT",
+        `Simulation ran ${ledgerDiff} ledgers ago (max ${config.maxLedgerAge}). Re-run to confirm state has not changed.`,
+      );
     }
   }
 
