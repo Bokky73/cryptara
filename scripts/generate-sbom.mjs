@@ -80,6 +80,7 @@ function generateCargoSbom() {
 const outputs = [
   generateNpmSbom("frontend", join(root, "frontend")),
   generateNpmSbom("evm", join(root, "backend", "contracts")),
+  generateNpmSbom("read-client", join(root, "packages", "read-client")),
   generateCargoSbom()
 ];
 

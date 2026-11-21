@@ -1,0 +1,28 @@
+{
+  "tables": [
+    "wallets",
+    "token_identities",
+    "agent_runs",
+    "agent_results",
+    "source_snapshots",
+    "recommendations",
+    "approvals",
+    "transactions",
+    "x402_payment_receipts",
+    "risk_snapshots",
+    "user_rules",
+    "alert_rules",
+    "alerts",
+    "watchlist_entries"
+  ],
+  "sensitive_columns": {
+    "wallets": [],
+    "transactions": []
+  },
+  "retention": {
+    "days": 30
+  },
+  "recovery_objective": {
+    "rto_seconds": 900
+  }
+}
