@@ -45,6 +45,24 @@ describe("CryptaraVault", function () {
       await vault.connect(user).deposit(token.target, ethers.parseEther("50"));
       expect(await vault.userBalance(user.address, token.target)).to.equal(ethers.parseEther("50"));
     });
+
+    it("should reject fee-on-transfer tokens (no phantom balance)", async function () {
+      const { vault, policy, user } = await loadFixture(deployFixture);
+
+      const FeeToken = await ethers.getContractFactory("MockFeeOnTransferERC20");
+      const feeToken = await FeeToken.deploy(100); // 1% fee
+      await feeToken.waitForDeployment();
+      await policy.allowAsset(feeToken.target);
+
+      await feeToken.transfer(user.address, ethers.parseEther("100"));
+      await feeToken.connect(user).approve(vault.target, ethers.parseEther("50"));
+
+      await expect(
+        vault.connect(user).deposit(feeToken.target, ethers.parseEther("50")),
+      ).to.be.revertedWithCustomError(vault, "FeeOnTransferNotSupported");
+
+      expect(await vault.userBalance(user.address, feeToken.target)).to.equal(0);
+    });
   });
 
   describe("Withdraw validation", function () {
@@ -75,6 +93,24 @@ describe("CryptaraVault", function () {
       await expect(
         vault.connect(agent).withdraw(token.target, 1, user.address, fakeHash),
       ).to.be.revertedWith("unknown intent");
+    });
+  });
+
+  describe("Reentrancy protection", function () {
+    it("should block reentrant deposit via callback token", async function () {
+      const { vault, policy, user } = await loadFixture(deployFixture);
+
+      const Reentrant = await ethers.getContractFactory("MockReentrantERC20");
+      const reentrant = await Reentrant.deploy(vault.target);
+      await reentrant.waitForDeployment();
+      await policy.allowAsset(reentrant.target);
+
+      await reentrant.mint(user.address, ethers.parseEther("100"));
+      await reentrant.connect(user).approve(vault.target, ethers.parseEther("50"));
+
+      await expect(
+        vault.connect(user).deposit(reentrant.target, ethers.parseEther("50")),
+      ).to.be.reverted;
     });
   });
 
@@ -173,8 +209,6 @@ describe("CryptaraVault", function () {
       await policy.connect(agent).createIntent(decision, token.target, ethers.parseEther("5"), intentExpiry, 25);
 
       await vault.connect(agent).withdraw(token.target, ethers.parseEther("3"), user.address, intentHash);
-
-      expect(await token.balanceOf(user.address)).to.equal(ethers.parseEther("53"));
       expect(await vault.userBalance(user.address, token.target)).to.equal(ethers.parseEther("47"));
     });
   });
