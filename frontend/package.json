@@ -50,7 +50,8 @@
     "test:vesting-unlock": "vitest run tests/features/vesting-unlock",
     "test:authority-history": "vitest run tests/features/authority-history",
     "test:watchlist-collections": "vitest run tests/features/watchlist-collections",
-    "test:run-comparison": "vitest run tests/features/run-comparison"
+    "test:run-comparison": "vitest run tests/features/run-comparison",
+    "test:perf": "tsx --tsconfig tsconfig.json scripts/perf-budget-check.ts"
   },
   "dependencies": {
     "@coinbase/x402": "^2.1.0",

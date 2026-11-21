@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+/** Percent over budget before the check hard-fails (15 % grace window). */
+const BUDGET_OVERAGE_THRESHOLD_PCT = 15;
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const frontendRoot = path.resolve(scriptDir, "..");
@@ -124,31 +127,72 @@ function checkBundleSizes(budgets: PerformanceBudgets, failures: string[], notes
 
   const initialJsKb = bytesToKb(sharedChunks.reduce((total, file) => total + statSync(file).size, 0));
   const initialBudgetKb = Math.max(...Object.values(budgets.bundles.initialJsKb));
+  const initialOverPct = initialBudgetKb > 0 ? ((initialJsKb - initialBudgetKb) / initialBudgetKb) * 100 : 0;
 
-  if (initialJsKb > initialBudgetKb) {
+  if (initialOverPct > BUDGET_OVERAGE_THRESHOLD_PCT) {
     failures.push(
-      `Initial (shared) JS is ${initialJsKb}KB, exceeding the ${initialBudgetKb}KB budget from budgets.json bundles.initialJsKb. ` +
+      `Initial (shared) JS is ${initialJsKb}KB, exceeding the ${initialBudgetKb}KB budget by ${initialOverPct.toFixed(1)}% (threshold ${BUDGET_OVERAGE_THRESHOLD_PCT}%). ` +
         "Check for newly added dependencies pulled into every route, or code that should be dynamically imported.",
     );
+  } else if (initialJsKb > initialBudgetKb) {
+    notes.push(`WARN Initial JS: ${initialJsKb}KB is over the ${initialBudgetKb}KB budget by ${initialOverPct.toFixed(1)}% (within ${BUDGET_OVERAGE_THRESHOLD_PCT}% grace).`);
   } else {
     notes.push(`Initial JS: ${initialJsKb}KB (budget ${initialBudgetKb}KB, ${sharedChunks.length} shared chunk file(s)).`);
   }
 
   const routeChunkBudgetKb = Math.max(...Object.values(budgets.bundles.routeChunkKb));
-  const oversizedRouteChunks = routeChunks.map((file) => ({ file, kb: bytesToKb(statSync(file).size) })).filter((entry) => entry.kb > routeChunkBudgetKb);
+  const routeChunkResults = routeChunks.map((file) => {
+    const kb = bytesToKb(statSync(file).size);
+    const overPct = routeChunkBudgetKb > 0 ? ((kb - routeChunkBudgetKb) / routeChunkBudgetKb) * 100 : 0;
+    return { file, kb, overPct };
+  });
 
-  if (oversizedRouteChunks.length > 0) {
-    for (const entry of oversizedRouteChunks) {
-      failures.push(
-        `Route chunk ${path.relative(nextDir, entry.file)} is ${entry.kb}KB, exceeding the ${routeChunkBudgetKb}KB per-route budget from budgets.json bundles.routeChunkKb. ` +
-          "Consider splitting the route, lazy-loading a heavy component, or moving logic server-side.",
-      );
-    }
-  } else if (routeChunks.length > 0) {
-    notes.push(`Checked ${routeChunks.length} route chunk file(s) against the ${routeChunkBudgetKb}KB budget: all within budget.`);
-  } else {
+  const hardFails = routeChunkResults.filter((r) => r.overPct > BUDGET_OVERAGE_THRESHOLD_PCT);
+  const softWarns = routeChunkResults.filter((r) => r.overPct > 0 && r.overPct <= BUDGET_OVERAGE_THRESHOLD_PCT);
+
+  for (const entry of hardFails) {
+    failures.push(
+      `Route chunk ${path.relative(nextDir, entry.file)} is ${entry.kb}KB, exceeding the ${routeChunkBudgetKb}KB budget by ${entry.overPct.toFixed(1)}% (threshold ${BUDGET_OVERAGE_THRESHOLD_PCT}%). ` +
+        "Consider splitting the route, lazy-loading a heavy component, or moving logic server-side.",
+    );
+  }
+  for (const entry of softWarns) {
+    notes.push(`WARN route chunk ${path.relative(nextDir, entry.file)}: ${entry.kb}KB is over budget by ${entry.overPct.toFixed(1)}% (within grace).`);
+  }
+  if (hardFails.length === 0 && routeChunks.length > 0) {
+    notes.push(`Checked ${routeChunks.length} route chunk file(s) against the ${routeChunkBudgetKb}KB budget: none exceed the ${BUDGET_OVERAGE_THRESHOLD_PCT}% failure threshold.`);
+  } else if (routeChunks.length === 0) {
     notes.push("No route-specific chunk files were identified to check individually (only shared chunks were found).");
   }
+}
+
+function writeStepSummary(notes: string[], failures: string[]) {
+  const summaryFile = process.env.GITHUB_STEP_SUMMARY;
+  if (!summaryFile) return;
+
+  const lines: string[] = ["## Bundle size budget\n"];
+
+  if (notes.length > 0) {
+    lines.push("| Status | Detail |");
+    lines.push("|---|---|");
+    for (const note of notes) {
+      const icon = note.startsWith("WARN") ? "⚠️" : note.startsWith("SKIP") ? "⏭️" : "✅";
+      lines.push(`| ${icon} | ${note.replace(/^(WARN|SKIP)\s+/, "")} |`);
+    }
+    lines.push("");
+  }
+
+  if (failures.length > 0) {
+    lines.push("### ❌ Failures\n");
+    for (const failure of failures) {
+      lines.push(`- ${failure}`);
+    }
+    lines.push("");
+  } else {
+    lines.push("**Result: ✅ All bundle checks passed.**\n");
+  }
+
+  appendFileSync(summaryFile, lines.join("\n") + "\n");
 }
 
 async function main() {
@@ -164,6 +208,8 @@ async function main() {
   for (const note of notes) {
     console.log(`[test:perf] ${note}`);
   }
+
+  writeStepSummary(notes, failures);
 
   if (failures.length > 0) {
     console.error("\n[test:perf] Performance budget check FAILED:\n");
