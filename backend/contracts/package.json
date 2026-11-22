@@ -5,6 +5,7 @@
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
+    "coverage": "hardhat coverage",
     "deploy:policy": "hardhat run scripts/deploy-policy.ts",
     "deploy:audit": "hardhat run scripts/deploy-audit-layer.ts",
     "verify": "hardhat verify"
@@ -15,6 +16,7 @@
     "@openzeppelin/contracts": "^5.0.0",
     "dotenv": "^16.4.5",
     "hardhat": "^2.22.0",
+    "solidity-coverage": "^0.8.0",
     "typescript": "^5.4.0"
   }
 }
