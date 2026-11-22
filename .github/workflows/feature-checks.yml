@@ -1,0 +1,81 @@
+name: Feature checks
+
+on:
+  pull_request:
+    paths:
+      - "frontend/src/**"
+      - "frontend/tests/features/**"
+      - "frontend/e2e/specs/**"
+      - "docs/features/**"
+      - ".github/workflows/feature-checks.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: feature-checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.compute.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: compute
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node .github/scripts/discover-feature-suites.mjs
+
+  focused-suite:
+    needs: discover
+    if: ${{ needs.discover.outputs.matrix != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Run feature suite
+        run: npx vitest run tests/features/${{ matrix.suite }}
+      - name: Typecheck feature suite
+        run: |
+          if [ -f "tests/features/${{ matrix.suite }}/tsconfig.json" ]; then
+            npx tsc --noEmit --project "tests/features/${{ matrix.suite }}/tsconfig.json"
+          fi
+      - name: Lint feature suite
+        run: |
+          TARGETS="tests/features/${{ matrix.suite }}"
+          for dir in \
+            "src/server/research/${{ matrix.suite }}" \
+            "src/components/research/${{ matrix.suite }}" \
+            "src/app/api/insights/${{ matrix.suite }}" \
+            "src/app/insights/${{ matrix.suite }}"; do
+            [ -d "$dir" ] && TARGETS="$TARGETS $dir"
+          done
+          [ -f "e2e/specs/${{ matrix.suite }}.spec.ts" ] && TARGETS="$TARGETS e2e/specs/${{ matrix.suite }}.spec.ts"
+          npx eslint $TARGETS
+      - name: Install Playwright browsers
+        if: ${{ hashFiles(format('frontend/e2e/specs/{0}.spec.ts', matrix.suite)) != '' }}
+        run: npx playwright install --with-deps chromium
+      - name: Run Playwright spec
+        if: ${{ hashFiles(format('frontend/e2e/specs/{0}.spec.ts', matrix.suite)) != '' }}
+        run: PORT=3022 NEXT_PUBLIC_APP_URL=http://localhost:3022 npx playwright test "e2e/specs/${{ matrix.suite }}.spec.ts" --project=chromium-desktop --project=chromium-mobile
