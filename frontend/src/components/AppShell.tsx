@@ -22,10 +22,23 @@ const navLinkClassName =
 const mobileNavLinkClassName =
   "shrink-0 rounded-full px-3 py-2 text-sm text-[var(--color-nav-fg)] hover:bg-[var(--color-nav-hover-bg)] hover:text-[var(--color-fg)] focus-visible:bg-white/8 focus-visible:text-white";
 
+// WCAG 2.2 AA target size (2.5.8): interactive controls must be at least
+// 24x24 CSS px, and 44x44 on touch/mobile. Applied to the header controls.
+const headerControlClassName =
+  "inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]";
+
 export function AppShell({ children, commandAssets }: { children: ReactNode; commandAssets?: readonly SessionAsset[] }) {
   return (
     <div className="min-h-screen overflow-hidden bg-background text-foreground">
-      <a href="#main-content" className="skip-link">
+      {/*
+        Skip link: first focusable element on the page. Visually hidden until
+        focused, then revealed so keyboard users can jump past the header nav
+        straight to the main landmark.
+      */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:inline-flex focus:min-h-[44px] focus:items-center focus:rounded-full focus:bg-[var(--color-fg)] focus:px-5 focus:py-2 focus:text-sm focus:font-semibold focus:text-[var(--color-bg)] focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-[var(--color-focus)]"
+      >
         Skip to main content
       </a>
       <header className="sticky top-0 z-30 border-b border-[var(--color-border)] bg-[var(--color-header-bg)] backdrop-blur-2xl">
@@ -51,9 +64,15 @@ export function AppShell({ children, commandAssets }: { children: ReactNode; com
             ))}
           </nav>
           <div className="flex items-center gap-2 sm:gap-3">
-            <CommandTrigger assets={commandAssets} />
-            <ThemeToggle />
-            <WalletConnectButton />
+            <div className={headerControlClassName}>
+              <CommandTrigger assets={commandAssets} />
+            </div>
+            <div className={headerControlClassName}>
+              <ThemeToggle />
+            </div>
+            <div className={headerControlClassName}>
+              <WalletConnectButton />
+            </div>
           </div>
         </div>
         {/*
