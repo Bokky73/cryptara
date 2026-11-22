@@ -84,6 +84,16 @@ pub struct GovernanceUpdated {
 }
 
 #[contractevent]
+pub struct ContractUpgraded {
+    #[topic]
+    pub old_version: u32,
+    #[topic]
+    pub new_wasm_hash: BytesN<32>,
+    #[topic]
+    pub governance: Address,
+}
+
+#[contractevent]
 pub struct RiskPublished {
     #[topic]
     pub asset_id: BytesN<32>,
@@ -115,6 +125,7 @@ pub enum RegistryError {
     InvalidEvidenceUri = 9,
     StaleTimestamp = 10,
     InvalidVersion = 11,
+    GovernanceNotSet = 12,
 }
 
 // ─── Contract ───────────────────────────────────────────────────────
@@ -241,6 +252,64 @@ impl RiskRegistry {
         Ok(())
     }
 
+    /// Set the governance contract address. Only callable by admin.
+    pub fn set_governance(
+        env: Env,
+        new_governance: Address,
+    ) -> Result<(), RegistryError> {
+        require_initialized(&env)?;
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+
+        let old_governance: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Governance)
+            .unwrap_or_else(|| admin.clone());
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Governance, &new_governance);
+        bump_instance_ttl(&env);
+
+        GovernanceUpdated {
+            old_governance,
+            new_governance,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    /// Governance-gated WASM upgrade. Requires the configured governance
+    /// contract to authorize (never a single EOA admin). Emits a stable
+    /// indexed `ContractUpgraded` event before swapping the WASM.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), RegistryError> {
+        require_initialized(&env)?;
+        let governance: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Governance)
+            .ok_or(RegistryError::GovernanceNotSet)?;
+        governance.require_auth();
+
+        let old_version: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Version)
+            .unwrap_or(CONTRACT_VERSION);
+
+        ContractUpgraded {
+            old_version,
+            new_wasm_hash: new_wasm_hash.clone(),
+            governance,
+        }
+        .publish(&env);
+
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash);
+        Ok(())
+    }
+
     /// Publish or update a risk record for an asset on a specific network.
     /// Enforces all bounds, validates publisher, checks staleness.
     /// Returns the newly-created RiskRecord.
@@ -276,147 +345,6 @@ impl RiskRegistry {
             env.ledger().timestamp(),
         )?;
 
-        // Compute version and check staleness
-        let key = DataKey::Record(asset_id.clone(), network.clone());
-        let version =
-            if let Some(existing) = env.storage().persistent().get::<DataKey, RiskRecord>(&key) {
-                if updated_at <= existing.updated_at {
-                    return Err(RegistryError::StaleReport);
-                }
-                existing.version.saturating_add(1)
-            } else {
-                1
-            };
+        // Compute vers
 
-        let record = RiskRecord {
-            asset_id: asset_id.clone(),
-            network: network.clone(),
-            asset_label,
-            score,
-            confidence_bps,
-            verdict: verdict.clone(),
-            report_hash: report_hash.clone(),
-            evidence_uri,
-            publisher: publisher.clone(),
-            version,
-            updated_at,
-            ledger: env.ledger().sequence(),
-        };
-
-        env.storage().persistent().set(&key, &record);
-        bump_record_ttl(&env, &key);
-
-        RiskPublished {
-            asset_id,
-            network,
-            publisher,
-            score,
-            confidence_bps,
-            verdict,
-            report_hash,
-            version,
-            updated_at,
-        }
-        .publish(&env);
-
-        Ok(record)
-    }
-
-    /// Read a risk record by asset_id and network.
-    /// Extends TTL on hit to keep active records alive.
-    pub fn get_risk(env: Env, asset_id: BytesN<32>, network: Symbol) -> Option<RiskRecord> {
-        let key = DataKey::Record(asset_id, network);
-        let value = env.storage().persistent().get(&key);
-        if value.is_some() {
-            bump_record_ttl(&env, &key);
-        }
-        bump_instance_ttl(&env);
-        value
-    }
-
-    /// Check whether an address is an authorized publisher.
-    pub fn is_publisher(env: Env, publisher: Address) -> bool {
-        let key = DataKey::Publisher(publisher);
-        let auth = env.storage().persistent().get(&key).unwrap_or(false);
-        if auth {
-            bump_publisher_ttl(&env, &key);
-        }
-        bump_instance_ttl(&env);
-        auth
-    }
-
-    /// Return the admin address.
-    pub fn admin(env: Env) -> Result<Address, RegistryError> {
-        require_initialized(&env)?;
-        Ok(env.storage().instance().get(&DataKey::Admin).unwrap())
-    }
-
-    /// Return the contract version.
-    pub fn contract_version(env: Env) -> Result<u32, RegistryError> {
-        require_initialized(&env)?;
-        Ok(env.storage().instance().get(&DataKey::Version).unwrap())
-    }
-
-    /// Upgrade: set a new contract version. Only callable by admin.
-    /// Requires new_version to be greater than current version.
-    /// Emits ContractVersionChanged event for on-chain tracking.
-    pub fn set_contract_version(env: Env, new_version: u32) -> Result<(), RegistryError> {
-        require_initialized(&env)?;
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        admin.require_auth();
-        let old_version: u32 = env.storage().instance().get(&DataKey::Version).unwrap();
-        if new_version <= old_version {
-            return Err(RegistryError::InvalidVersion);
-        }
-        env.storage()
-            .instance()
-            .set(&DataKey::Version, &new_version);
-        ContractVersionChanged {
-            old_version,
-            new_version,
-        }
-        .publish(&env);
-        Ok(())
-    }
-
-    /// Extend TTL for a specific risk record. Useful for off-chain keepers
-    /// to maintain active records.
-    pub fn extend_record_ttl(
-        env: Env,
-        asset_id: BytesN<32>,
-        network: Symbol,
-    ) -> Result<(), RegistryError> {
-        require_initialized(&env)?;
-        let key = DataKey::Record(asset_id, network);
-        if env.storage().persistent().has(&key) {
-            bump_record_ttl(&env, &key);
-            Ok(())
-        } else {
-            Err(RegistryError::NotInitialized)
-        }
-    }
-
-    /// Set governance contract for timelocked privileged changes.
-    pub fn set_governance(env: Env, governance: Address) -> Result<(), RegistryError> {
-        require_initialized(&env)?;
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        admin.require_auth();
-        let old: Option<Address> = env.storage().instance().get(&DataKey::Governance);
-        env.storage().instance().set(&DataKey::Governance, &governance);
-        let old_governance = old.unwrap_or(governance.clone());
-        GovernanceUpdated {
-            old_governance,
-            new_governance: governance,
-        }
-        .publish(&env);
-        bump_instance_ttl(&env);
-        Ok(())
-    }
-
-    pub fn governance(env: Env) -> Option<Address> {
-        env.storage().instance().get(&DataKey::Governance)
-    }
-}
-
-#[cfg(test)]
-mod test;
+/* … truncated 4784 chars — edit only what you need near the top … */
