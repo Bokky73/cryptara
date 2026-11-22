@@ -21,10 +21,10 @@ export function TokenTable({ holdings }: { holdings: TokenHolding[] }) {
           <thead className="text-xs uppercase tracking-[0.16em] text-white/36">
             <tr>
               <th className="pb-3 font-medium">Token</th>
-              <th className="pb-3 font-medium">Balance</th>
-              <th className="pb-3 font-medium">Value</th>
-              <th className="pb-3 font-medium">Exposure</th>
-              <th className="pb-3 font-medium">Risk</th>
+              <th className="pb-3 text-right font-medium">Balance</th>
+              <th className="pb-3 text-right font-medium">Value</th>
+              <th className="pb-3 text-right font-medium">Exposure</th>
+              <th className="pb-3 text-right font-medium">Risk</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/8">
@@ -34,11 +34,15 @@ export function TokenTable({ holdings }: { holdings: TokenHolding[] }) {
                   <div className="font-semibold">{holding.symbol}</div>
                   <div className="text-xs text-white/42">{holding.name}</div>
                 </td>
-                <td className="py-4 text-white/72">{holding.balance.toLocaleString("en-US")}</td>
-                <td className="py-4 text-white/72">{formatUsd(holding.valueUsd)}</td>
-                <td className="py-4 text-white/72">{formatPercent(holding.allocationPercent)}</td>
-                <td className="py-4">
-                  <span className="rounded-full border border-white/10 bg-white/7 px-3 py-1 text-xs">
+                <td className="py-4 text-right tabular-nums text-white/72">
+                  {holding.balance.toLocaleString("en-US")}
+                </td>
+                <td className="py-4 text-right tabular-nums text-white/72">{formatUsd(holding.valueUsd)}</td>
+                <td className="py-4 text-right tabular-nums text-white/72">
+                  {formatPercent(holding.allocationPercent)}
+                </td>
+                <td className="py-4 text-right">
+                  <span className="rounded-full border border-white/10 bg-white/7 px-3 py-1 text-xs tabular-nums">
                     {holding.riskScore}/100
                   </span>
                 </td>
