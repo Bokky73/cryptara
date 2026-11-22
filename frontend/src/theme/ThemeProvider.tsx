@@ -44,6 +44,23 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [theme]);
 
   useEffect(() => {
+    if (theme !== "system") {
+      return;
+    }
+
+    const contrastMedia = window.matchMedia("(prefers-contrast: more)");
+    const syncContrast = () => {
+      applyThemeToDocument("system");
+      setResolvedTheme(resolveTheme("system"));
+    };
+
+    syncContrast();
+    contrastMedia.addEventListener("change", syncContrast);
+
+    return () => contrastMedia.removeEventListener("change", syncContrast);
+  }, [theme]);
+
+  useEffect(() => {
     const onStorage = (event: StorageEvent) => {
       if (event.key !== THEME_STORAGE_KEY || !isThemeMode(event.newValue)) {
         return;
