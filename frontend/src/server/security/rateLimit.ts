@@ -1,4 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+
+import { jsonError } from "@/server/api/errors";
 
 type RateLimitOptions = {
   limit: number;
@@ -46,15 +48,17 @@ export function checkRateLimit(request: Request | NextRequest, options: RateLimi
   }
 
   if (bucket.count >= options.limit) {
-    const response = NextResponse.json(
-      {
-        error: "rate_limited",
-        detail: `Too many ${options.namespace} requests. Try again after ${new Date(bucket.resetAt).toISOString()}.`,
-      },
-      { status: 429 },
-    );
+    const retryAfterSeconds = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+    const response = jsonError({
+      code: "rate_limited",
+      message: `Too many ${options.namespace} requests. Try again after ${new Date(bucket.resetAt).toISOString()}.`,
+      status: 429,
+      retryable: true,
+      recoveryAction: "retry_after_delay",
+      details: { namespace: options.namespace, retryAfterSeconds },
+    });
 
-    response.headers.set("Retry-After", Math.ceil((bucket.resetAt - now) / 1000).toString());
+    response.headers.set("Retry-After", retryAfterSeconds.toString());
 
     return response;
   }
