@@ -39,3 +39,25 @@ export function LiveRegion({ message, politeness = "polite", visible = false, cl
     </VisuallyHidden>
   );
 }
+
+/**
+ * Announce a scan milestone ("Analysis started", "Risk report ready: ...").
+ * Thin wrapper so async flows share consistent wording and politeness.
+ */
+export function ScanAnnouncement({ message, visible = false, className, id }: Omit<LiveRegionProps, "politeness">) {
+  return <LiveRegion message={message} politeness="polite" visible={visible} className={className} id={id} />;
+}
+
+/**
+ * Announce a clipboard copy confirmation ("Copied to clipboard").
+ */
+export function CopyAnnouncement({ message, visible = false, className, id }: Omit<LiveRegionProps, "politeness">) {
+  return <LiveRegion message={message} politeness="polite" visible={visible} className={className} id={id} />;
+}
+
+/**
+ * Announce a watchlist or rule mutation ("Added to watchlist", "Rule saved").
+ */
+export function MutationAnnouncement({ message, visible = false, className, id }: Omit<LiveRegionProps, "politeness">) {
+  return <LiveRegion message={message} politeness="polite" visible={visible} className={className} id={id} />;
+}
