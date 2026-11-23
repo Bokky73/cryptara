@@ -1,0 +1,8 @@
+{
+  "filter_paths": "node_modules|contracts/MockERC20.sol",
+  "exclude_dependencies": true,
+  "fail_on": "medium",
+  "fail_pedantic": false,
+  "solc_remaps": [],
+  "detectors_to_exclude": []
+}
