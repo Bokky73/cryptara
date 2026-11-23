@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { jsonError } from "@/server/api/errors";
+import { withApiHandler } from "@/server/api/handler";
 import { z } from "zod";
 import { withCacheHeaders } from "@/server/cache/strategy";
-import { checkRateLimit } from "@/server/security/rateLimit";
 import { getStellarSwapQuote } from "@/server/stellar/swap";
 import type { StellarSwapQuote } from "@/server/types";
 
@@ -30,18 +30,14 @@ const bodySchema = z.object({
  * - 400 for invalid input
  * - 429 when rate limited
  */
-export async function POST(request: Request) {
-  const rateLimited = checkRateLimit(request, { namespace: "execute:quote", limit: 30, windowMs: 60_000 });
-  if (rateLimited) return rateLimited;
-
-  const body = await request.json().catch(() => ({}));
-  const parsed = bodySchema.safeParse(body);
-
-  if (!parsed.success) {
-    return jsonError({ code: "validation_error", message: "Invalid input", status: 400, details: parsed.error.flatten() });
-  }
-
-  const { chain, walletAddress, fromAsset, toAsset, fromIssuer, toIssuer, amount, slippageBps } = parsed.data;
+export const POST = withApiHandler(
+  {
+    schema: bodySchema,
+    rateLimit: "executePrepare",
+    maxBodyBytes: 16 * 1024,
+  },
+  async ({ body }) => {
+  const { chain, walletAddress, fromAsset, toAsset, fromIssuer, toIssuer, amount, slippageBps } = body;
 
   // Fetch a brand-new quote — every call invalidates prior calldata
   const result = await getStellarSwapQuote({
@@ -76,4 +72,5 @@ export async function POST(request: Request) {
       refreshRequiredAfter: freshQuote.expiresAt,
     },
   }), "execution");
-}
+  },
+);

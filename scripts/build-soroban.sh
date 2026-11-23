@@ -8,6 +8,10 @@ set -euo pipefail
 
 # Documented per-contract WASM size budget (in KB).
 MAX_WASM_KB="${MAX_WASM_KB:-40}"
+# Reproducible Soroban WASM build (aligned with CI).
+# Pinned: soroban-sdk =27.0.6, stellar contract build, wasm32v1-none
+# Profile: release (opt-level=z, LTO, strip=symbols, codegen-units=1)
+# The lockfile is mandatory and the target is Stellar's wasm32v1-none runtime target.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOROBAN_DIR="$(cd "${SCRIPT_DIR}/../soroban" && pwd)"
@@ -19,6 +23,12 @@ CONTRACTS=(
   "audit"
   "vault"
 )
+echo "=== Soroban Reproducible Build ==="
+echo "Soroban SDK: =27.0.6 (pinned in soroban/Cargo.toml)"
+echo "Build: stellar contract build"
+echo "Target: wasm32v1-none"
+echo "Profile: release (opt-level=z, LTO, strip=symbols)"
+echo ""
 
 cd "${SOROBAN_DIR}"
 
@@ -28,6 +38,25 @@ if command -v stellar >/dev/null 2>&1; then
 else
   echo "==> stellar CLI not found; building via cargo" >&2
   cargo build --locked --target wasm32-unknown-unknown --release
+# Toolchain drift guard: soroban/rust-toolchain.toml must match the root one so
+# that cargo invoked from either directory selects the same Rust version and
+# WASM target (reproducible hashes / provenance).
+ROOT_TOOLCHAIN="${ROOT_DIR}/rust-toolchain.toml"
+SOROBAN_TOOLCHAIN="${ROOT_DIR}/soroban/rust-toolchain.toml"
+if [ ! -f "$ROOT_TOOLCHAIN" ] || [ ! -f "$SOROBAN_TOOLCHAIN" ]; then
+  echo "ERROR: rust-toolchain.toml missing (root or soroban/)" >&2
+  exit 1
+fi
+if ! cmp -s "$ROOT_TOOLCHAIN" "$SOROBAN_TOOLCHAIN"; then
+  echo "ERROR: soroban/rust-toolchain.toml diverges from root rust-toolchain.toml" >&2
+  echo "       Keep them identical to preserve reproducible WASM builds." >&2
+  diff -u "$ROOT_TOOLCHAIN" "$SOROBAN_TOOLCHAIN" >&2 || true
+  exit 1
+fi
+
+if ! command -v stellar >/dev/null 2>&1; then
+  echo "ERROR: stellar CLI is required (CI pins 26.1.x)" >&2
+  exit 1
 fi
 
 WASM_DIR="${SOROBAN_DIR}/target/wasm32-unknown-unknown/release"

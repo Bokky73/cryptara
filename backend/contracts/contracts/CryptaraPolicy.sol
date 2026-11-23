@@ -28,6 +28,12 @@ contract CryptaraPolicy {
     }
 
     // ──────────────────────────────────────────────
+    //  Constants
+    // ──────────────────────────────────────────────
+
+    uint256 public constant MAX_TRACKED_ASSETS = 256;
+
+    // ──────────────────────────────────────────────
     //  State
     // ──────────────────────────────────────────────
 
@@ -45,8 +51,13 @@ contract CryptaraPolicy {
 
     mapping(address => bool) public allowedAssets;
     mapping(address => bool) public blockedAssets;
-    address[] public allowedAssetList;
-    address[] public blockedAssetList;
+
+    // Index-tracked sets for O(1) add/remove (swap-and-pop).
+    // Index is 1-based; 0 means "not tracked".
+    address[] private _allowedAssetList;
+    mapping(address => uint256) private _allowedAssetIndex;
+    address[] private _blockedAssetList;
+    mapping(address => uint256) private _blockedAssetIndex;
 
     mapping(bytes32 => PolicyDecision) public policyDecisions;
     mapping(bytes32 => Intent) public intents;
@@ -67,8 +78,8 @@ contract CryptaraPolicy {
     event IntentCreated(bytes32 indexed intentHash, bytes32 indexed policyCommitment);
     event IntentExecuted(bytes32 indexed intentHash);
     event IntentRevoked(bytes32 indexed intentHash);
-    event Paused(address indexed by);
-    event Unpaused(address indexed by);
+    event Paused(address indexed actor, bool paused, bytes32 reasonHash, uint256 timestamp);
+    event Unpaused(address indexed actor, bool paused, bytes32 reasonHash, uint256 timestamp);
     event AssetAllowed(address indexed asset);
     event AssetBlocked(address indexed asset, bool blocked);
     event LimitsUpdated(uint256 maxTxValue, uint256 maxSlippageBps, uint256 maxDailySpend);
@@ -155,17 +166,28 @@ contract CryptaraPolicy {
         require(asset != address(0), "Policy: zero asset");
         require(!allowedAssets[asset], "Policy: already allowed");
         require(!blockedAssets[asset], "Policy: blocked asset");
+        require(_allowedAssetList.length < MAX_TRACKED_ASSETS, "Policy: allowlist full");
         allowedAssets[asset] = true;
-        allowedAssetList.push(asset);
+        _allowedAssetList.push(asset);
+        _allowedAssetIndex[asset] = _allowedAssetList.length;
         emit AssetAllowed(asset);
     }
 
     function blockAsset(address asset, bool blocked) external onlyOwner {
         require(asset != address(0), "Policy: zero asset");
-        blockedAssets[asset] = blocked;
         if (blocked) {
-            allowedAssets[asset] = false;
-            blockedAssetList.push(asset);
+            require(!blockedAssets[asset], "Policy: already blocked");
+            require(_blockedAssetList.length < MAX_TRACKED_ASSETS, "Policy: blocklist full");
+            blockedAssets[asset] = true;
+            _blockedAssetList.push(asset);
+            _blockedAssetIndex[asset] = _blockedAssetList.length;
+            if (allowedAssets[asset]) {
+                _removeAllowedAsset(asset);
+            }
+        } else {
+            require(blockedAssets[asset], "Policy: not blocked");
+            blockedAssets[asset] = false;
+            _removeBlockedAsset(asset);
         }
         emit AssetBlocked(asset, blocked);
     }
@@ -173,22 +195,75 @@ contract CryptaraPolicy {
     function isAssetAllowed(address asset) public view returns (bool) {
         if (blockedAssets[asset]) return false;
         if (allowedAssets[asset]) return true;
-        if (allowedAssetList.length == 0) return true;
+        if (_allowedAssetList.length == 0) return true;
         return false;
+    }
+
+    function allowedAssetCount() external view returns (uint256) {
+        return _allowedAssetList.length;
+    }
+
+    function blockedAssetCount() external view returns (uint256) {
+        return _blockedAssetList.length;
+    }
+
+    function allowedAssetAt(uint256 index) external view returns (address) {
+        return _allowedAssetList[index];
+    }
+
+    function blockedAssetAt(uint256 index) external view returns (address) {
+        return _blockedAssetList[index];
+    }
+
+    // ──────────────────────────────────────────────
+    //  Internal set helpers (O(1) swap-and-pop)
+    // ──────────────────────────────────────────────
+
+    function _removeAllowedAsset(address asset) internal {
+        uint256 idx = _allowedAssetIndex[asset];
+        if (idx == 0) return;
+        uint256 lastIdx = _allowedAssetList.length;
+        if (idx != lastIdx) {
+            address lastAsset = _allowedAssetList[lastIdx - 1];
+            _allowedAssetList[idx - 1] = lastAsset;
+            _allowedAssetIndex[lastAsset] = idx;
+        }
+        _allowedAssetList.pop();
+        delete _allowedAssetIndex[asset];
+        allowedAssets[asset] = false;
+    }
+
+    function _removeBlockedAsset(address asset) internal {
+        uint256 idx = _blockedAssetIndex[asset];
+        if (idx == 0) return;
+        uint256 lastIdx = _blockedAssetList.length;
+        if (idx != lastIdx) {
+            address lastAsset = _blockedAssetList[lastIdx - 1];
+            _blockedAssetList[idx - 1] = lastAsset;
+            _blockedAssetIndex[lastAsset] = idx;
+        }
+        _blockedAssetList.pop();
+        delete _blockedAssetIndex[asset];
     }
 
     // ──────────────────────────────────────────────
     //  Pause / Emergency
     // ──────────────────────────────────────────────
 
-    function pause() external onlyOwnerOrEmergency {
+    /// @notice Instant circuit-breaker. Either governance (owner) or the
+    ///         emergencyAdmin may pause with zero delay.
+    function pause(bytes32 reasonHash) external onlyOwnerOrEmergency {
+        require(!paused, "Policy: already paused");
         paused = true;
-        emit Paused(msg.sender);
+        emit Paused(msg.sender, true, reasonHash, block.timestamp);
     }
 
-    function unpause() external onlyOwnerOrEmergency {
+    /// @notice Only governance (owner / timelocked multisig) may unpause.
+    ///         emergencyAdmin is explicitly forbidden from lifting the pause.
+    function unpause(bytes32 reasonHash) external onlyOwner {
+        require(paused, "Policy: not paused");
         paused = false;
-        emit Unpaused(msg.sender);
+        emit Unpaused(msg.sender, false, reasonHash, block.timestamp);
     }
 
     // ──────────────────────────────────────────────
@@ -248,142 +323,5 @@ contract CryptaraPolicy {
 
         emit PolicyApplied(_user, decisionHash);
         return decisionHash;
-    }
-
-    function revokePolicy(bytes32 decisionHash) external {
-        PolicyDecision storage decision = policyDecisions[decisionHash];
-        require(decision.decisionHash == decisionHash, "Policy: unknown decision");
-        require(msg.sender == owner || msg.sender == emergencyAdmin || msg.sender == decision.user || msg.sender == decision.authorizedAgent, "Policy: not authorised to revoke");
-        decision.revoked = true;
-        emit IntentRevoked(decisionHash);
-    }
-
-    // ──────────────────────────────────────────────
-    //  Intent Lifecycle
-    // ──────────────────────────────────────────────
-
-    function createIntent(
-        bytes32 _policyCommitment,
-        address _targetToken,
-        uint256 _amount,
-        uint64 _expiry,
-        uint256 _slippageBps
-    ) external onlyAgent whenNotPaused returns (bytes32) {
-        require(_targetToken != address(0), "Policy: zero token");
-        require(isAssetAllowed(_targetToken), "Policy: asset blocked");
-        require(_expiry > block.timestamp, "Policy: intent expired");
-        require(_amount > 0, "Policy: zero amount");
-        require(_slippageBps <= maxSlippageBps, "Policy: slippage exceeds limit");
-
-        PolicyDecision storage decision = policyDecisions[_policyCommitment];
-        require(decision.decisionHash == _policyCommitment, "Policy: unknown policy");
-        require(!decision.revoked, "Policy: policy revoked");
-        require(decision.expiry >= _expiry, "Policy: intent outlives policy");
-        require(_amount <= decision.maxTransactionValue, "Policy: exceeds tx limit");
-        require(_amount <= maxTransactionValue, "Policy: exceeds global tx limit");
-        require(_slippageBps <= decision.maxSlippageBps, "Policy: slippage exceeds policy limit");
-
-        _checkDailySpend(_amount);
-
-        uint256 nonce = decision.nonce;
-        bytes32 intentHash = hashIntent(_policyCommitment, _targetToken, _amount, nonce, _expiry);
-        require(intents[intentHash].intentHash != intentHash, "Policy: intent exists");
-
-        intents[intentHash] = Intent({
-            intentHash: intentHash,
-            policyCommitment: _policyCommitment,
-            targetToken: _targetToken,
-            amount: _amount,
-            nonce: nonce,
-            expiry: _expiry,
-            executed: false
-        });
-
-        emit IntentCreated(intentHash, _policyCommitment);
-        return intentHash;
-    }
-
-    function executeIntent(bytes32 intentHash) external onlyAgent whenNotPaused nonReentrant {
-        Intent storage intent = intents[intentHash];
-        require(intent.intentHash == intentHash, "Policy: unknown intent");
-        require(!intent.executed, "Policy: already executed");
-        require(intent.expiry >= block.timestamp, "Policy: intent expired");
-        require(!paused, "Policy: paused");
-
-        PolicyDecision storage decision = policyDecisions[intent.policyCommitment];
-        require(!decision.revoked, "Policy: policy revoked");
-
-        intent.executed = true;
-        emit IntentExecuted(intentHash);
-    }
-
-    function revokeIntent(bytes32 intentHash) external onlyOwnerOrEmergency {
-        Intent storage intent = intents[intentHash];
-        require(intent.intentHash == intentHash, "Policy: unknown intent");
-        intent.executed = true;
-        emit IntentRevoked(intentHash);
-    }
-
-    // ──────────────────────────────────────────────
-    //  Internal
-    // ──────────────────────────────────────────────
-
-    function _checkDailySpend(uint256 amount) internal {
-        uint256 today = block.timestamp / 1 days;
-        if (today != lastDailyReset) {
-            dailySpend[msg.sender] = 0;
-            lastDailyReset = today;
-            emit DailySpendReset(block.timestamp);
-        }
-        uint256 newSpend = dailySpend[msg.sender] + amount;
-        require(newSpend <= maxDailySpend, "Policy: daily limit");
-        dailySpend[msg.sender] = newSpend;
-    }
-
-    // ──────────────────────────────────────────────
-    //  Views
-    // ──────────────────────────────────────────────
-
-    function getAllowedAssets() external view returns (address[] memory) {
-        return allowedAssetList;
-    }
-
-    function getBlockedAssets() external view returns (address[] memory) {
-        return blockedAssetList;
-    }
-
-    function getVersion() external pure returns (string memory) {
-        return VERSION;
-    }
-
-    function getPolicyDecision(bytes32 decisionHash) external view returns (PolicyDecision memory) {
-        return policyDecisions[decisionHash];
-    }
-
-    function getIntentValidity(bytes32 intentHash, address token, uint256 amount) external view returns (bool valid, string memory reason) {
-        Intent storage intent = intents[intentHash];
-        if (intent.intentHash != intentHash) {
-            return (false, "unknown intent");
-        }
-        if (intent.executed) {
-            return (false, "already executed");
-        }
-        if (intent.expiry < block.timestamp) {
-            return (false, "intent expired");
-        }
-        if (intent.targetToken != token) {
-            return (false, "token mismatch");
-        }
-        if (intent.amount < amount) {
-            return (false, "insufficient intent amount");
-        }
-        PolicyDecision storage decision = policyDecisions[intent.policyCommitment];
-        if (decision.decisionHash != intent.policyCommitment) {
-            return (false, "unknown policy");
-        }
-        if (decision.revoked) {
-            return (false, "policy revoked");
-        }
-        return (true, "");
     }
 }

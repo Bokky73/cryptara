@@ -12,6 +12,7 @@ import {
 } from "@/server/stellar/dataLayer";
 import { redactProviderUrl } from "@/lib/stellar/failover";
 import { sharedProviderCircuits } from "@/server/providers/adapter";
+import { recordNegativeCacheEntry } from "@/server/cache/negative";
 
 export type StellarAccountRecord = Awaited<
   ReturnType<Horizon.Server["loadAccount"]>
@@ -32,7 +33,31 @@ type HorizonAdapterOptions = {
   retryLimit?: number;
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
+  /** Absolute epoch-ms deadline for the whole orchestration; per-call budgets derive from it. */
+  deadlineAt?: number;
+  /** Minimum per-call budget so we don't fire zero-timeout requests. */
+  minTimeoutMs?: number;
 };
+
+const IDEMPOTENT_RETRY_CODES = new Set(["timeout", "transport_error"]);
+const IDEMPOTENT_HTTP_STATUSES = new Set([429, 502, 503, 504]);
+
+function isIdempotentRetryable(error: unknown, failure: ReturnType<typeof classify>) {
+  if (!failure.retryable) return false;
+  const status =
+    typeof error === "object" && error !== null && "response" in error
+      ? (error as { response?: { status?: unknown } }).response?.status
+      : undefined;
+  if (typeof status === "number") {
+    return IDEMPOTENT_HTTP_STATUSES.has(status);
+  }
+  return IDEMPOTENT_RETRY_CODES.has(failure.code);
+}
+
+function jitteredBackoff(attempt: number) {
+  const base = 100 * 2 ** attempt;
+  return Math.round(base * (0.75 + Math.random() * 0.5));
+}
 
 function defaultServerFactory(url: string, requestId: string) {
   return new Horizon.Server(url, {
@@ -80,7 +105,10 @@ async function timeout<T>(operation: Promise<T>, milliseconds: number) {
 
 export class HorizonAccountDataAdapter implements StellarAccountDataAdapter {
   private readonly options: Required<
-    Pick<HorizonAdapterOptions, "timeoutMs" | "retryLimit" | "now" | "sleep">
+    Pick<
+      HorizonAdapterOptions,
+      "timeoutMs" | "retryLimit" | "now" | "sleep" | "minTimeoutMs"
+    >
   > &
     HorizonAdapterOptions;
 
@@ -90,6 +118,7 @@ export class HorizonAccountDataAdapter implements StellarAccountDataAdapter {
       timeoutMs: options.timeoutMs ?? 8_000,
       retryLimit: Math.max(0, options.retryLimit ?? 1),
       now: options.now ?? Date.now,
+      minTimeoutMs: Math.max(1, options.minTimeoutMs ?? 250),
       sleep:
         options.sleep ??
         ((milliseconds) =>
@@ -97,6 +126,19 @@ export class HorizonAccountDataAdapter implements StellarAccountDataAdapter {
             setTimeout(resolve, milliseconds);
           })),
     };
+  }
+
+  private remainingBudget() {
+    if (typeof this.options.deadlineAt !== "number") {
+      return this.options.timeoutMs;
+    }
+    return this.options.deadlineAt - this.options.now();
+  }
+
+  private attemptTimeout() {
+    const remaining = this.remainingBudget();
+    if (remaining <= 0) return 0;
+    return Math.max(this.options.minTimeoutMs, Math.min(this.options.timeoutMs, remaining));
   }
 
   async loadAccount(
@@ -121,6 +163,18 @@ export class HorizonAccountDataAdapter implements StellarAccountDataAdapter {
       const safeProviderUrl = redactProviderUrl(providerUrl);
       const circuitKey = `stellar-horizon:${networkId}:${safeProviderUrl}`;
       for (let attempt = 0; attempt <= this.options.retryLimit; attempt += 1) {
+        if (this.remainingBudget() <= 0) {
+          attempts.push({
+            providerUrl: safeProviderUrl,
+            stage: "operation",
+            attempt: attempt + 1,
+            ok: false,
+            latencyMs: 0,
+            errorCode: "timeout",
+            error: "Orchestration deadline exhausted before Horizon call.",
+          });
+          break;
+        }
         const attemptStartedAt = this.options.now();
         try {
           sharedProviderCircuits.acquire(circuitKey);
@@ -130,7 +184,7 @@ export class HorizonAccountDataAdapter implements StellarAccountDataAdapter {
           );
           const account = await timeout(
             server.loadAccount(accountId),
-            this.options.timeoutMs,
+            this.attemptTimeout(),
           );
           const ledgerHeight =
             "last_modified_ledger" in account &&
@@ -174,32 +228,62 @@ export class HorizonAccountDataAdapter implements StellarAccountDataAdapter {
           };
         } catch (error) {
           const failure = classify(error);
-          sharedProviderCircuits.failure(circuitKey, this.options.now() - attemptStartedAt, failure.retryable);
+          const latencyMs = this.options.now() - attemptStartedAt;
+          const circuitOpen =
+            error instanceof Error &&
+            (error.name === "ProviderCircuitOpenError" ||
+              error.message.toLowerCase().includes("circuit"));
+          if (!circuitOpen) {
+            sharedProviderCircuits.failure(circuitKey, latencyMs, failure.retryable);
+          }
           attempts.push({
             providerUrl: safeProviderUrl,
             stage: "operation",
             attempt: attempt + 1,
             ok: false,
-            latencyMs: this.options.now() - attemptStartedAt,
-            errorCode: failure.code,
+            latencyMs,
+            errorCode: circuitOpen ? "circuit_open" : failure.code,
             error: failure.message.replaceAll(providerUrl, safeProviderUrl),
           });
-          if (!failure.retryable || attempt === this.options.retryLimit) break;
-          await this.options.sleep(Math.round(100 * 2 ** attempt * (0.75 + Math.random() * 0.5)));
+          if (circuitOpen) {
+            // Circuit is open: short-circuit this provider immediately.
+            break;
+          }
+          const idempotent = isIdempotentRetryable(error, failure);
+          if (!idempotent) {
+            recordNegativeCacheEntry({
+              key: `stellar-horizon:${networkId}:${safeProviderUrl}:${accountId}`,
+              provider: "stellar-horizon",
+              reason: failure.code,
+              ttlMs: 5_000,
+            });
+            break;
+          }
+          if (attempt === this.options.retryLimit) break;
+          const backoff = jitteredBackoff(attempt);
+          if (this.remainingBudget() - backoff <= 0) break;
+          await this.options.sleep(backoff);
         }
       }
     }
 
-    const retryable = attempts
-      .filter((attempt) => !attempt.ok)
-      .every(
+    const failures = attempts.filter((attempt) => !attempt.ok);
+    const allCircuitsOpen =
+      failures.length > 0 &&
+      failures.every((attempt) => attempt.errorCode === "circuit_open");
+    const retryable =
+      failures.length > 0 &&
+      failures.every(
         (attempt) =>
           attempt.errorCode === "timeout" ||
           attempt.errorCode === "transport_error",
       );
+    // Never fabricate data in live mode: surface an honest unavailable state.
     throw new StellarDataLayerError(
-      "all_providers_failed",
-      `All Stellar data API providers failed for ${networkId}.`,
+      allCircuitsOpen ? "unavailable" : "all_providers_failed",
+      allCircuitsOpen
+        ? `Stellar data API circuit open for ${networkId}; provider unavailable.`
+        : `All Stellar data API providers failed for ${networkId}.`,
       retryable,
       attempts,
     );

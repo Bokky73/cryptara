@@ -17,7 +17,7 @@ function ScopedTrigger({ scope, assets }: { scope: PaletteScope | null; assets: 
     const listener = (event: globalThis.KeyboardEvent) => { if (isPaletteShortcut(event)) { event.preventDefault(); setLoaded(true); setOpen(value => !value); } };
     window.addEventListener("keydown", listener); return () => window.removeEventListener("keydown", listener);
   }, []);
-  return <><button type="button" aria-haspopup="dialog" aria-expanded={open} aria-keyshortcuts="Control+k Meta+k" onClick={() => { setLoaded(true); setOpen(true); }}
+  return <><button type="button" aria-haspopup="dialog" aria-expanded={open} aria-keyshortcuts="Control+k Meta+k" aria-label="Search routes and insights" onClick={() => { setLoaded(true); setOpen(true); }}
     className="rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]">Search</button>
     {loaded && <LazyPalette open={open} scope={scope} assets={assets} close={() => setOpen(false)} navigate={href => router.push(href)} />}</>;
 }

@@ -9,8 +9,8 @@
 
   /* Text */
   --color-fg: #f7f4ed;
-  --color-fg-muted: rgba(247, 244, 237, 0.62);
-  --color-fg-subtle: rgba(247, 244, 237, 0.38);
+  --color-fg-muted: rgba(247, 244, 237, 0.72);
+  --color-fg-subtle: rgba(247, 244, 237, 0.62);
   --color-fg-inverse: #050505;
 
   /* Brand */
@@ -21,9 +21,9 @@
   --color-brand-border: rgba(217, 164, 65, 0.25);
 
   /* Borders & glass */
-  --color-border: rgba(255, 255, 255, 0.1);
-  --color-border-strong: rgba(255, 255, 255, 0.12);
-  --color-glass-border: rgba(255, 255, 255, 0.1);
+  --color-border: rgba(255, 255, 255, 0.18);
+  --color-border-strong: rgba(255, 255, 255, 0.28);
+  --color-glass-border: rgba(255, 255, 255, 0.18);
   --color-glass-bg: rgba(255, 255, 255, 0.055);
   --color-glass-highlight: rgba(255, 255, 255, 0.08);
   --color-glass-shadow: rgba(0, 0, 0, 0.28);
@@ -32,6 +32,7 @@
   /* Focus & selection */
   --color-focus: #d9a441;
   --color-focus-ring-offset: #050505;
+  --color-focus-ring-width: 2px;
   --color-selection-bg: #d9a441;
   --color-selection-fg: #050505;
 
@@ -83,9 +84,9 @@
   --color-risk-low-bg: rgba(96, 211, 148, 0.1);
   --color-risk-medium-bg: rgba(242, 200, 109, 0.1);
   --color-risk-high-bg: rgba(255, 107, 107, 0.1);
-  --color-risk-low-border: rgba(110, 231, 183, 0.25);
-  --color-risk-medium-border: rgba(217, 164, 65, 0.25);
-  --color-risk-high-border: rgba(248, 113, 113, 0.25);
+  --color-risk-low-border: rgba(110, 231, 183, 0.45);
+  --color-risk-medium-border: rgba(217, 164, 65, 0.45);
+  --color-risk-high-border: rgba(248, 113, 113, 0.45);
 
   /* Status */
   --color-success: #6ee7b7;
@@ -94,7 +95,7 @@
 
   /* Header */
   --color-header-bg: rgba(5, 5, 5, 0.78);
-  --color-nav-fg: rgba(255, 255, 255, 0.64);
+  --color-nav-fg: rgba(255, 255, 255, 0.72);
   --color-nav-hover-bg: rgba(255, 255, 255, 0.08);
 
   /* Gauge marker */

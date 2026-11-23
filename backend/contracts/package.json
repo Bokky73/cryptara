@@ -9,7 +9,18 @@
     "deploy:policy": "hardhat run scripts/deploy-policy.ts",
     "deploy:audit": "hardhat run scripts/deploy-audit-layer.ts",
     "verify": "hardhat verify"
+  "name": "contracts",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "hardhat test",
+    "test:gas": "REPORT_GAS=true GAS_SNAPSHOT_FILE=gas-snapshot.txt hardhat test",
+    "compile": "hardhat compile"
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@nomicfoundation/hardhat-verify": "^2.0.0",
@@ -18,5 +29,6 @@
     "hardhat": "^2.22.0",
     "solidity-coverage": "^0.8.0",
     "typescript": "^5.4.0"
+    "hardhat": "^2.22.0"
   }
 }

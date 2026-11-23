@@ -4,9 +4,10 @@ import { gateFeature } from "@/server/features/evaluator";
 import { StrKey } from "@stellar/stellar-sdk";
 import { runTokenScan } from "@/server/scan/tokenScan";
 import { checkRateLimit } from "@/server/security/rateLimit";
-import { createX402PaymentReceipt } from "@/server/storage";
+import { createX402PaymentReceipt, findX402PaymentReceiptByTxHash } from "@/server/storage";
 import { getX402RuntimeConfig } from "@/server/x402/config";
 import { hashPaymentHeader, stableJsonHash } from "@/server/x402/guards";
+import { verifyStellarSettlement } from "@/server/x402/stellar";
 export const runtime = "nodejs";
 
 const querySchema = z.object({
@@ -18,42 +19,52 @@ const querySchema = z.object({
 });
 
 /**
- * Verify a Stellar payment proof for premium deep scan.
+ * Parse the client-supplied Stellar payment proof envelope.
  *
  * The proof is a base64-encoded JSON object containing:
- * - payer: Stellar account address (G...)
+ * - txHash: the Stellar transaction hash of the settlement
+ * - payer: Stellar account address (G...) — advisory only, confirmed on-chain
  * - network: "stellar:testnet" or "stellar:pubnet"
- * - signedPayload: base64-encoded signed payload from the Stellar wallet
  * - timestamp: ISO-8601 timestamp (must be within 5 minutes)
  * - nonce: random nonce string for replay protection
  *
- * Returns the verified payer address or throws.
+ * NOTE: These fields are untrusted. They are only used to locate the
+ * transaction; the actual settlement is verified on-chain via
+ * `verifyStellarSettlement` before any premium work runs.
  */
-function verifyStellarPaymentProof(proof: Record<string, unknown>): {
+function parseStellarPaymentProof(proof: Record<string, unknown>): {
+  txHash: string;
   payer: string;
   network: string;
+  nonce: string;
 } {
+  const txHash = String(proof.txHash ?? "");
   const payer = String(proof.payer ?? "");
   const network = String(proof.network ?? "");
   const timestamp = String(proof.timestamp ?? "");
   const nonce = String(proof.nonce ?? "");
 
-  // 1. Validate payer is a valid Stellar account address
+  // 1. Validate tx hash shape (Stellar tx hashes are 64 hex chars)
+  if (!/^[0-9a-fA-F]{64}$/.test(txHash)) {
+    throw new Error("Invalid Stellar transaction hash in payment proof.");
+  }
+
+  // 2. Validate payer is a valid Stellar account address
   if (!payer || !StrKey.isValidEd25519PublicKey(payer)) {
     throw new Error("Invalid Stellar payer address in payment proof.");
   }
 
-  // 2. Validate network
+  // 3. Validate network
   if (network !== "stellar:testnet" && network !== "stellar:pubnet") {
     throw new Error(`Unsupported Stellar network in payment proof: ${network}`);
   }
 
-  // 3. Pubnet fail-closed gate
+  // 4. Pubnet fail-closed gate
   if (network === "stellar:pubnet") {
     throw new Error("Stellar pubnet x402 payments are not enabled. Pubnet is fail-closed until a production facilitator and controlled payment flow are proven.");
   }
 
-  // 4. Validate timestamp freshness (within 5 minutes)
+  // 5. Validate timestamp freshness (within 5 minutes)
   const proofTime = new Date(timestamp).getTime();
   const now = Date.now();
   const maxAge = 5 * 60 * 1000;
@@ -62,12 +73,12 @@ function verifyStellarPaymentProof(proof: Record<string, unknown>): {
     throw new Error("Stellar payment proof is expired or timestamp is in the future.");
   }
 
-  // 5. Validate nonce presence (replay protection handled by header hash)
+  // 6. Validate nonce presence (replay protection handled by tx hash receipt)
   if (!nonce || nonce.length < 16) {
     throw new Error("Stellar payment proof nonce is too short for replay protection.");
   }
 
-  return { payer, network };
+  return { txHash, payer, network, nonce };
 }
 
 async function stellarDeepScanHandler(request: NextRequest): Promise<NextResponse<unknown>> {
@@ -112,15 +123,49 @@ async function stellarDeepScanHandler(request: NextRequest): Promise<NextRespons
     return jsonError({ code: "invalid_payment_proof", message: "The x-stellar-payment-proof header must be a valid base64-encoded JSON object.", status: 400 });
   }
 
-  let verification: { payer: string; network: string };
+  let proofFields: { txHash: string; payer: string; network: string; nonce: string };
   try {
-    verification = verifyStellarPaymentProof(proof);
+    proofFields = parseStellarPaymentProof(proof);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Payment proof verification failed.";
-    return jsonError({ code: "payment_proof_rejected", message, status: 402 });
+    return jsonError({ code: "payment_failure", message, status: 402 });
   }
 
-  // Idempotency: hash the payment proof and check for duplicates
+  // Replay check: reject a tx hash that has already been redeemed for any payload.
+  const existingReceipt = findX402PaymentReceiptByTxHash(proofFields.txHash);
+  if (existingReceipt) {
+    return jsonError({
+      code: "duplicate_payment",
+      message: "This Stellar payment transaction was already used.",
+      status: 402,
+      legacy: { receiptId: existingReceipt.id },
+    });
+  }
+
+  // Cryptographic on-chain verification: do not trust client-supplied fields.
+  let settlement: { payer: string; network: string; amount: string; recipient: string; txHash: string };
+  try {
+    settlement = await verifyStellarSettlement({
+      txHash: proofFields.txHash,
+      expectedNetwork: proofFields.network,
+      expectedRecipient: config.stellarPayTo,
+      requiredAmount: config.priceUsd,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Stellar settlement verification failed.";
+    return jsonError({ code: "payment_failure", message, status: 402 });
+  }
+
+  // Defense in depth: re-assert the settlement invariants even though
+  // verifyStellarSettlement already enforces them.
+  if (
+    settlement.txHash.toLowerCase() !== proofFields.txHash.toLowerCase() ||
+    settlement.recipient !== config.stellarPayTo ||
+    settlement.network !== proofFields.network
+  ) {
+    return jsonError({ code: "payment_failure", message: "Stellar settlement does not match the expected payment terms.", status: 402 });
+  }
+
   const paymentHeaderHash = hashPaymentHeader(parsed.data.paymentProof);
   const requestBody = { query: parsed.data.query, chain: parsed.data.chain, walletAddress: parsed.data.walletAddress };
 
@@ -128,20 +173,21 @@ async function stellarDeepScanHandler(request: NextRequest): Promise<NextRespons
     requestId: `${config.protectedResource}:stellar:${paymentHeaderHash.slice(0, 16)}`,
     paymentHeaderHash,
     walletAddress: parsed.data.walletAddress,
-    network: verification.network,
+    network: settlement.network,
     asset: "USDC",
-    amount: config.priceUsd,
+    amount: settlement.amount,
     priceUsd: config.priceUsd,
-    payTo: config.stellarPayTo,
+    payTo: settlement.recipient,
     facilitatorUrl: config.facilitatorUrl,
     protectedResource: config.protectedResource,
     requestBodyHash: stableJsonHash(requestBody),
-    payer: verification.payer,
+    payer: settlement.payer,
+    txHash: settlement.txHash,
     verificationStatus: "verified",
   });
 
   if ("verificationStatus" in receipt && receipt.verificationStatus === "duplicate") {
-    return jsonError({ code: "duplicate_payment", message: "This Stellar payment proof was already used.", status: 409, legacy: { receiptId: receipt.id } });
+    return jsonError({ code: "duplicate_payment", message: "This Stellar payment proof was already used.", status: 402, legacy: { receiptId: receipt.id } });
   }
 
   const scan = await runTokenScan(parsed.data.query, parsed.data.chain, parsed.data.walletAddress);

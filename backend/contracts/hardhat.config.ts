@@ -20,6 +20,12 @@ const config: HardhatUserConfig = {
       },
     },
   },
+  gasReporter: {
+    enabled: process.env.REPORT_GAS === "true",
+    currency: "USD",
+    outputFile: process.env.GAS_SNAPSHOT_FILE,
+    noColors: Boolean(process.env.GAS_SNAPSHOT_FILE),
+  },
   networks: {
     hardhat: {},
     sepolia: {

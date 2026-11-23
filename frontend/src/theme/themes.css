@@ -21,8 +21,8 @@
   --color-tooltip: #ffffff;
 
   --color-fg: #12110f;
-  --color-fg-muted: rgba(18, 17, 15, 0.62);
-  --color-fg-subtle: rgba(18, 17, 15, 0.42);
+  --color-fg-muted: rgba(18, 17, 15, 0.72);
+  --color-fg-subtle: rgba(18, 17, 15, 0.62);
   --color-fg-inverse: #ffffff;
 
   --color-brand: #9a6b12;
@@ -31,9 +31,9 @@
   --color-brand-subtle: rgba(154, 107, 18, 0.12);
   --color-brand-border: rgba(154, 107, 18, 0.28);
 
-  --color-border: rgba(18, 17, 15, 0.12);
-  --color-border-strong: rgba(18, 17, 15, 0.18);
-  --color-glass-border: rgba(18, 17, 15, 0.14);
+  --color-border: rgba(18, 17, 15, 0.24);
+  --color-border-strong: rgba(18, 17, 15, 0.36);
+  --color-glass-border: rgba(18, 17, 15, 0.24);
   --color-glass-bg: rgba(255, 255, 255, 0.72);
   --color-glass-highlight: rgba(255, 255, 255, 0.9);
   --color-glass-shadow: rgba(18, 17, 15, 0.08);
@@ -50,16 +50,16 @@
   --color-risk-low-bg: rgba(4, 120, 87, 0.1);
   --color-risk-medium-bg: rgba(180, 83, 9, 0.1);
   --color-risk-high-bg: rgba(185, 28, 28, 0.1);
-  --color-risk-low-border: rgba(4, 120, 87, 0.28);
-  --color-risk-medium-border: rgba(180, 83, 9, 0.28);
-  --color-risk-high-border: rgba(185, 28, 28, 0.28);
+  --color-risk-low-border: rgba(4, 120, 87, 0.4);
+  --color-risk-medium-border: rgba(180, 83, 9, 0.4);
+  --color-risk-high-border: rgba(185, 28, 28, 0.4);
 
   --color-success: #047857;
   --color-warning: #b45309;
   --color-danger: #b91c1c;
 
   --color-header-bg: rgba(244, 241, 232, 0.92);
-  --color-nav-fg: rgba(18, 17, 15, 0.68);
+  --color-nav-fg: rgba(18, 17, 15, 0.72);
   --color-nav-hover-bg: rgba(18, 17, 15, 0.06);
 
   --color-gauge-track: rgba(18, 17, 15, 0.1);
@@ -138,8 +138,8 @@
     --color-tooltip: #ffffff;
 
     --color-fg: #12110f;
-    --color-fg-muted: rgba(18, 17, 15, 0.62);
-    --color-fg-subtle: rgba(18, 17, 15, 0.42);
+    --color-fg-muted: rgba(18, 17, 15, 0.72);
+    --color-fg-subtle: rgba(18, 17, 15, 0.62);
     --color-fg-inverse: #ffffff;
 
     --color-brand: #9a6b12;
@@ -148,9 +148,9 @@
     --color-brand-subtle: rgba(154, 107, 18, 0.12);
     --color-brand-border: rgba(154, 107, 18, 0.28);
 
-    --color-border: rgba(18, 17, 15, 0.12);
-    --color-border-strong: rgba(18, 17, 15, 0.18);
-    --color-glass-border: rgba(18, 17, 15, 0.14);
+    --color-border: rgba(18, 17, 15, 0.24);
+    --color-border-strong: rgba(18, 17, 15, 0.36);
+    --color-glass-border: rgba(18, 17, 15, 0.24);
     --color-glass-bg: rgba(255, 255, 255, 0.72);
     --color-glass-highlight: rgba(255, 255, 255, 0.9);
     --color-glass-shadow: rgba(18, 17, 15, 0.08);
@@ -167,16 +167,16 @@
     --color-risk-low-bg: rgba(4, 120, 87, 0.1);
     --color-risk-medium-bg: rgba(180, 83, 9, 0.1);
     --color-risk-high-bg: rgba(185, 28, 28, 0.1);
-    --color-risk-low-border: rgba(4, 120, 87, 0.28);
-    --color-risk-medium-border: rgba(180, 83, 9, 0.28);
-    --color-risk-high-border: rgba(185, 28, 28, 0.28);
+    --color-risk-low-border: rgba(4, 120, 87, 0.4);
+    --color-risk-medium-border: rgba(180, 83, 9, 0.4);
+    --color-risk-high-border: rgba(185, 28, 28, 0.4);
 
     --color-success: #047857;
     --color-warning: #b45309;
     --color-danger: #b91c1c;
 
     --color-header-bg: rgba(244, 241, 232, 0.92);
-    --color-nav-fg: rgba(18, 17, 15, 0.68);
+    --color-nav-fg: rgba(18, 17, 15, 0.72);
     --color-nav-hover-bg: rgba(18, 17, 15, 0.06);
 
     --color-gauge-track: rgba(18, 17, 15, 0.1);
@@ -188,5 +188,19 @@
 @media (prefers-color-scheme: dark) {
   [data-theme="system"] {
     color-scheme: dark;
+  }
+}
+
+/* Forced high contrast — honor OS preference for stronger separation */
+@media (prefers-contrast: more) {
+  [data-theme="dark"],
+  :root:not([data-theme]),
+  [data-theme="system"] {
+    --color-fg-muted: #ffffff;
+    --color-fg-subtle: #ffffff;
+    --color-border: #ffffff;
+    --color-border-strong: #ffffff;
+    --color-glass-border: #ffffff;
+    --color-focus: #ffcc00;
   }
 }
