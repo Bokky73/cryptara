@@ -5,8 +5,9 @@ import {
   networkSchema,
   validateChainScopedWallet,
 } from "@/server/security/inputValidation";
+import { withApiHandler } from "@/server/api/withApiHandler";
 
-const bodySchema = z.object({
+export const decisionBodySchema = z.object({
   chainFamily: chainFamilySchema.optional(),
   network: networkSchema.optional(),
   walletAddress: z.string().min(1),
@@ -31,17 +32,16 @@ const bodySchema = z.object({
   }
 });
 
-export async function POST(request: Request) {
-  const body = await request.json().catch(() => ({}));
-  const parsed = bodySchema.safeParse(body);
-
-  if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
-  }
-
-  return NextResponse.json({
-    id: crypto.randomUUID(),
-    ...parsed.data,
-    createdAt: new Date().toISOString(),
-  });
-}
+export const POST = withApiHandler(
+  {
+    schema: decisionBodySchema,
+    maxBodyBytes: 64 * 1024,
+  },
+  async ({ data }) => {
+    return NextResponse.json({
+      id: crypto.randomUUID(),
+      ...data,
+      createdAt: new Date().toISOString(),
+    });
+  },
+);

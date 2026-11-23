@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { jsonError } from "@/server/api/errors";
+import { withApiHandler } from "@/server/api/withApiHandler";
 import { createHash } from "node:crypto";
 import { gateFeature } from "@/server/features/evaluator";
 import { z } from "zod";
@@ -10,13 +11,11 @@ import { buildExecutionPreviewFromPortfolio } from "@/server/agents/execution";
 import { getPortfolioSnapshot } from "@/server/portfolio/getPortfolio";
 import { assertApprovalOnly } from "@/server/security/policy";
 import { evaluateCapability, subjectFromRequest } from "@/server/security/authz";
-import { checkRateLimit } from "@/server/security/rateLimit";
 import { getUserRuleRecord } from "@/server/storage";
 import { assertPrepareAllowedByRecovery, getIncidentMode } from "@/server/recovery";
 import { prepareTransaction } from "@/server/transactions/lifecycleManager";
 import { getStellarNetwork } from "@/lib/stellar/config";
 import type { TransactionRecord, TransactionExpectedEffect, TransactionPreview } from "@/server/types";
-import { withRouteSpan } from "@/server/observability/tracing/spans";
 
 export const AUTHZ_CAPABILITY = "execution:prepare" as const;
 
@@ -270,55 +269,59 @@ function buildIdempotencyKey(input: { walletAddress?: string; network?: string; 
   return `auto:${digest}`;
 }
 
-export async function POST(request: Request) {
-  return withRouteSpan("execute.prepare", { "http.method": "POST" }, async () => {
-  const rateLimited = checkRateLimit(request, { namespace: "execute:prepare", limit: 20, windowMs: 60_000 });
-
-  if (rateLimited) {
-    return rateLimited;
-  }
-
-  const body = await request.json().catch(() => ({}));
-  const parsed = bodySchema.safeParse(body);
-
-  if (!parsed.success) {
-    return jsonError({ code: "validation_error", message: "Invalid input", status: 400, details: parsed.error.flatten() });
-  }
-
+export const POST = withApiHandler(
+  {
+    schema: bodySchema,
+    auth: AUTHZ_CAPABILITY,
+    rateLimit: "executePrepare",
+    maxBodyBytes: 64 * 1024,
+    span: "execute.prepare",
+  },
+  async ({ data, request, requestId }) => {
   const authz = evaluateCapability(
-    subjectFromRequest(request, { chainFamily: parsed.data.network?.startsWith("stellar") ? "stellar" : "evm", network: parsed.data.network }),
+    subjectFromRequest(request, { chainFamily: data.network?.startsWith("stellar") ? "stellar" : "evm", network: data.network }),
     AUTHZ_CAPABILITY,
-    { walletAddress: parsed.data.walletAddress, network: parsed.data.network },
+    { walletAddress: data.walletAddress, network: data.network },
   );
-  if (!authz.allowed) return NextResponse.json({ error: "auth_error", reason: authz.reason }, { status: 403 });
+  if (!authz.allowed) {
+    return jsonError({
+      code: "auth_error",
+      message: authz.reason ?? "Not authorized to prepare executions.",
+      status: 403,
+      requestId,
+    });
+  }
 
-  const prepareGate = gateFeature("execute_prepare", parsed.data.walletAddress ?? "");
+  const prepareGate = gateFeature("execute_prepare", data.walletAddress ?? "");
   if (!prepareGate.enabled) {
-    return NextResponse.json(
-      { error: "feature_disabled", feature: "execute_prepare", detail: prepareGate.detail },
-      { status: 403 },
-    );
+    return jsonError({
+      code: "feature_disabled",
+      message: prepareGate.detail ?? "Execution preparation is disabled.",
+      status: 403,
+      requestId,
+      legacy: { feature: "execute_prepare" },
+    });
   }
 
   try {
     assertApprovalOnly({ autoExecute: false });
   } catch (error) {
-    return jsonError({ code: "auth_error", message: error instanceof Error ? error.message : "Execution policy failed", status: 403 });
+    return jsonError({ code: "auth_error", message: error instanceof Error ? error.message : "Execution policy failed", status: 403, requestId });
   }
 
   try {
     assertPrepareAllowedByRecovery();
   } catch (error) {
-    return jsonError({ code: "incident_mode", message: error instanceof Error ? error.message : "Incident mode is active.", status: 423, legacy: { incidentMode: getIncidentMode() } });
+    return jsonError({ code: "incident_mode", message: error instanceof Error ? error.message : "Incident mode is active.", status: 423, requestId, legacy: { incidentMode: getIncidentMode() } });
   }
 
-  const { portfolio } = await getPortfolioSnapshot(parsed.data.walletAddress);
-  const rules = getUserRuleRecord(parsed.data.walletAddress ?? portfolio.walletAddress);
-  const preview = await buildExecutionPreviewFromPortfolio(portfolio, { ...parsed.data, rules });
+  const { portfolio } = await getPortfolioSnapshot(data.walletAddress);
+  const rules = getUserRuleRecord(data.walletAddress ?? portfolio.walletAddress);
+  const preview = await buildExecutionPreviewFromPortfolio(portfolio, { ...data, rules });
 
-  const walletAddress = parsed.data.walletAddress ?? portfolio.walletAddress;
-  const network = parsed.data.network ?? preview.network ?? "Connected wallet";
-  const chainFamily = parsed.data.chainFamily ?? (network?.toLowerCase().startsWith("stellar") ? "stellar" : "evm");
+  const walletAddress = data.walletAddress ?? portfolio.walletAddress;
+  const network = data.network ?? preview.network ?? "Connected wallet";
+  const chainFamily = data.chainFamily ?? (network?.toLowerCase().startsWith("stellar") ? "stellar" : "evm");
 
   // ── Server-side payload validation ──────────────────────────────────────
   // Do NOT accept rawPayload from the client. The server rebuilds the signed
@@ -338,14 +341,14 @@ export async function POST(request: Request) {
   // measure and cannot be compared directly. The token/route validation below
   // is sufficient to ensure the effects are semantically consistent with the
   // preview.
-  if (parsed.data.expectedEffects && parsed.data.expectedEffects.length > 0) {
+  if (data.expectedEffects && data.expectedEffects.length > 0) {
     // Validate effect tokens match the preview's route
     if (preview.quote?.route && preview.quote.route.length >= 2) {
-      for (const effect of parsed.data.expectedEffects) {
+      for (const effect of data.expectedEffects) {
         if (effect.kind === "swap" || effect.kind === "transfer") {
           if (effect.fromToken && !preview.quote.route.some((t) => t.toLowerCase() === effect.fromToken!.toLowerCase())) {
             if (effect.fromToken !== preview.fromToken) {
-              return jsonError({ code: "expected_effects_mismatch", message: `Expected effect fromToken "${effect.fromToken}" does not match preview route or fromToken.`, status: 422 });
+              return jsonError({ code: "expected_effects_mismatch", message: `Expected effect fromToken "${effect.fromToken}" does not match preview route or fromToken.`, status: 422, requestId });
             }
           }
         }
@@ -356,9 +359,9 @@ export async function POST(request: Request) {
   const idempotencyKey = buildIdempotencyKey({
     walletAddress,
     network,
-    decisionId: parsed.data.decisionId,
-    asset: parsed.data.fromToken ?? preview.fromToken ?? "wallet",
-    providedKey: parsed.data.idempotencyKey,
+    decisionId: data.decisionId,
+    asset: data.fromToken ?? preview.fromToken ?? "wallet",
+    providedKey: data.idempotencyKey,
   });
 
   // ── Build trusted executable payload ────────────────────────────────────
@@ -370,22 +373,22 @@ export async function POST(request: Request) {
   const rawPayload = buildRawPayload(
     chainFamily as "evm" | "stellar",
     preview,
-    parsed.data.expectedEffects,
-    parsed.data.sourceAccount ?? preview.stellarQuote?.sorobanSimulation?.sourceAccount,
+    data.expectedEffects,
+    data.sourceAccount ?? preview.stellarQuote?.sorobanSimulation?.sourceAccount,
   );
 
   const prepareInput: Parameters<typeof prepareTransaction>[0] = {
     chainFamily,
     network,
     walletAddress,
-    sourceAccount: parsed.data.sourceAccount,
-    decisionId: parsed.data.decisionId,
-    decisionAction: parsed.data.action as TransactionRecord["decisionAction"],
-    asset: parsed.data.fromToken ?? preview.fromToken ?? "wallet",
-    valueUsd: parsed.data.estimatedValueUsd ?? preview.estimatedValueUsd,
+    sourceAccount: data.sourceAccount,
+    decisionId: data.decisionId,
+    decisionAction: data.action as TransactionRecord["decisionAction"],
+    asset: data.fromToken ?? preview.fromToken ?? "wallet",
+    valueUsd: data.estimatedValueUsd ?? preview.estimatedValueUsd,
     // Pass only server-validated expectedEffects (rebuild from preview when possible)
-    expectedEffects: parsed.data.expectedEffects,
-    simulationStatus: parsed.data.simulationStatus ?? preview.simulation?.status,
+    expectedEffects: data.expectedEffects,
+    simulationStatus: data.simulationStatus ?? preview.simulation?.status,
     policyStatus: preview.policyStatus,
     idempotencyKey,
     rawPayload,
@@ -408,5 +411,5 @@ export async function POST(request: Request) {
       transaction: prepared.transaction,
     },
   }), "execution");
-  });
-}
+  },
+);

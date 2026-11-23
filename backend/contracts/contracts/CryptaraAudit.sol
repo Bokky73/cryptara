@@ -183,10 +183,9 @@ contract CryptaraAudit {
 
     /// @notice Record an execution intent for `user`.
     /// @dev Consumes `intentId`; a repeat reverts with `IntentReplayed`. An
-    ///      `expiresAt` already in the past reverts with `IntentStale`.
-    ///
-    ///      Recording an intent authorizes nothing on its own — the resulting
-    ///      transaction is still signed by the user's wallet.
+    ///      intent whose `expiresAt` is not strictly in the future reverts with
+    ///      `IntentStale`, and one that outlives `MAX_INTENT_WINDOW` reverts with
+    ///      `WindowTooLong`.
     function recordIntent(
         address user,
         bytes32 policyHash,
@@ -195,7 +194,9 @@ contract CryptaraAudit {
         bytes32 intentHash,
         uint64 expiresAt
     ) external onlyLiveAgent(user, policyHash) {
-        if (intentId == bytes32(0) || intentHash == bytes32(0) || decisionId == bytes32(0)) revert ZeroHash();
+        if (intentId == bytes32(0) || decisionId == bytes32(0) || intentHash == bytes32(0)) {
+            revert ZeroHash();
+        }
         if (intentUsed[user][intentId]) revert IntentReplayed();
         if (expiresAt <= block.timestamp) revert IntentStale();
         if (expiresAt - uint64(block.timestamp) > MAX_INTENT_WINDOW) revert WindowTooLong();
@@ -212,16 +213,6 @@ contract CryptaraAudit {
         returns (bytes32 policyHash, uint64 expiresAt, bool active)
     {
         Authorization memory authorization = _authorizations[user][agent];
-
         return (authorization.policyHash, authorization.expiresAt, authorization.active);
-    }
-
-    /// @notice Whether `agent` may currently act for `user`.
-    /// @dev Combines revocation, expiry and pause into the single question a
-    ///      caller actually has.
-    function isAgentLive(address user, address agent) external view returns (bool) {
-        Authorization memory authorization = _authorizations[user][agent];
-
-        return authorization.active && authorization.expiresAt > block.timestamp && !paused[user];
     }
 }

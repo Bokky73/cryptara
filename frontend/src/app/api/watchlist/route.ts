@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { checkRateLimit } from "@/server/security/rateLimit";
 import { addToWatchlist, listWatchlist, removeFromWatchlist } from "@/server/discovery/watchlist";
 import { ensureStorageReady } from "@/server/storage";
 import { resolveWalletSession } from "@/server/security/walletSession";
 import { evaluateCapability } from "@/server/security/authz";
+import { withApiHandler } from "@/server/api/withApiHandler";
+import { jsonError } from "@/server/api/errors";
 
 export const AUTHZ_CAPABILITY = "watchlist:write" as const;
 
@@ -34,107 +35,105 @@ const listQuerySchema = z.object({
   walletAddress: z.string().min(1).max(80).optional(),
 });
 
-export async function GET(request: Request) {
-  const rateLimited = checkRateLimit(request, { namespace: "watchlist:list", limit: 60, windowMs: 60_000 });
+export const GET = withApiHandler(
+  {
+    schema: { query: listQuerySchema },
+    rateLimit: { namespace: "watchlist:list", limit: 60, windowMs: 60_000 },
+  },
+  async ({ query, request }) => {
+    await ensureStorageReady();
 
-  if (rateLimited) {
-    return rateLimited;
-  }
-
-  await ensureStorageReady();
-
-  const url = new URL(request.url);
-  const parsed = listQuerySchema.safeParse({ walletAddress: url.searchParams.get("walletAddress") ?? undefined });
-
-  if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
-  }
-
-  // Wallet isolation: the session cookie is authoritative
-  const session = resolveWalletSession(request, { suppliedWallet: parsed.data.walletAddress });
-  if (session.response) return session.response;
-
-  const authz = evaluateCapability(
-    { kind: "wallet", walletAddress: session.wallet, walletHash: "route" },
-    "portfolio:read",
-    { walletAddress: session.wallet },
-  );
-  if (!authz.allowed) return NextResponse.json({ error: "auth_error", reason: authz.reason }, { status: 403 });
-
-  return NextResponse.json({ entries: listWatchlist(session.wallet!) });
-}
-
-export async function POST(request: Request) {
-  const rateLimited = checkRateLimit(request, { namespace: "watchlist:add", limit: 20, windowMs: 60_000 });
-
-  if (rateLimited) {
-    return rateLimited;
-  }
-
-  await ensureStorageReady();
-
-  const body = await request.json().catch(() => ({}));
-
-  const parsedAdd = addBodySchema.safeParse({ ...body, action: "add" });
-
-  if (parsedAdd.success) {
     // Wallet isolation: the session cookie is authoritative
-    const session = resolveWalletSession(request, { suppliedWallet: parsedAdd.data.walletAddress });
+    const session = resolveWalletSession(request, { suppliedWallet: query.walletAddress });
     if (session.response) return session.response;
-    const wallet = session.wallet!;
+
     const authz = evaluateCapability(
-      { kind: "wallet", walletAddress: wallet, walletHash: "route", chainFamily: parsedAdd.data.chain?.startsWith("stellar") ? "stellar" : "evm", network: parsedAdd.data.network?.toLowerCase() },
-      AUTHZ_CAPABILITY,
-      { walletAddress: wallet, network: parsedAdd.data.network },
+      { kind: "wallet", walletAddress: session.wallet, walletHash: "route" },
+      "portfolio:read",
+      { walletAddress: session.wallet },
     );
-    if (!authz.allowed) return NextResponse.json({ error: "auth_error", reason: authz.reason }, { status: 403 });
+    if (!authz.allowed) {
+      return jsonError("auth_error", { reason: authz.reason, status: 403 });
+    }
 
-    const result = await addToWatchlist({
-      walletAddress: wallet,
-      chain: parsedAdd.data.chain,
-      network: parsedAdd.data.network,
-      contractAddress: parsedAdd.data.contractAddress,
-      pairAddress: parsedAdd.data.pairAddress,
-      symbol: parsedAdd.data.symbol,
-      tokenName: parsedAdd.data.tokenName,
-      assetKey: parsedAdd.data.assetKey,
-      issuer: parsedAdd.data.issuer,
-      assetType: parsedAdd.data.assetType,
-      source: parsedAdd.data.source === "manual" ? "manual_watchlist" : parsedAdd.data.source,
-      note: parsedAdd.data.note,
-    });
+    return NextResponse.json({ entries: listWatchlist(session.wallet!) });
+  },
+);
 
-    return result.ok
-      ? NextResponse.json({ entry: result.entry, alreadyExisted: result.alreadyExisted })
-      : NextResponse.json({ error: result.error }, { status: 422 });
-  }
+export const POST = withApiHandler(
+  {
+    schema: { body: z.union([addBodySchema, removeBodySchema]) },
+    rateLimit: { namespace: "watchlist:add", limit: 20, windowMs: 60_000 },
+  },
+  async ({ body, request }) => {
+    await ensureStorageReady();
 
-  const parsedRemove = removeBodySchema.safeParse({ ...body, action: "remove" });
+    if (body.action === "add") {
+      // Wallet isolation: the session cookie is authoritative
+      const session = resolveWalletSession(request, { suppliedWallet: body.walletAddress });
+      if (session.response) return session.response;
+      const wallet = session.wallet!;
+      const authz = evaluateCapability(
+        {
+          kind: "wallet",
+          walletAddress: wallet,
+          walletHash: "route",
+          chainFamily: body.chain?.startsWith("stellar") ? "stellar" : "evm",
+          network: body.network?.toLowerCase(),
+        },
+        AUTHZ_CAPABILITY,
+        { walletAddress: wallet, network: body.network },
+      );
+      if (!authz.allowed) {
+        return jsonError("auth_error", { reason: authz.reason, status: 403 });
+      }
 
-  if (parsedRemove.success) {
+      const result = await addToWatchlist({
+        walletAddress: wallet,
+        chain: body.chain,
+        network: body.network,
+        contractAddress: body.contractAddress,
+        pairAddress: body.pairAddress,
+        symbol: body.symbol,
+        tokenName: body.tokenName,
+        assetKey: body.assetKey,
+        issuer: body.issuer,
+        assetType: body.assetType,
+        source: body.source === "manual" ? "manual_watchlist" : body.source,
+        note: body.note,
+      });
+
+      return result.ok
+        ? NextResponse.json({ entry: result.entry, alreadyExisted: result.alreadyExisted })
+        : jsonError("validation_error", { message: result.error, status: 422 });
+    }
+
     // Wallet isolation: the session cookie is authoritative
-    const session = resolveWalletSession(request, { suppliedWallet: parsedRemove.data.walletAddress });
+    const session = resolveWalletSession(request, { suppliedWallet: body.walletAddress });
     if (session.response) return session.response;
 
     const entries = listWatchlist(session.wallet!);
-    const owned = entries.find((entry) => entry.id === parsedRemove.data.entryId);
+    const owned = entries.find((entry) => entry.id === body.entryId);
 
     if (!owned) {
-      return NextResponse.json({ error: "Entry not found or does not belong to this wallet." }, { status: 404 });
+      return jsonError("not_found", {
+        message: "Entry not found or does not belong to this wallet.",
+        status: 404,
+      });
     }
 
     const authz = evaluateCapability(
       { kind: "wallet", walletAddress: session.wallet, walletHash: "route" },
       AUTHZ_CAPABILITY,
-      { walletAddress: session.wallet, id: parsedRemove.data.entryId },
+      { walletAddress: session.wallet, id: body.entryId },
     );
-    if (!authz.allowed) return NextResponse.json({ error: "auth_error", reason: authz.reason }, { status: 403 });
+    if (!authz.allowed) {
+      return jsonError("auth_error", { reason: authz.reason, status: 403 });
+    }
 
-    const ok = await removeFromWatchlist(parsedRemove.data.entryId);
+    const ok = await removeFromWatchlist(body.entryId);
 
     return NextResponse.json({ ok });
-  }
-
-  return NextResponse.json({ error: "Invalid watchlist request." }, { status: 400 });
-}
+  },
+);
 // Bulk import/export handles versions up to 1.0.0

@@ -78,8 +78,8 @@ contract CryptaraPolicy {
     event IntentCreated(bytes32 indexed intentHash, bytes32 indexed policyCommitment);
     event IntentExecuted(bytes32 indexed intentHash);
     event IntentRevoked(bytes32 indexed intentHash);
-    event Paused(address indexed by);
-    event Unpaused(address indexed by);
+    event Paused(address indexed actor, bool paused, bytes32 reasonHash, uint256 timestamp);
+    event Unpaused(address indexed actor, bool paused, bytes32 reasonHash, uint256 timestamp);
     event AssetAllowed(address indexed asset);
     event AssetBlocked(address indexed asset, bool blocked);
     event LimitsUpdated(uint256 maxTxValue, uint256 maxSlippageBps, uint256 maxDailySpend);
@@ -250,14 +250,20 @@ contract CryptaraPolicy {
     //  Pause / Emergency
     // ──────────────────────────────────────────────
 
-    function pause() external onlyOwnerOrEmergency {
+    /// @notice Instant circuit-breaker. Either governance (owner) or the
+    ///         emergencyAdmin may pause with zero delay.
+    function pause(bytes32 reasonHash) external onlyOwnerOrEmergency {
+        require(!paused, "Policy: already paused");
         paused = true;
-        emit Paused(msg.sender);
+        emit Paused(msg.sender, true, reasonHash, block.timestamp);
     }
 
-    function unpause() external onlyOwnerOrEmergency {
+    /// @notice Only governance (owner / timelocked multisig) may unpause.
+    ///         emergencyAdmin is explicitly forbidden from lifting the pause.
+    function unpause(bytes32 reasonHash) external onlyOwner {
+        require(paused, "Policy: not paused");
         paused = false;
-        emit Unpaused(msg.sender);
+        emit Unpaused(msg.sender, false, reasonHash, block.timestamp);
     }
 
     // ──────────────────────────────────────────────

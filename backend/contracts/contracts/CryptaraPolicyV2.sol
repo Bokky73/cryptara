@@ -166,5 +166,25 @@ contract CryptaraPolicyV2 is CryptaraPolicy, EIP712 {
 
     function blockedAssetAt(uint256 index) external view returns (address) {
         return _blockedAssets.at(index);
+    // Asymmetric pause authority: emergencyAdmin OR governance may pause instantly,
+    // but ONLY governance (timelocked multisig) may unpause.
+    function pause(bytes32 reasonHash) external override {
+        require(
+            msg.sender == emergencyAdmin || msg.sender == owner || msg.sender == timelock,
+            "PolicyV2: not authorized to pause"
+        );
+        require(!paused, "PolicyV2: already paused");
+        paused = true;
+        emit Paused(msg.sender, true, reasonHash, block.timestamp);
+    }
+
+    function unpause(bytes32 reasonHash) external override {
+        require(
+            msg.sender == owner || msg.sender == timelock,
+            "PolicyV2: only governance can unpause"
+        );
+        require(paused, "PolicyV2: not paused");
+        paused = false;
+        emit Paused(msg.sender, false, reasonHash, block.timestamp);
     }
 }

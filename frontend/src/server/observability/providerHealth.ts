@@ -38,20 +38,57 @@ export type ProviderHealthSnapshot = {
   circuits: ReturnType<typeof getProviderCircuitHealth>;
 };
 
-export function getProviderCircuitHealth() {
-  return sharedProviderCircuits.snapshots().map((circuit) => {
-    const latencyPenalty = Math.min(35, circuit.averageLatencyMs / 100);
-    const errorPenalty = circuit.errorRate * 55;
-    const statePenalty = circuit.state === "open" ? 40 : circuit.state === "half_open" ? 20 : 0;
-    return {
-      provider: redactSecrets(circuit.key),
-      state: circuit.state,
-      sampleCount: circuit.sampleCount,
-      errorRate: Number(circuit.errorRate.toFixed(3)),
-      averageLatencyMs: circuit.averageLatencyMs,
-      score: Math.max(0, Math.round(100 - latencyPenalty - errorPenalty - statePenalty)),
-    };
-  });
+export type ProviderCircuitHealth = {
+  provider: string;
+  state: CircuitState;
+  sampleCount: number;
+  errorRate: number;
+  averageLatencyMs: number;
+  score: number;
+};
+
+/**
+ * Composite provider health score in [0, 100].
+ * Penalizes open/half-open circuits, high error rates, and slow latency.
+ * An open circuit is treated as fully unavailable (score 0).
+ */
+export function scoreProviderCircuit(circuit: {
+  state: CircuitState;
+  errorRate: number;
+  averageLatencyMs: number;
+}): number {
+  if (circuit.state === "open") return 0;
+  const latencyPenalty = Math.min(35, circuit.averageLatencyMs / 100);
+  const errorPenalty = Math.min(55, circuit.errorRate * 55);
+  const statePenalty = circuit.state === "half_open" ? 20 : 0;
+  return Math.max(0, Math.round(100 - latencyPenalty - errorPenalty - statePenalty));
+}
+
+export function getProviderCircuitHealth(): ProviderCircuitHealth[] {
+  return sharedProviderCircuits.snapshots().map((circuit) => ({
+    provider: redactSecrets(circuit.key),
+    state: circuit.state,
+    sampleCount: circuit.sampleCount,
+    errorRate: Number(circuit.errorRate.toFixed(3)),
+    averageLatencyMs: circuit.averageLatencyMs,
+    score: scoreProviderCircuit(circuit),
+  }));
+}
+
+/**
+ * Look up the circuit health entry for a given provider key.
+ * Returns `undefined` when the provider has no recorded samples yet.
+ */
+export function getCircuitHealthFor(providerKey: string): ProviderCircuitHealth | undefined {
+  return getProviderCircuitHealth().find((entry) => entry.provider === redactSecrets(providerKey));
+}
+
+/**
+ * Returns true when the circuit for the given provider key is open,
+ * meaning the provider should be treated as unavailable.
+ */
+export function isProviderCircuitOpen(providerKey: string): boolean {
+  return sharedProviderCircuits.snapshot(providerKey)?.state === "open";
 }
 
 // ── Disable switches ───────────────────────────────────────────────
@@ -129,13 +166,20 @@ export async function checkEvmProviderHealth(params: {
       latencyMs,
     }));
 
+    const circuit = getCircuitHealthFor(`evm_rpc_${network}`);
+    const circuitOpen = circuit?.state === "open";
+
     return {
       provider,
       family: "evm",
       network,
-      status: "healthy",
+      status: circuitOpen ? "unavailable" : "healthy",
       latencyMs,
-      detail: `EVM RPC healthy at block ${blockNumber} (${latencyMs}ms).`,
+      detail: circuitOpen
+        ? `EVM RPC circuit open for ${network}; treating provider as unavailable.`
+        : `EVM RPC healthy at block ${blockNumber} (${latencyMs}ms).`,
+      score: circuit?.score,
+      circuitState: circuit?.state,
       checkedAt: new Date().toISOString(),
     };
   } catch (error) {
@@ -151,6 +195,8 @@ export async function checkEvmProviderHealth(params: {
       reason: message,
     }));
 
+    const circuit = getCircuitHealthFor(`evm_rpc_${network}`);
+
     return {
       provider,
       family: "evm",
@@ -159,6 +205,8 @@ export async function checkEvmProviderHealth(params: {
       latencyMs,
       detail: `EVM RPC is unavailable for ${network}.`,
       error: redactSecrets(message),
+      score: circuit?.score,
+      circuitState: circuit?.state,
       checkedAt: new Date().toISOString(),
     };
   }
@@ -175,7 +223,10 @@ export async function checkStellarProviderHealth(params: {
     const health = await getStellarRpcHealth(params.network);
     const latencyMs = health.latencyMs;
 
-    const status: HealthStatus = health.healthy ? "healthy" : "degraded";
+    const circuit = getCircuitHealthFor("stellar_rpc");
+    const circuitOpen = circuit?.state === "open";
+
+    const status: HealthStatus = circuitOpen ? "unavailable" : health.healthy ? "healthy" : "degraded";
 
     recordAuditEvent(auditProviderHealthCheck({
       correlationId: `health_stellar_${params.network}`,
@@ -183,7 +234,7 @@ export async function checkStellarProviderHealth(params: {
       providerUrl: health.providerUrl ? redactProviderUrl(health.providerUrl) : undefined,
       chainFamily: "stellar",
       network: params.network,
-      healthy: health.healthy,
+      healthy: health.healthy && !circuitOpen,
       latencyMs,
     }));
 
@@ -193,9 +244,13 @@ export async function checkStellarProviderHealth(params: {
       network: params.network,
       status,
       latencyMs,
-      detail: health.healthy
-        ? `Stellar RPC healthy at ledger ${health.latestLedger} (${latencyMs}ms).`
-        : `Stellar RPC degraded: status=${health.status}, ledger=${health.latestLedger}.`,
+      detail: circuitOpen
+        ? `Stellar RPC circuit open for ${params.network}; treating provider as unavailable.`
+        : health.healthy
+          ? `Stellar RPC healthy at ledger ${health.latestLedger} (${latencyMs}ms).`
+          : `Stellar RPC degraded: status=${health.status}, ledger=${health.latestLedger}.`,
+      score: circuit?.score,
+      circuitState: circuit?.state,
       checkedAt: health.checkedAt,
     };
   } catch (error) {
@@ -210,6 +265,8 @@ export async function checkStellarProviderHealth(params: {
       reason: message,
     }));
 
+    const circuit = getCircuitHealthFor("stellar_rpc");
+
     return {
       provider: "stellar_rpc",
       family: "stellar",
@@ -218,6 +275,8 @@ export async function checkStellarProviderHealth(params: {
       latencyMs,
       detail: `Stellar RPC is unavailable for ${params.network}.`,
       error: redactSecrets(message),
+      score: circuit?.score,
+      circuitState: circuit?.state,
       checkedAt: new Date().toISOString(),
     };
   }
@@ -252,6 +311,42 @@ export async function getProviderHealthSnapshot(options?: {
     overallStatus,
     circuits: getProviderCircuitHealth(),
   };
+}
+
+/**
+ * Confidence multiplier in [0, 1] derived from the health snapshot.
+ * Used by the agent pipeline to downgrade confidence when providers are
+ * degraded or unavailable — never to fabricate data in live mode.
+ */
+export function getProviderConfidenceMultiplier(snapshot: ProviderHealthSnapshot): number {
+  const scores = snapshot.circuits.map((circuit) => circuit.score);
+  const circuitScore = scores.length > 0 ? scores.reduce((sum, s) => sum + s, 0) / scores.length : 100;
+
+  const statusPenalty =
+    snapshot.overallStatus === "unavailable"
+      ? 0.5
+      : snapshot.overallStatus === "degraded"
+        ? 0.75
+        : snapshot.overallStatus === "unconfigured"
+          ? 0.6
+          : 1;
+
+  const multiplier = (circuitScore / 100) * statusPenalty;
+  return Math.max(0, Math.min(1, Number(multiplier.toFixed(3))));
+}
+
+/**
+ * Downgrade a base confidence score using the current provider health.
+ * Returns the adjusted confidence and the multiplier applied so callers can
+ * surface the degradation to the agent state.
+ */
+export function applyProviderHealthToConfidence(
+  baseConfidence: number,
+  snapshot: ProviderHealthSnapshot,
+): { confidence: number; multiplier: number; status: HealthStatus } {
+  const multiplier = getProviderConfidenceMultiplier(snapshot);
+  const confidence = Math.max(0, Math.min(1, Number((baseConfidence * multiplier).toFixed(3))));
+  return { confidence, multiplier, status: snapshot.overallStatus };
 }
 
 /**
