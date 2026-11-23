@@ -1,4 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+
+import { jsonError } from "@/server/api/errors";
 
 type RateLimitOptions = {
   limit: number;
@@ -203,6 +205,18 @@ export class PostgresRateLimitStore implements RateLimitStore {
 const storeGlobal = globalThis as typeof globalThis & {
   __cryptaraRateLimitStore?: RateLimitStore;
 };
+  if (bucket.count >= options.limit) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+    const response = jsonError({
+      code: "rate_limited",
+      message: `Too many ${options.namespace} requests. Try again after ${new Date(bucket.resetAt).toISOString()}.`,
+      status: 429,
+      retryable: true,
+      recoveryAction: "retry_after_delay",
+      details: { namespace: options.namespace, retryAfterSeconds },
+    });
+
+    response.headers.set("Retry-After", retryAfterSeconds.toString());
 
 function createStore(): RateLimitStore {
   const kind = (process.env.RATE_LIMIT_STORE ?? "memory").toLowerCase();
