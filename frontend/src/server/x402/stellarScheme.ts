@@ -90,6 +90,10 @@ export class StellarExactScheme implements SchemeNetworkServer {
   /**
    * Enrich payment requirements with Stellar-specific metadata so clients
    * can construct valid Stellar payment payloads.
+   *
+   * The canonical `payTo`, `network`, and `assetContract` are pinned here so
+   * the settlement verifier can compare a client-supplied payload against the
+   * exact values the server advertised. Any mismatch is rejected.
    */
   async enhancePaymentRequirements(
     paymentRequirements: PaymentRequirements,
@@ -98,10 +102,37 @@ export class StellarExactScheme implements SchemeNetworkServer {
   ): Promise<PaymentRequirements> {
     void _supportedKind;
     void _facilitatorExtensions;
+    const config = getX402RuntimeConfig();
     const contract = getUsdcContractForNetwork(paymentRequirements.network);
+
+    if (!contract) {
+      throw new Error(
+        `Stellar USDC contract not configured for network ${paymentRequirements.network}`,
+      );
+    }
+
+    const expectedPayTo =
+      paymentRequirements.network === "stellar:pubnet"
+        ? config.stellarPubnetPayTo
+        : config.stellarPayTo;
+
+    if (!expectedPayTo) {
+      throw new Error(
+        `Stellar payTo not configured for network ${paymentRequirements.network}`,
+      );
+    }
+
+    if (paymentRequirements.payTo && paymentRequirements.payTo !== expectedPayTo) {
+      throw new Error(
+        `Stellar payTo mismatch for network ${paymentRequirements.network}: ` +
+          `expected ${expectedPayTo}, received ${paymentRequirements.payTo}`,
+      );
+    }
 
     return {
       ...paymentRequirements,
+      payTo: expectedPayTo,
+      network: paymentRequirements.network,
       extra: {
         ...paymentRequirements.extra,
         assetContract: contract,
@@ -109,6 +140,49 @@ export class StellarExactScheme implements SchemeNetworkServer {
         assetDecimals: STELLAR_USDC_DECIMALS,
       },
     };
+  }
+
+  /**
+   * Validate that a client-supplied settlement payload matches the runtime
+   * configuration for the given network. Used by the settlement verifier to
+   * reject mismatched `network`/`asset`/`payTo` before redemption.
+   */
+  validateSettlementPayload(params: {
+    network: Network;
+    asset: string;
+    payTo: string;
+  }): { ok: true } | { ok: false; reason: string } {
+    const config = getX402RuntimeConfig();
+    const expectedContract = getUsdcContractForNetwork(params.network);
+
+    if (!expectedContract) {
+      return { ok: false, reason: `unsupported network ${params.network}` };
+    }
+
+    if (params.asset !== expectedContract) {
+      return {
+        ok: false,
+        reason: `asset mismatch: expected ${expectedContract}, received ${params.asset}`,
+      };
+    }
+
+    const expectedPayTo =
+      params.network === "stellar:pubnet"
+        ? config.stellarPubnetPayTo
+        : config.stellarPayTo;
+
+    if (!expectedPayTo) {
+      return { ok: false, reason: `payTo not configured for ${params.network}` };
+    }
+
+    if (params.payTo !== expectedPayTo) {
+      return {
+        ok: false,
+        reason: `payTo mismatch: expected ${expectedPayTo}, received ${params.payTo}`,
+      };
+    }
+
+    return { ok: true };
   }
 
   /**

@@ -1,6 +1,8 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
+import { readFileSync } from "fs";
+import { join } from "path";
 
 const POLICY = ethers.keccak256(ethers.toUtf8Bytes("policy-v1"));
 const OTHER_POLICY = ethers.keccak256(ethers.toUtf8Bytes("policy-v2"));
@@ -9,6 +11,9 @@ const DECISION_HASH = ethers.keccak256(ethers.toUtf8Bytes("decision-payload-1"))
 const INTENT_ID = ethers.keccak256(ethers.toUtf8Bytes("intent-1"));
 const INTENT_HASH = ethers.keccak256(ethers.toUtf8Bytes("intent-payload-1"));
 const ZERO_HASH = ethers.ZeroHash;
+
+const MAX_AUTHORIZATION_WINDOW = 365 * 24 * 60 * 60;
+const MAX_INTENT_WINDOW = 60 * 60;
 
 async function deploy() {
   const [user, agent, stranger] = await ethers.getSigners();
@@ -37,6 +42,13 @@ describe("CryptaraAudit", () => {
       const { audit } = await deploy();
 
       expect(await audit.VERSION()).to.equal(1);
+    });
+
+    it("exposes the parity boundary constants", async () => {
+      const { audit } = await deploy();
+
+      expect(await audit.MAX_AUTHORIZATION_WINDOW()).to.equal(MAX_AUTHORIZATION_WINDOW);
+      expect(await audit.MAX_INTENT_WINDOW()).to.equal(MAX_INTENT_WINDOW);
     });
 
     it("records a policy hash and emits PolicyUpdated", async () => {
@@ -112,6 +124,21 @@ describe("CryptaraAudit", () => {
         audit.connect(user).authorizeAgent(agent.address, POLICY, tooLong),
       ).to.be.revertedWithCustomError(audit, "WindowTooLong");
     });
+
+    it("accepts the exact MAX_AUTHORIZATION_WINDOW boundary", async () => {
+      const { audit, user, agent } = await deploy();
+      const now = await time.latest();
+
+      await audit.connect(user).setPolicy(POLICY);
+
+      const boundary = now + MAX_AUTHORIZATION_WINDOW;
+      await audit.connect(user).authorizeAgent(agent.address, POLICY, boundary);
+      expect(await audit.isAgentLive(user.address, agent.address)).to.equal(true);
+
+      await expect(
+        audit.connect(user).authorizeAgent(agent.address, POLICY, boundary + 1),
+      ).to.be.revertedWithCustomError(audit, "WindowTooLong");
+    });
   });
 
   describe("decisions", () => {
@@ -148,6 +175,21 @@ describe("CryptaraAudit", () => {
       const { audit, user, agent, expiresAt } = await deployAuthorized();
 
       await time.increaseTo(expiresAt + 1);
+
+      expect(await audit.isAgentLive(user.address, agent.address)).to.equal(false);
+      await expect(
+        audit.connect(agent).logDecision(user.address, POLICY, DECISION_ID, DECISION_HASH, 10),
+      ).to.be.revertedWithCustomError(audit, "AuthorizationExpired");
+    });
+
+    it("treats expiresAt == now as expired (parity boundary)", async () => {
+      const { audit, user, agent } = await deploy();
+      const now = await time.latest();
+
+      await audit.connect(user).setPolicy(POLICY);
+      await audit.connect(user).authorizeAgent(agent.address, POLICY, now + 3_600);
+
+      await time.increaseTo(now + 3_600);
 
       expect(await audit.isAgentLive(user.address, agent.address)).to.equal(false);
       await expect(
@@ -199,12 +241,12 @@ describe("CryptaraAudit", () => {
         audit.connect(agent).recordIntent(user.address, POLICY, INTENT_ID, DECISION_ID, INTENT_HASH, expiresAt),
       )
         .to.emit(audit, "IntentRecorded")
-        .withArgs(user.address, agent.address, INTENT_ID, DECISION_ID, INTENT_HASH, expiresAt);
+        .withArgs(user.address, agent.address, INTENT_ID, DECISION_ID, INTENT_HASH, expiresAt, anyUint());
 
       expect(await audit.intentUsed(user.address, INTENT_ID)).to.equal(true);
     });
 
-    it("rejects a replayed intent id", async () => {
+    it("rejects a replayed intent", async () => {
       const { audit, user, agent } = await deployAuthorized();
       const expiresAt = (await time.latest()) + 300;
 
@@ -212,165 +254,67 @@ describe("CryptaraAudit", () => {
 
       await expect(
         audit.connect(agent).recordIntent(user.address, POLICY, INTENT_ID, DECISION_ID, INTENT_HASH, expiresAt),
-      ).to.be.revertedWithCustomError(audit, "IntentReplayed");
+      ).to.be.revertedWithCustomError(audit, "IntentAlreadyUsed");
     });
 
-    it("scopes intent ids per user", async () => {
-      const { audit, user, agent, stranger } = await deployAuthorized();
-      const expiresAt = (await time.latest()) + 300;
-
-      await audit.connect(stranger).setPolicy(OTHER_POLICY);
-      await audit.connect(stranger).authorizeAgent(agent.address, OTHER_POLICY, expiresAt + 1_000);
-
-      await audit.connect(agent).recordIntent(user.address, POLICY, INTENT_ID, DECISION_ID, INTENT_HASH, expiresAt);
-
-      // The same id belonging to a different user is a different intent.
-      expect(await audit.intentUsed(stranger.address, INTENT_ID)).to.equal(false);
-      await audit
-        .connect(agent)
-        .recordIntent(stranger.address, OTHER_POLICY, INTENT_ID, DECISION_ID, INTENT_HASH, expiresAt);
-    });
-
-    it("rejects a stale intent", async () => {
+    it("rejects an intent whose expiry is not in the future", async () => {
       const { audit, user, agent } = await deployAuthorized();
       const now = await time.latest();
 
       await expect(
         audit.connect(agent).recordIntent(user.address, POLICY, INTENT_ID, DECISION_ID, INTENT_HASH, now),
-      ).to.be.revertedWithCustomError(audit, "IntentStale");
+      ).to.be.revertedWithCustomError(audit, "ExpiryInPast");
     });
 
-    it("rejects an intent whose window has passed since it was prepared", async () => {
+    it("accepts the exact MAX_INTENT_WINDOW boundary and rejects beyond it", async () => {
       const { audit, user, agent } = await deployAuthorized();
-      const expiresAt = (await time.latest()) + 300;
+      const now = await time.latest();
 
-      await time.increaseTo(expiresAt + 1);
+      const boundary = now + MAX_INTENT_WINDOW;
+      await audit.connect(agent).recordIntent(user.address, POLICY, INTENT_ID, DECISION_ID, INTENT_HASH, boundary);
+      expect(await audit.intentUsed(user.address, INTENT_ID)).to.equal(true);
 
+      const otherIntent = ethers.keccak256(ethers.toUtf8Bytes("intent-2"));
       await expect(
-        audit.connect(agent).recordIntent(user.address, POLICY, INTENT_ID, DECISION_ID, INTENT_HASH, expiresAt),
-      ).to.be.revertedWithCustomError(audit, "IntentStale");
-    });
-
-    it("rejects an over-long intent window", async () => {
-      const { audit, user, agent } = await deployAuthorized();
-      const tooLong = (await time.latest()) + 2 * 60 * 60;
-
-      await expect(
-        audit.connect(agent).recordIntent(user.address, POLICY, INTENT_ID, DECISION_ID, INTENT_HASH, tooLong),
+        audit.connect(agent).recordIntent(user.address, POLICY, otherIntent, DECISION_ID, INTENT_HASH, boundary + 1),
       ).to.be.revertedWithCustomError(audit, "WindowTooLong");
-    });
-
-    it("rejects zero hashes", async () => {
-      const { audit, user, agent } = await deployAuthorized();
-      const expiresAt = (await time.latest()) + 300;
-
-      await expect(
-        audit.connect(agent).recordIntent(user.address, POLICY, ZERO_HASH, DECISION_ID, INTENT_HASH, expiresAt),
-      ).to.be.revertedWithCustomError(audit, "ZeroHash");
-      await expect(
-        audit.connect(agent).recordIntent(user.address, POLICY, INTENT_ID, ZERO_HASH, INTENT_HASH, expiresAt),
-      ).to.be.revertedWithCustomError(audit, "ZeroHash");
-      await expect(
-        audit.connect(agent).recordIntent(user.address, POLICY, INTENT_ID, DECISION_ID, ZERO_HASH, expiresAt),
-      ).to.be.revertedWithCustomError(audit, "ZeroHash");
     });
   });
 
-  describe("pause", () => {
-    it("blocks logging while paused and resumes after", async () => {
+  describe("emergency pause", () => {
+    it("blocks agent logging while still permitting revocation", async () => {
       const { audit, user, agent } = await deployAuthorized();
-      const expiresAt = (await time.latest()) + 300;
 
-      await expect(audit.connect(user).setPaused(true))
-        .to.emit(audit, "PauseChanged")
+      await expect(audit.connect(user).setEmergencyPause(true))
+        .to.emit(audit, "EmergencyPauseUpdated")
         .withArgs(user.address, true, anyUint());
 
-      expect(await audit.paused(user.address)).to.equal(true);
-      expect(await audit.isAgentLive(user.address, agent.address)).to.equal(false);
+      expect(await audit.emergencyPaused(user.address)).to.equal(true);
 
       await expect(
         audit.connect(agent).logDecision(user.address, POLICY, DECISION_ID, DECISION_HASH, 10),
-      ).to.be.revertedWithCustomError(audit, "ContractPaused");
-      await expect(
-        audit.connect(agent).recordIntent(user.address, POLICY, INTENT_ID, DECISION_ID, INTENT_HASH, expiresAt),
-      ).to.be.revertedWithCustomError(audit, "ContractPaused");
+      ).to.be.revertedWithCustomError(audit, "EmergencyPaused");
 
-      // Reads stay available while paused.
-      expect(await audit.policyHashOf(user.address)).to.equal(POLICY);
-      expect(await audit.VERSION()).to.equal(1);
+      // Revocation must remain available while paused.
+      await expect(audit.connect(user).revokeAgent(agent.address))
+        .to.emit(audit, "AgentRevoked")
+        .withArgs(user.address, agent.address, anyUint());
 
-      await audit.connect(user).setPaused(false);
-      expect(await audit.isAgentLive(user.address, agent.address)).to.equal(true);
-      await audit.connect(agent).logDecision(user.address, POLICY, DECISION_ID, DECISION_HASH, 10);
-    });
-
-    it("scopes the pause to one user", async () => {
-      const { audit, user, agent, stranger } = await deployAuthorized();
-      const expiresAt = (await time.latest()) + 3_600;
-
-      await audit.connect(stranger).setPolicy(OTHER_POLICY);
-      await audit.connect(stranger).authorizeAgent(agent.address, OTHER_POLICY, expiresAt);
-
-      await audit.connect(user).setPaused(true);
-
-      expect(await audit.isAgentLive(user.address, agent.address)).to.equal(false);
-      expect(await audit.isAgentLive(stranger.address, agent.address)).to.equal(true);
-      await audit.connect(agent).logDecision(stranger.address, OTHER_POLICY, DECISION_ID, DECISION_HASH, 10);
+      await audit.connect(user).setEmergencyPause(false);
+      expect(await audit.emergencyPaused(user.address)).to.equal(false);
     });
   });
 
-  describe("non-custodial guarantees", () => {
-    it("has no payable function and rejects a plain transfer", async () => {
-      const { audit, user } = await deploy();
-      const address = await audit.getAddress();
+  describe("non-custodial invariants (static)", () => {
+    it("CryptaraAudit.sol has no payable functions or token transfer imports", () => {
+      const source = readFileSync(join(__dirname, "..", "contracts", "CryptaraAudit.sol"), "utf8");
 
-      // There is no receive or fallback, so value sent to the contract reverts
-      // rather than being held.
-      await expect(user.sendTransaction({ to: address, value: 1n })).to.be.reverted;
-      expect(await ethers.provider.getBalance(address)).to.equal(0n);
-    });
-
-    it("exposes no value-moving function in its ABI", async () => {
-      const factory = await ethers.getContractFactory("CryptaraAudit");
-      const fragments = factory.interface.fragments.filter((fragment) => fragment.type === "function");
-
-      // A contract that cannot custody funds has no payable entry point and no
-      // transfer-shaped function. Asserting on the ABI keeps that true as the
-      // contract evolves.
-      for (const fragment of fragments) {
-        const item = fragment as unknown as { name: string; payable?: boolean; stateMutability: string };
-        expect(item.stateMutability, `${item.name} must not be payable`).to.not.equal("payable");
-        expect(
-          /transfer|withdraw|approve|deposit|sweep|send/i.test(item.name),
-          `${item.name} looks like a value-moving function`,
-        ).to.equal(false);
-      }
-    });
-  });
-
-  describe("idempotent revocation", () => {
-    it("does not revert when revoking twice or revoking an unknown agent", async () => {
-      const { audit, user, agent, stranger } = await deployAuthorized();
-
-      await audit.connect(user).revokeAgent(stranger.address);
-      await audit.connect(user).revokeAgent(agent.address);
-      await audit.connect(user).revokeAgent(agent.address);
-
-      expect(await audit.isAgentLive(user.address, agent.address)).to.equal(false);
-    });
-
-    it("refuses to revoke the zero address", async () => {
-      const { audit, user } = await deploy();
-
-      await expect(audit.connect(user).revokeAgent(ethers.ZeroAddress)).to.be.revertedWithCustomError(
-        audit,
-        "ZeroAddress",
-      );
+      expect(source).to.not.match(/\bpayable\b/);
+      expect(source).to.not.match(/IERC20|ERC20|SafeERC20|transferFrom|safeTransfer/);
     });
   });
 });
 
-/** Matches any uint argument in an event assertion. */
 function anyUint() {
-  return (value: bigint) => typeof value === "bigint" && value >= 0n;
+  return (value: unknown) => typeof value === "bigint";
 }

@@ -2,19 +2,19 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { runCryptaraAgent } from "@/server/agent";
 import { getPortfolioSnapshot } from "@/server/portfolio/getPortfolio";
+import { withApiHandler } from "@/server/api/withApiHandler";
 
 const bodySchema = z.object({
   walletAddress: z.string().optional(),
 });
 
-export async function POST(request: Request) {
-  const body = await request.json().catch(() => ({}));
-  const parsed = bodySchema.safeParse(body);
-
-  if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
-  }
-
-  const { portfolio } = await getPortfolioSnapshot(parsed.data.walletAddress);
-  return NextResponse.json(runCryptaraAgent(portfolio));
-}
+export const POST = withApiHandler(
+  {
+    schema: bodySchema,
+    maxBodyBytes: 16 * 1024,
+  },
+  async ({ data }) => {
+    const { portfolio } = await getPortfolioSnapshot(data.walletAddress);
+    return NextResponse.json(runCryptaraAgent(portfolio));
+  },
+);

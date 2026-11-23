@@ -7,6 +7,8 @@ import {
 } from "../src/server/providers/adapter";
 import { executeWithFallback, redactProviderUrl } from "../src/lib/stellar/failover";
 import { redactSecrets } from "../src/server/observability/logging";
+import { NegativeCache } from "../src/server/cache/negative";
+import { ProviderHealthRegistry } from "../src/server/observability/providerHealth";
 
 async function main() {
 const identity = { family: "stellar" as const, network: "stellar-testnet", passphrase: "Test SDF Network ; September 2015" };
@@ -123,7 +125,119 @@ assert.equal(redactProviderUrl("https://user:pass@rpc.example/path/token?api_key
 const redacted = redactSecrets("wallet GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF endpoint https://user:pass@rpc.example?token=secret owner 0x1111111111111111111111111111111111111111");
 assert(!redacted.includes("secret") && !redacted.includes("GAAAA") && !redacted.includes("0x1111"));
 
-console.log("provider-resilience-check: timeout, 429, 5xx, malformed, lag, Stellar/EVM identity, recovery, cancellation, redaction, and all-down fixtures passed");
+// Fault injection: a provider that fails N times trips the circuit to open and
+// subsequent calls short-circuit immediately without performing I/O.
+{
+  const faultRegistry = new ProviderCircuitRegistry({ failureThreshold: 3, openMs: 5_000, now });
+  let ioCalls = 0;
+  const failing = async () => {
+    ioCalls += 1;
+    throw new ProviderRequestError("HTTP 503", "provider_error", { retryable: true, status: 503 });
+  };
+  for (let index = 0; index < 3; index += 1) {
+    const result = await runProviderAdapter(failing, { ...base, provider: "fault-inject", retries: 0, circuitRegistry: faultRegistry });
+    assert.equal(result.ok, false);
+  }
+  assert.equal(ioCalls, 3, "each pre-trip failure must reach the provider");
+  const shortCircuited = await runProviderAdapter(failing, { ...base, provider: "fault-inject", retries: 0, circuitRegistry: faultRegistry });
+  assert.equal(shortCircuited.circuitState, "open");
+  assert.equal(shortCircuited.attempts, 0, "open circuit must short-circuit without I/O");
+  assert.equal(ioCalls, 3, "short-circuited calls must not hit the provider");
+  assert.equal(shortCircuited.error?.code, "circuit_open");
+}
+
+// Fault injection: half-open probe recovers after cooldown, and a failing probe
+// re-opens the circuit.
+{
+  const probeRegistry = new ProviderCircuitRegistry({ failureThreshold: 1, openMs: 500, now });
+  await runProviderAdapter(async () => { throw new ProviderRequestError("network reset", "network_error", { retryable: true }); }, {
+    ...base, provider: "probe", retries: 0, circuitRegistry: probeRegistry,
+  });
+  const stillOpen = await runProviderAdapter(async () => "nope", { ...base, provider: "probe", retries: 0, circuitRegistry: probeRegistry });
+  assert.equal(stillOpen.circuitState, "open");
+  clock += 500;
+  let probeCalls = 0;
+  const failedProbe = await runProviderAdapter(async () => { probeCalls += 1; throw new ProviderRequestError("still down", "network_error", { retryable: true }); }, {
+    ...base, provider: "probe", retries: 0, circuitRegistry: probeRegistry,
+  });
+  assert.equal(probeCalls, 1, "half-open must allow exactly one probe");
+  assert.equal(failedProbe.circuitState, "open", "failed half-open probe must re-open the circuit");
+  clock += 500;
+  const recoveredProbe = await runProviderAdapter(async () => "healthy", { ...base, provider: "probe", retries: 0, circuitRegistry: probeRegistry });
+  assert.equal(recoveredProbe.ok, true);
+  assert.equal(recoveredProbe.circuitState, "closed");
+}
+
+// Fault injection: deadline-derived timeout aborts a slow provider.
+{
+  const deadline = clock + 50;
+  const slow = await runProviderAdapter(() => new Promise<never>(() => undefined), {
+    ...base,
+    provider: "slow-deadline",
+    retries: 0,
+    deadline,
+    timeoutMs: 10_000,
+  });
+  assert.equal(slow.error?.code, "timeout", "deadline must cap the per-call budget");
+  assert(clock <= deadline + 1, "slow provider must not exceed the orchestration deadline");
+}
+
+// Fault injection: jittered backoff applies only to idempotent errors.
+{
+  const before = delays.length;
+  let idempotentCalls = 0;
+  await runProviderAdapter(async () => {
+    idempotentCalls += 1;
+    if (idempotentCalls === 1) throw new ProviderRequestError("HTTP 502", "provider_error", { retryable: true, status: 502 });
+    return "ok";
+  }, { ...base, provider: "idempotent", retries: 1 });
+  assert.equal(idempotentCalls, 2);
+  assert(delays.length > before, "idempotent 502 must trigger jittered backoff");
+
+  const nonIdempotentBefore = delays.length;
+  let nonIdempotentCalls = 0;
+  await runProviderAdapter(async () => {
+    nonIdempotentCalls += 1;
+    throw new ProviderRequestError("wallet validation failed", "invalid_request");
+  }, { ...base, provider: "non-idempotent", retries: 3 });
+  assert.equal(nonIdempotentCalls, 1, "non-idempotent errors must not retry");
+  assert.equal(delays.length, nonIdempotentBefore, "non-idempotent errors must not back off");
+}
+
+// Fault injection: negative cache entries short-circuit repeated failures.
+{
+  const negative = new NegativeCache({ now, defaultTtlMs: 1_000 });
+  let negativeCalls = 0;
+  const failing = async () => {
+    negativeCalls += 1;
+    throw new ProviderRequestError("HTTP 503", "provider_error", { retryable: true, status: 503 });
+  };
+  const first = await runProviderAdapter(failing, { ...base, provider: "neg-cache", retries: 0, negativeCache: negative, cacheKey: "neg-cache:key" });
+  assert.equal(first.ok, false);
+  assert.equal(negativeCalls, 1);
+  const cached = await runProviderAdapter(failing, { ...base, provider: "neg-cache", retries: 0, negativeCache: negative, cacheKey: "neg-cache:key" });
+  assert.equal(cached.ok, false);
+  assert.equal(negativeCalls, 1, "negative cache must short-circuit repeated failures");
+  clock += 1_000;
+  await runProviderAdapter(failing, { ...base, provider: "neg-cache", retries: 0, negativeCache: negative, cacheKey: "neg-cache:key" });
+  assert.equal(negativeCalls, 2, "negative cache must expire after TTL");
+}
+
+// Fault injection: degraded providers yield unavailable status with reduced
+// confidence, never mock data in live mode.
+{
+  const health = new ProviderHealthRegistry({ now });
+  const degraded = await runProviderFallbacks([
+    { ...base, provider: "degraded-primary", fallbackRank: 0, retries: 0, run: async () => { throw new ProviderRequestError("timeout", "timeout", { retryable: true }); } },
+    { ...base, provider: "degraded-secondary", fallbackRank: 1, retries: 0, run: async () => { throw new ProviderRequestError("HTTP 503", "provider_error", { retryable: true, status: 503 }); } },
+  ], identity, { health, live: true });
+  assert.equal(degraded.ok, false);
+  assert.equal(degraded.status, "unavailable");
+  assert.equal(degraded.value, undefined, "live mode must never fabricate mock data");
+  assert(degraded.confidence < 1, "unavailable status must reduce confidence");
+}
+
+console.log("provider-resilience-check: timeout, 429, 5xx, malformed, lag, Stellar/EVM identity, recovery, cancellation, redaction, circuit trip/half-open, deadline, backoff, negative cache, degraded-unavailable, and all-down fixtures passed");
 }
 
 main().catch((error) => {

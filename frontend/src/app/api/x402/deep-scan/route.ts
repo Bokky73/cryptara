@@ -34,15 +34,22 @@ async function deepScanHandler(request: NextRequest): Promise<NextResponse<unkno
     return jsonError({ code: "validation_error", message: "Invalid input", status: 400, details: parsed.error.flatten() });
   }
 
+  // Verify the HMAC-signed internal settlement context produced by the x402
+  // middleware/facilitator. Client-supplied `x-payment-*` headers are never
+  // trusted here; spoofed or replayed payments are rejected with HTTP 402.
   const guard = assertFreshX402Payment({ request, requestBody: parsed.data, config });
 
   if (!guard.ok) {
-    return jsonError({ code: guard.error as any, message: guard.detail, status: guard.status, legacy: { receiptId: guard.receiptId } });
+    return jsonError({
+      code: guard.error as any,
+      message: guard.detail,
+      status: guard.status,
+      legacy: { receiptId: guard.receiptId },
+    });
   }
 
-  // Persist a chain-aware receipt. Payment details come from the x402
-  // middleware headers (verified by facilitator) — never from unverified
-  // client claims.
+  // Persist a chain-aware receipt only after the signed settlement context has
+  // been verified and the tx hash confirmed as not already redeemed.
   const receipt = createX402PaymentReceipt({
     requestId: guard.requestId,
     paymentHeaderHash: guard.paymentHeaderHash,
