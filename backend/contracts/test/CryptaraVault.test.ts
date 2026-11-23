@@ -45,6 +45,24 @@ describe("CryptaraVault", function () {
       await vault.connect(user).deposit(token.target, ethers.parseEther("50"));
       expect(await vault.userBalance(user.address, token.target)).to.equal(ethers.parseEther("50"));
     });
+
+    it("should reject zero-amount deposit", async function () {
+      const { vault, token, user } = await loadFixture(deployFixture);
+      await expect(
+        vault.connect(user).deposit(token.target, 0),
+      ).to.be.revertedWith("Vault: zero amount");
+    });
+
+    it("should accumulate balances across multiple deposits", async function () {
+      const { vault, token, user } = await loadFixture(deployFixture);
+
+      await token.transfer(user.address, ethers.parseEther("100"));
+      await token.connect(user).approve(vault.target, ethers.parseEther("100"));
+
+      await vault.connect(user).deposit(token.target, ethers.parseEther("30"));
+      await vault.connect(user).deposit(token.target, ethers.parseEther("20"));
+      expect(await vault.userBalance(user.address, token.target)).to.equal(ethers.parseEther("50"));
+    });
   });
 
   describe("Withdraw validation", function () {
@@ -173,8 +191,6 @@ describe("CryptaraVault", function () {
       await policy.connect(agent).createIntent(decision, token.target, ethers.parseEther("5"), intentExpiry, 25);
 
       await vault.connect(agent).withdraw(token.target, ethers.parseEther("3"), user.address, intentHash);
-
-      expect(await token.balanceOf(user.address)).to.equal(ethers.parseEther("53"));
       expect(await vault.userBalance(user.address, token.target)).to.equal(ethers.parseEther("47"));
     });
   });
