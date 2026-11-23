@@ -189,10 +189,13 @@ impl VaultContract {
     }
 
     pub fn user_balance(env: Env, user: Address, token: Address) -> i128 {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Balance(user, token))
-            .unwrap_or(0)
+        let balance_key = DataKey::Balance(user, token);
+        let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+        if env.storage().persistent().has(&balance_key) {
+            extend_entry(&env, &balance_key);
+        }
+        bump_instance(&env);
+        balance
     }
 }
 
@@ -280,6 +283,8 @@ mod test {
     }
 
     #[test]
+    fn instance_ttl_extends_below_threshold() {
+        let (env, vault, _agent, user, token, _policy) = setup();
     fn reject_zero_and_negative_deposit() {
         let (_env, vault, _agent, user, token, _policy) = setup();
 
@@ -298,11 +303,17 @@ mod test {
 
         vault.deposit(&user, &token, &100_000_000i128);
 
-        let policy_client = cryptara_policy::PolicyContractClient::new(&_env, &_policy);
-        let decision = policy_client.apply_policy(&user, &100_000_000i128, &50, &1_703_600_000);
-        let intent =
-            policy_client.create_intent(&decision, &token, &100_000_000i128, &1_701_800_000, &50);
+        // Advance close to the instance TTL threshold, then touch the contract.
+        env.ledger().set_sequence_number(INSTANCE_TTL_THRESHOLD + 1);
+        vault.user_balance(&user, &token);
 
+        let ttl = env.storage().instance().get_ttl();
+        assert!(ttl >= INSTANCE_TTL_THRESHOLD);
+    }
+
+    #[test]
+    fn balance_survives_180_day_progression() {
+        let (env, vault, _agent, user, token, _policy) = setup();
         for amount in [0i128, -1i128, i128::MIN] {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 vault.withdraw(&token, &amount, &user, &intent);
@@ -336,6 +347,40 @@ mod test {
 
         vault.deposit(&user, &token, &10_000_000i128);
 
+        // 180 days of ledgers at ~5s per ledger.
+        let ledgers_180_days: u32 = 180 * 24 * 60 * 60 / 5;
+        env.ledger().set_sequence_number(ledgers_180_days);
+
+        // Reading the balance bumps instance + persistent TTL and preserves funds.
+        assert_eq!(vault.user_balance(&user, &token), 100_000_000);
+
+        let balance_key = DataKey::Balance(user.clone(), token.clone());
+        let ttl = env.storage().persistent().get_ttl(&balance_key);
+        assert!(ttl >= LEDGER_TTL_THRESHOLD);
+    }
+
+    #[test]
+    fn active_authorization_survives_180_day_progression() {
+        let (env, vault, _agent, user, token, _policy) = setup();
+
+        vault.deposit(&user, &token, &100_000_000i128);
+
+        let policy_client = cryptara_policy::PolicyContractClient::new(&env, &_policy);
+        let decision = policy_client.apply_policy(&user, &100_000_000i128, &50, &1_703_600_000);
+        let intent =
+            policy_client.create_intent(&decision, &token, &100_000_000i128, &1_701_800_000, &50);
+
+        // Simulate 180 days of ledger progression before the withdrawal.
+        let ledgers_180_days: u32 = 180 * 24 * 60 * 60 / 5;
+        env.ledger().set_sequence_number(ledgers_180_days);
+
+        vault.withdraw(&token, &50_000_000i128, &user, &intent);
+
+        assert_eq!(vault.user_balance(&user, &token), 50_000_000);
+
+        let consumed_key = DataKey::ConsumedIntent(intent.clone());
+        let ttl = env.storage().persistent().get_ttl(&consumed_key);
+        assert!(ttl >= LEDGER_TTL_THRESHOLD);
         let policy_client = cryptara_policy::PolicyContractClient::new(&_env, &_policy);
         let decision = policy_client.apply_policy(&user, &10_000_000i128, &50, &1_703_600_000);
         let intent =

@@ -95,7 +95,7 @@ export function hashIntentPayload(payload: ExecutionIntentPayload): `0x${string}
 export function buildPolicyDomain(chainId: number, contractAddress: `0x${string}`): EIP712Domain {
   return {
     name: "CryptaraPolicy",
-    version: "1",
+    version: "2",
     chainId,
     verifyingContract: contractAddress,
   };
