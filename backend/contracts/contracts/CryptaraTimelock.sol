@@ -47,6 +47,7 @@ contract CryptaraTimelock {
     uint256 public constant MIN_DELAY_SECS = 24 hours;
     uint256 public constant MAX_DELAY_SECS = 30 days;
     uint256 public constant MIN_SIGNERS = 2;
+    uint256 public constant GRACE_PERIOD = 14 days;
 
     mapping(bytes32 => Proposal) private proposals;
     bytes32[] private proposalQueue;
@@ -69,6 +70,7 @@ contract CryptaraTimelock {
     error ProposalAlreadyExecuted();
     error ProposalAlreadyCancelled();
     error ProposalNotReady();
+    error ProposalExpired();
     error InsufficientSignatures();
     error InvalidSigner();
     error DuplicateSigner();
@@ -174,7 +176,19 @@ contract CryptaraTimelock {
         if (p.executed) revert ProposalAlreadyExecuted();
         if (p.cancelled) revert ProposalAlreadyCancelled();
         if (block.timestamp < p.effectiveAt) revert ProposalNotReady();
-        if (p.signatureCount < threshold) revert InsufficientSignatures();
+        if (block.timestamp > p.effectiveAt + GRACE_PERIOD) revert ProposalExpired();
+
+        // Re-verify quorum against the *current* active signer set and threshold.
+        // Signatures from signers removed after proposal creation must not count.
+        uint256 activeSignatures = 0;
+        address[] storage creationSigners = p.signersAtCreation;
+        for (uint256 i = 0; i < creationSigners.length; i++) {
+            address s = creationSigners[i];
+            if (p.hasSigned[s] && isSigner[s]) {
+                activeSignatures += 1;
+            }
+        }
+        if (activeSignatures < threshold) revert InsufficientSignatures();
 
         p.executed = true;
 
@@ -219,61 +233,56 @@ contract CryptaraTimelock {
     }
 
     function getPendingQueue() external view returns (PendingChange[] memory) {
+        uint256 len = proposalQueue.length;
         uint256 count = 0;
-        for (uint256 i = 0; i < proposalQueue.length; i++) {
+        for (uint256 i = 0; i < len; i++) {
             Proposal storage p = proposals[proposalQueue[i]];
-            if (p.createdAt != 0 && !p.executed && !p.cancelled) count++;
-        }
-        PendingChange[] memory out = new PendingChange[](count);
-        uint256 idx = 0;
-        for (uint256 i = 0; i < proposalQueue.length; i++) {
-            Proposal storage p = proposals[proposalQueue[i]];
-            if (p.createdAt != 0 && !p.executed && !p.cancelled) {
-                out[idx] = PendingChange({
-                    id: p.id,
-                    target: p.target,
-                    selector: p.selector,
-                    payloadHash: p.payloadHash,
-                    proposer: p.proposer,
-                    createdAt: p.createdAt,
-                    effectiveAt: p.effectiveAt,
-                    delaySecs: p.delaySecs,
-                    signatureCount: p.signatureCount,
-                    threshold: threshold
-                });
-                idx++;
+            if (!p.executed && !p.cancelled) {
+                count += 1;
             }
         }
-        return out;
-    }
 
-    function getPendingCount() external view returns (uint256) {
-        uint256 c = 0;
-        for (uint256 i = 0; i < proposalQueue.length; i++) {
+        PendingChange[] memory queue = new PendingChange[](count);
+        uint256 idx = 0;
+        for (uint256 i = 0; i < len; i++) {
             Proposal storage p = proposals[proposalQueue[i]];
-            if (p.createdAt != 0 && !p.executed && !p.cancelled) c++;
+            if (p.executed || p.cancelled) continue;
+            queue[idx] = PendingChange({
+                id: p.id,
+                target: p.target,
+                selector: p.selector,
+                payloadHash: p.payloadHash,
+                proposer: p.proposer,
+                createdAt: p.createdAt,
+                effectiveAt: p.effectiveAt,
+                delaySecs: p.delaySecs,
+                signatureCount: p.signatureCount,
+                threshold: threshold
+            });
+            idx += 1;
         }
-        return c;
+        return queue;
     }
 
-    function hasSigned(bytes32 proposalId, address signer) external view returns (bool) {
-        return proposals[proposalId].hasSigned[signer];
-    }
+    function setSigners(address[] calldata _signers, uint256 _threshold) external onlySigner {
+        if (_signers.length < MIN_SIGNERS) revert InvalidSignerCount();
+        if (_threshold < MIN_SIGNERS || _threshold > _signers.length) revert InvalidThreshold();
 
-    function updateSigners(address[] calldata newSigners, uint256 newThreshold) external onlyEmergencyAdmin {
-        if (newSigners.length < MIN_SIGNERS) revert InvalidSignerCount();
-        if (newThreshold < MIN_SIGNERS || newThreshold > newSigners.length) revert InvalidThreshold();
-        for (uint256 i = 0; i < signers.length; i++) isSigner[signers[i]] = false;
-        for (uint256 i = 0; i < newSigners.length; i++) {
-            if (newSigners[i] == address(0)) revert ZeroAddress();
-            isSigner[newSigners[i]] = true;
+        for (uint256 i = 0; i < signers.length; i++) {
+            isSigner[signers[i]] = false;
         }
-        signers = newSigners;
-        threshold = newThreshold;
-        emit SignersUpdated(newSigners, newThreshold);
+        for (uint256 i = 0; i < _signers.length; i++) {
+            if (_signers[i] == address(0)) revert ZeroAddress();
+            if (isSigner[_signers[i]]) revert DuplicateSigner();
+            isSigner[_signers[i]] = true;
+        }
+        signers = _signers;
+        threshold = _threshold;
+
+        emit SignersUpdated(_signers, _threshold);
     }
 
-    function updateDelays(uint256 _minDelay, uint256 _maxDelay) external onlyEmergencyAdmin {
+    function setDelays(uint256 _minDelay, uint256 _maxDelay) external onlySigner {
         if (_minDelay < MIN_DELAY_SECS || _minDelay > MAX_DELAY_SECS) revert InvalidDelay();
         if (_maxDelay < MIN_DELAY_SECS || _maxDelay > MAX_DELAY_SECS) revert InvalidDelay();
         if (_minDelay > _maxDelay) revert InvalidDelay();
@@ -290,9 +299,5 @@ contract CryptaraTimelock {
     function unpause() external onlyEmergencyAdmin {
         paused = false;
         emit EmergencyPauseSet(false, msg.sender, block.timestamp);
-    }
-
-    function getSigners() external view returns (address[] memory) {
-        return signers;
     }
 }

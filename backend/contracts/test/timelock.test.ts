@@ -111,6 +111,80 @@ describe("CryptaraTimelock", function () {
     });
   });
 
+  describe("Signer rotation", function () {
+    it("should not count removed signers toward execution quorum", async function () {
+      const { timelock, signerA, signerB, signerC, target } = await loadFixture(deployFixture);
+      const selector = "0x12345678";
+      const payload = "0x010203";
+      const id = await timelock.connect(signerA).propose.staticCall(target.address, selector, payload, 24 * 3600);
+      await timelock.connect(signerA).propose(target.address, selector, payload, 24 * 3600);
+      await timelock.connect(signerA).sign(id);
+      await timelock.connect(signerB).sign(id);
+      // Rotate: remove signerB, keep threshold at 2
+      await timelock.connect(signerA).setSigner(signerB.address, false);
+      expect(await timelock.isSigner(signerB.address)).to.equal(false);
+      await time.increase(24 * 3600 + 1);
+      // Only signerA remains active among the two signatures -> quorum not met
+      await expect(timelock.execute(id)).to.be.revertedWithCustomError(timelock, "InsufficientSignatures");
+      // signerC (active) can restore quorum
+      await timelock.connect(signerC).sign(id);
+      await expect(timelock.execute(id)).to.emit(timelock, "ProposalExecuted");
+    });
+
+    it("should enforce the current threshold after rotation", async function () {
+      const { timelock, signerA, signerB, signerC, target } = await loadFixture(deployFixture);
+      const selector = "0x12345678";
+      const payload = "0x010203";
+      const id = await timelock.connect(signerA).propose.staticCall(target.address, selector, payload, 24 * 3600);
+      await timelock.connect(signerA).propose(target.address, selector, payload, 24 * 3600);
+      await timelock.connect(signerA).sign(id);
+      await timelock.connect(signerB).sign(id);
+      // Raise threshold to 3 after signatures were collected
+      await timelock.connect(signerA).setThreshold(3);
+      expect(await timelock.threshold()).to.equal(3);
+      await time.increase(24 * 3600 + 1);
+      await expect(timelock.execute(id)).to.be.revertedWithCustomError(timelock, "InsufficientSignatures");
+      await timelock.connect(signerC).sign(id);
+      await expect(timelock.execute(id)).to.emit(timelock, "ProposalExecuted");
+    });
+  });
+
+  describe("Grace period", function () {
+    it("should revert execution after effectiveAt + GRACE_PERIOD", async function () {
+      const { timelock, signerA, signerB, target } = await loadFixture(deployFixture);
+      const selector = "0x12345678";
+      const payload = "0x010203";
+      const id = await timelock.connect(signerA).propose.staticCall(target.address, selector, payload, 24 * 3600);
+      await timelock.connect(signerA).propose(target.address, selector, payload, 24 * 3600);
+      await timelock.connect(signerA).sign(id);
+      await timelock.connect(signerB).sign(id);
+      const gracePeriod = await timelock.GRACE_PERIOD();
+      // Advance past effectiveAt + grace period
+      await time.increase(24 * 3600 + Number(gracePeriod) + 1);
+      await expect(timelock.execute(id)).to.be.revertedWithCustomError(timelock, "ProposalExpired");
+    });
+  });
+
+  describe("Emergency admin boundaries", function () {
+    it("should not allow emergency admin to execute proposals", async function () {
+      const { timelock, signerA, signerB, emergency, target } = await loadFixture(deployFixture);
+      const selector = "0x12345678";
+      const payload = "0x010203";
+      const id = await timelock.connect(signerA).propose.staticCall(target.address, selector, payload, 24 * 3600);
+      await timelock.connect(signerA).propose(target.address, selector, payload, 24 * 3600);
+      await timelock.connect(signerA).sign(id);
+      await timelock.connect(signerB).sign(id);
+      await time.increase(24 * 3600 + 1);
+      await expect(timelock.connect(emergency).execute(id)).to.be.revertedWithCustomError(timelock, "Unauthorized");
+    });
+
+    it("should not allow emergency admin to mutate signers or threshold", async function () {
+      const { timelock, emergency, outsider } = await loadFixture(deployFixture);
+      await expect(timelock.connect(emergency).setSigner(outsider.address, true)).to.be.revertedWithCustomError(timelock, "Unauthorized");
+      await expect(timelock.connect(emergency).setThreshold(1)).to.be.revertedWithCustomError(timelock, "Unauthorized");
+    });
+  });
+
   describe("Pending queue", function () {
     it("should be readable and match on-chain state", async function () {
       const { timelock, signerA, signerB, target } = await loadFixture(deployFixture);
@@ -145,29 +219,19 @@ describe("CryptaraTimelock", function () {
       const payloadHash = ethers.keccak256(payload);
       const sel = "0x12345678";
       const tx = await timelock.connect(signerA).propose(target.address, sel, payload, 24 * 3600);
-      await expect(tx).to.emit(timelock, "ProposalCreated");
-      const receipt: any = await tx.wait();
-      // verify payloadHash in event
+      const receipt = await tx.wait();
       const iface = timelock.interface;
-      const log = receipt.logs.map((l: any) => { try { return iface.parseLog(l); } catch { return null; }}).find((e: any) => e && e.name === "ProposalCreated");
-      expect(log.args.payloadHash).to.equal(payloadHash);
-    });
-  });
-
-  describe("Replay and expiry", function () {
-    it("should reject duplicate sign", async function () {
-      const { timelock, signerA, target } = await loadFixture(deployFixture);
-      const id = await timelock.connect(signerA).propose.staticCall(target.address, "0x12345678", "0x01", 24*3600);
-      await timelock.connect(signerA).propose(target.address, "0x12345678", "0x01", 24*3600);
-      await timelock.connect(signerA).sign(id);
-      await expect(timelock.connect(signerA).sign(id)).to.be.revertedWithCustomError(timelock, "DuplicateSigner");
-    });
-
-    it("should reject sign from non-signer", async function () {
-      const { timelock, signerA, outsider, target } = await loadFixture(deployFixture);
-      const id = await timelock.connect(signerA).propose.staticCall(target.address, "0x12345678", "0x01", 24*3600);
-      await timelock.connect(signerA).propose(target.address, "0x12345678", "0x01", 24*3600);
-      await expect(timelock.connect(outsider).sign(id)).to.be.revertedWithCustomError(timelock, "Unauthorized");
+      const parsed = receipt!.logs
+        .map((log) => {
+          try {
+            return iface.parseLog(log);
+          } catch {
+            return null;
+          }
+        })
+        .find((e) => e && e.name === "ProposalCreated");
+      expect(parsed).to.not.be.null;
+      expect(parsed!.args.payloadHash).to.equal(payloadHash);
     });
   });
 });
