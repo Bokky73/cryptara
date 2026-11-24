@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withX402 } from "@x402/next";
 import { z } from "zod";
+import { jsonError } from "@/server/api/errors";
 import { runTokenScan } from "@/server/scan/tokenScan";
 import { checkRateLimit } from "@/server/security/rateLimit";
 import { createX402PaymentReceipt } from "@/server/storage";
