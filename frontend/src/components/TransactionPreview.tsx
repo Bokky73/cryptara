@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { TransactionPreview as Preview } from "@/server/types";
+import type { PreparedTransactionPayload, TransactionPreview as Preview } from "@/server/types";
 import { formatUsd } from "@/lib/format";
 import { SimulationResultPanel } from "@/components/SimulationResultPanel";
+import { SigningVerificationWarning } from "@/components/SigningVerificationWarning";
+import { usePreviewSigningVerdict } from "@/hooks/useSigning";
 
 function useCountdown(expiresAt?: string | null) {
   const [now, setNow] = useState(() => Date.now());
@@ -27,24 +29,56 @@ function useCountdown(expiresAt?: string | null) {
   };
 }
 
-export function TransactionPreview({ preview }: { preview: Preview }) {
+export function TransactionPreview({
+  preview,
+  payload,
+  walletAddress,
+  sourceAccount,
+  onRefresh,
+}: {
+  preview: Preview;
+  /** Prepared payload from /api/execute/prepare, when available. */
+  payload?: PreparedTransactionPayload | null;
+  walletAddress?: string;
+  sourceAccount?: string;
+  onRefresh?: () => void;
+}) {
   const [acknowledged, setAcknowledged] = useState(false);
   const countdown = useCountdown(preview.quote?.expiresAt ?? null);
+  const { verdict, isVerifying } = usePreviewSigningVerdict({
+    preview,
+    payload,
+    walletAddress,
+    sourceAccount,
+  });
 
   const buyRisk = preview.projectedRiskScore ?? preview.currentRiskScore ?? 0;
   const confidence = preview.simulation?.confidence ?? 100;
   const highRisk = buyRisk >= 60 || confidence < 50;
   const quoteExpired = countdown?.expired ?? false;
-  const canReview = !preview.blockedReason && !quoteExpired && (!highRisk || acknowledged);
+  const verificationFailed = verdict !== null && !verdict.ok;
+  const canReview =
+    !preview.blockedReason &&
+    !quoteExpired &&
+    !verificationFailed &&
+    !isVerifying &&
+    (!highRisk || acknowledged);
 
   const explorerUrl = preview.explorerUrl ?? null;
   const contractVerified = preview.contractVerified ?? false;
   const targetContract = preview.targetContract ?? null;
 
   return (
-    <section className="rounded-[28px] border border-[#d9a441]/25 bg-[#d9a441]/8 p-6">
+    <section data-testid="transaction-preview" className="rounded-[28px] border border-[#d9a441]/25 bg-[#d9a441]/8 p-6">
       <div className="text-sm uppercase tracking-[0.18em] text-[#d9a441]">Transaction preview</div>
       <h2 className="mt-3 text-2xl font-semibold">{preview.title}</h2>
+
+      {verdict ? (
+        <SigningVerificationWarning
+          issues={verdict.issues.filter((issue) => issue.blocking)}
+          onRefresh={onRefresh ?? (() => window.location.reload())}
+        />
+      ) : null}
 
       {highRisk ? (
         <div
@@ -237,7 +271,7 @@ export function TransactionPreview({ preview }: { preview: Preview }) {
           <span>This quote has expired. Refresh to re-simulate before signing.</span>
           <button
             type="button"
-            onClick={() => window.location.reload()}
+            onClick={() => (onRefresh ? onRefresh() : window.location.reload())}
             className="rounded-full bg-yellow-400/20 px-3 py-1 text-xs font-semibold text-yellow-50 hover:bg-yellow-400/30"
           >
             Refresh Quote &amp; Re-simulate

@@ -3,10 +3,22 @@
 import Link from "next/link";
 import { useState } from "react";
 import { CheckSquare, Square, RotateCw, Trash2, Download, Layers, TrendingUp, TrendingDown, Minus, AlertTriangle } from "lucide-react";
-import type { WatchlistEntry, WatchlistScanRun } from "@/server/types";
+import {
+  apiRequest,
+  listWatchlist,
+  toApiClientError,
+  type ApiClientError,
+  type WatchlistEntry,
+  type WatchlistScanRun,
+} from "@/lib/apiClient";
+import { ApiErrorNotice } from "@/components/ApiErrorNotice";
+
+function localError(message: string): ApiClientError {
+  return { kind: "client", code: "validation_error", message, retryable: false, recoveryAction: "stop" };
+}
 
 export function WatchlistAddForm({ wallet }: { wallet: string }) {
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ApiClientError | null>(null);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -49,10 +61,10 @@ export function WatchlistAddForm({ wallet }: { wallet: string }) {
       }
       // Reject symbol-only Stellar inputs (e.g. just "USDC" without :ISSUER)
       if (body.assetType === "classic" && !body.issuer && !body.contractAddress && body.assetKey !== "native") {
-        setError(
+        setError(localError(
           "Stellar classic assets require a full CODE:ISSUER (e.g. USDC:GA5ZSE...). " +
             "Symbol-only values are not accepted.",
-        );
+        ));
         return;
       }
       body.network = chain;
@@ -74,19 +86,18 @@ export function WatchlistAddForm({ wallet }: { wallet: string }) {
     if (tokenName) body.tokenName = tokenName;
 
     try {
-      const response = await fetch("/api/watchlist", {
+      const data = await apiRequest<{ entry?: unknown }>("/api/watchlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await response.json();
-      if (response.ok && data.entry) {
+      if (data.entry) {
         window.location.href = `/watchlist?wallet=${encodeURIComponent(wallet)}&added=1`;
       } else {
-        setError(data.error ?? "Failed to add entry.");
+        setError(localError("The entry could not be added."));
       }
-    } catch {
-      setError("Network error. Please try again.");
+    } catch (cause) {
+      setError(toApiClientError(cause));
     }
   }
 
@@ -197,11 +208,7 @@ export function WatchlistAddForm({ wallet }: { wallet: string }) {
         </div>
       </div>
 
-      {error && (
-        <p className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2 text-xs text-rose-300">
-          {error}
-        </p>
-      )}
+      {error ? <ApiErrorNotice error={error} title="Could not add asset" /> : null}
     </form>
     <p className="mt-4 text-xs text-white/54">
       <Link href="/insights/watchlist-collections" className="underline underline-offset-2 hover:text-white">
@@ -214,65 +221,77 @@ export function WatchlistAddForm({ wallet }: { wallet: string }) {
 
 export function WatchlistRescanButton({ entryId, wallet }: { entryId: string; wallet: string }) {
   const [scanning, setScanning] = useState(false);
+  const [error, setError] = useState<ApiClientError | null>(null);
 
   async function handleRescan() {
     if (scanning) return;
     setScanning(true);
+    setError(null);
     try {
-      const response = await fetch(`/api/watchlist/${encodeURIComponent(entryId)}/rescan`, {
+      await apiRequest(`/api/watchlist/${encodeURIComponent(entryId)}/rescan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ walletAddress: wallet }),
       });
-      if (response.ok) {
-        window.location.href = `/watchlist?wallet=${encodeURIComponent(wallet)}`;
-      }
-      setScanning(false);
-    } catch {
+      window.location.href = `/watchlist?wallet=${encodeURIComponent(wallet)}`;
+    } catch (cause) {
+      setError(toApiClientError(cause));
+    } finally {
       setScanning(false);
     }
   }
 
   return (
-    <button
-      onClick={handleRescan}
-      disabled={scanning}
-      className="flex-1 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-1.5 text-center text-xs font-medium text-emerald-300 transition-colors hover:bg-emerald-500/15 disabled:opacity-50"
-    >
-      {scanning ? "Scanning…" : "Rescan"}
-    </button>
+    <div className="flex-1">
+      <button
+        onClick={handleRescan}
+        disabled={scanning}
+        className="w-full rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-1.5 text-center text-xs font-medium text-emerald-300 transition-colors hover:bg-emerald-500/15 disabled:opacity-50"
+      >
+        {scanning ? "Scanning…" : "Rescan"}
+      </button>
+      {error ? <ApiErrorNotice error={error} title="Rescan failed" /> : null}
+    </div>
   );
 }
 
 export function WatchlistRemoveButton({ entryId, wallet }: { entryId: string; wallet: string }) {
   const [removing, setRemoving] = useState(false);
+  const [error, setError] = useState<ApiClientError | null>(null);
 
   async function handleRemove() {
     if (removing) return;
     setRemoving(true);
+    setError(null);
     try {
-      const response = await fetch("/api/watchlist", {
+      const data = await apiRequest<{ ok?: boolean }>("/api/watchlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "remove", entryId, walletAddress: wallet }),
       });
-      const data = await response.json();
       if (data.ok) {
         window.location.href = `/watchlist?wallet=${encodeURIComponent(wallet)}&removed=1`;
+      } else {
+        setError(localError("The entry could not be removed."));
       }
-    } catch {
+    } catch (cause) {
+      setError(toApiClientError(cause));
+    } finally {
       setRemoving(false);
     }
   }
 
   return (
-    <button
-      onClick={handleRemove}
-      disabled={removing}
-      className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-1.5 text-xs font-medium text-rose-300/70 transition-colors hover:bg-rose-500/15 hover:text-rose-200 disabled:opacity-50"
-    >
-      {removing ? "Removing…" : "Remove"}
-    </button>
+    <div>
+      <button
+        onClick={handleRemove}
+        disabled={removing}
+        className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-1.5 text-xs font-medium text-rose-300/70 transition-colors hover:bg-rose-500/15 hover:text-rose-200 disabled:opacity-50"
+      >
+        {removing ? "Removing…" : "Remove"}
+      </button>
+      {error ? <ApiErrorNotice error={error} title="Remove failed" /> : null}
+    </div>
   );
 }
 
@@ -288,11 +307,20 @@ export function WatchlistExportButton({ wallet }: { wallet: string }) {
   );
 }
 
+type ImportCounts = {
+  validCount?: number;
+  duplicateCount?: number;
+  invalidCount?: number;
+  appliedCount?: number;
+};
+
+type ImportPreview = { data: string; isJson: boolean; result: ImportCounts };
+
 export function WatchlistImportForm({ wallet }: { wallet: string }) {
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ApiClientError | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [dryRunResult, setDryRunResult] = useState<any>(null);
+  const [dryRunResult, setDryRunResult] = useState<ImportPreview | null>(null);
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     setError(null);
@@ -303,18 +331,15 @@ export function WatchlistImportForm({ wallet }: { wallet: string }) {
 
     setLoading(true);
     try {
-      const isJson = file.name.endsWith('.json');
+      const isJson = file.name.endsWith(".json");
       const text = await file.text();
-      const res = await fetch(`/api/watchlist/import?wallet=${encodeURIComponent(wallet)}&dry_run=true`, {
-        method: "POST",
-        headers: { "Content-Type": isJson ? "application/json" : "text/csv" },
-        body: text
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to parse");
-      setDryRunResult({ data: text, result: data, isJson });
-    } catch (err: any) {
-      setError(err.message);
+      const result = await apiRequest<ImportCounts>(
+        `/api/watchlist/import?wallet=${encodeURIComponent(wallet)}&dry_run=true`,
+        { method: "POST", headers: { "Content-Type": isJson ? "application/json" : "text/csv" }, body: text },
+      );
+      setDryRunResult({ data: text, result, isJson });
+    } catch (cause) {
+      setError(toApiClientError(cause));
     } finally {
       setLoading(false);
     }
@@ -325,17 +350,18 @@ export function WatchlistImportForm({ wallet }: { wallet: string }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/watchlist/import?wallet=${encodeURIComponent(wallet)}`, {
-        method: "POST",
-        headers: { "Content-Type": dryRunResult.isJson ? "application/json" : "text/csv" },
-        body: dryRunResult.data
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Import failed");
-      setSuccess(`Imported ${data.appliedCount} entries.`);
+      const data = await apiRequest<ImportCounts>(
+        `/api/watchlist/import?wallet=${encodeURIComponent(wallet)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": dryRunResult.isJson ? "application/json" : "text/csv" },
+          body: dryRunResult.data,
+        },
+      );
+      setSuccess(`Imported ${data.appliedCount ?? 0} entries.`);
       setTimeout(() => window.location.reload(), 1500);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (cause) {
+      setError(toApiClientError(cause));
     } finally {
       setLoading(false);
     }
@@ -345,31 +371,31 @@ export function WatchlistImportForm({ wallet }: { wallet: string }) {
     <div className="mt-6 rounded-xl border border-slate-800 bg-slate-900/50 p-6">
       <h3 className="mb-4 font-semibold text-white">Bulk Import</h3>
       <div className="space-y-4">
-         <input type="file" accept=".csv,.json" onChange={handleFile} disabled={loading} className="text-sm text-slate-300" />
-         
-         {loading && <p className="text-sm text-blue-400">Loading...</p>}
-         {error && <p className="text-sm text-rose-400">{error}</p>}
-         {success && <p className="text-sm text-emerald-400">{success}</p>}
+        <input type="file" accept=".csv,.json" onChange={handleFile} disabled={loading} className="text-sm text-slate-300" />
 
-         {dryRunResult && !success && (
-           <div className="rounded bg-slate-950 p-3 text-sm text-slate-300">
-              <p>Valid: {dryRunResult.result.validCount}</p>
-              <p>Duplicates: {dryRunResult.result.duplicateCount}</p>
-              <p>Invalid: {dryRunResult.result.invalidCount}</p>
-              
-              {dryRunResult.result.invalidCount > 0 ? (
-                <p className="mt-2 text-amber-400">Cannot apply. Fix invalid rows first.</p>
-              ) : (
-                <button 
-                  onClick={handleApply}
-                  disabled={loading}
-                  className="mt-3 rounded bg-emerald-600 px-4 py-2 text-white hover:bg-emerald-500"
-                >
-                  Apply Import
-                </button>
-              )}
-           </div>
-         )}
+        {loading && <p className="text-sm text-blue-400">Loading...</p>}
+        {error ? <ApiErrorNotice error={error} title="Import failed" /> : null}
+        {success && <p className="text-sm text-emerald-400">{success}</p>}
+
+        {dryRunResult && !success && (
+          <div className="rounded bg-slate-950 p-3 text-sm text-slate-300">
+            <p>Valid: {dryRunResult.result.validCount}</p>
+            <p>Duplicates: {dryRunResult.result.duplicateCount}</p>
+            <p>Invalid: {dryRunResult.result.invalidCount}</p>
+
+            {(dryRunResult.result.invalidCount ?? 0) > 0 ? (
+              <p className="mt-2 text-amber-400">Cannot apply. Fix invalid rows first.</p>
+            ) : (
+              <button
+                onClick={handleApply}
+                disabled={loading}
+                className="mt-3 rounded bg-emerald-600 px-4 py-2 text-white hover:bg-emerald-500"
+              >
+                Apply Import
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -392,9 +418,29 @@ export function WatchlistManager({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkProcessing, setBulkProcessing] = useState(false);
   const [bulkStatus, setBulkStatus] = useState<string | null>(null);
+  const [currentItems, setCurrentItems] = useState(items);
+  const [readError, setReadError] = useState<ApiClientError | null>(null);
+
+  /** Re-read the watchlist through the shared typed contract after a mutation. */
+  async function refreshEntries() {
+    setReadError(null);
+    try {
+      const payload = await listWatchlist({ walletAddress: wallet });
+      setCurrentItems((previous) => {
+        const byId = new Map(previous.map((item) => [item.entry.id, item]));
+        return payload.entries.map((entry) => ({
+          entry,
+          recentRuns: byId.get(entry.id)?.recentRuns,
+          totalRuns: byId.get(entry.id)?.totalRuns,
+        }));
+      });
+    } catch (cause) {
+      setReadError(toApiClientError(cause));
+    }
+  }
 
   // Filter computation
-  const filteredItems = items.filter(({ entry }) => {
+  const filteredItems = currentItems.filter(({ entry }) => {
     if (filter === "all") return true;
     if (filter === "high_risk") {
       return (
@@ -409,15 +455,15 @@ export function WatchlistManager({
     return true;
   });
 
-  const highRiskCount = items.filter(
+  const highRiskCount = currentItems.filter(
     ({ entry }) =>
       (entry.latestScore !== undefined && entry.latestScore >= 60) ||
       entry.latestClassification === "risky" ||
       entry.latestClassification === "scam"
   ).length;
-  const stellarCount = items.filter(({ entry }) => entry.chain?.startsWith("stellar")).length;
-  const evmCount = items.filter(({ entry }) => !entry.chain?.startsWith("stellar")).length;
-  const staleCount = items.filter(
+  const stellarCount = currentItems.filter(({ entry }) => entry.chain?.startsWith("stellar")).length;
+  const evmCount = currentItems.filter(({ entry }) => !entry.chain?.startsWith("stellar")).length;
+  const staleCount = currentItems.filter(
     ({ entry }) => entry.latestStatus === "stale" || entry.latestStatus === "failed"
   ).length;
 
@@ -442,16 +488,22 @@ export function WatchlistManager({
   const handleBulkRescan = async () => {
     if (selectedIds.size === 0 || bulkProcessing) return;
     setBulkProcessing(true);
+    setReadError(null);
     setBulkStatus(`Rescanning ${selectedIds.size} assets...`);
     try {
       for (const id of Array.from(selectedIds)) {
-        await fetch(`/api/watchlist/${encodeURIComponent(id)}/rescan`, {
+        await apiRequest(`/api/watchlist/${encodeURIComponent(id)}/rescan`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ walletAddress: wallet }),
-        }).catch(() => null);
+        });
       }
-      window.location.href = `/watchlist?wallet=${encodeURIComponent(wallet)}&rescanned=${selectedIds.size}`;
+      await refreshEntries();
+      setSelectedIds(new Set());
+      setBulkStatus(`Rescanned ${selectedIds.size} assets.`);
+    } catch (cause) {
+      setReadError(toApiClientError(cause));
+      setBulkStatus(null);
     } finally {
       setBulkProcessing(false);
     }
@@ -460,16 +512,22 @@ export function WatchlistManager({
   const handleBulkRemove = async () => {
     if (selectedIds.size === 0 || bulkProcessing) return;
     setBulkProcessing(true);
+    setReadError(null);
     setBulkStatus(`Removing ${selectedIds.size} assets...`);
     try {
       for (const id of Array.from(selectedIds)) {
-        await fetch("/api/watchlist", {
+        await apiRequest("/api/watchlist", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "remove", entryId: id, walletAddress: wallet }),
-        }).catch(() => null);
+        });
       }
-      window.location.href = `/watchlist?wallet=${encodeURIComponent(wallet)}&removed=${selectedIds.size}`;
+      await refreshEntries();
+      setSelectedIds(new Set());
+      setBulkStatus(`Removed ${selectedIds.size} assets.`);
+    } catch (cause) {
+      setReadError(toApiClientError(cause));
+      setBulkStatus(null);
     } finally {
       setBulkProcessing(false);
     }
@@ -489,7 +547,7 @@ export function WatchlistManager({
                 : "border border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white"
             }`}
           >
-            All <span className="opacity-75">({items.length})</span>
+            All <span className="opacity-75">({currentItems.length})</span>
           </button>
           <button
             type="button"
@@ -539,16 +597,28 @@ export function WatchlistManager({
           )}
         </div>
 
-        {filteredItems.length > 0 && (
+        <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={toggleAll}
-            className="text-xs text-white/60 hover:text-white"
+            onClick={refreshEntries}
+            disabled={bulkProcessing}
+            className="text-xs text-white/60 hover:text-white disabled:opacity-50"
           >
-            {selectedIds.size === filteredItems.length ? "Deselect all" : "Select all"}
+            Refresh
           </button>
-        )}
+          {filteredItems.length > 0 && (
+            <button
+              type="button"
+              onClick={toggleAll}
+              className="text-xs text-white/60 hover:text-white"
+            >
+              {selectedIds.size === filteredItems.length ? "Deselect all" : "Select all"}
+            </button>
+          )}
+        </div>
       </div>
+
+      {readError ? <ApiErrorNotice error={readError} title="Watchlist could not be refreshed" onRetry={refreshEntries} /> : null}
 
       {/* Grid of items */}
       {filteredItems.length === 0 ? (

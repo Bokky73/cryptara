@@ -10,7 +10,15 @@ import type {
   PreparedTransactionPayload,
   EvmPreparedTransactionPayload,
   StellarPreparedTransactionPayload,
+  TransactionPreview as Preview,
 } from "@/server/types";
+import {
+  verifyPreparedPayloadAgainstPreview,
+  type SigningVerificationIssue,
+  type SigningVerificationResult,
+} from "@/lib/signing/previewVerification";
+import { SigningVerificationWarning } from "@/components/SigningVerificationWarning";
+import { normalizeStellarNetworkId } from "@/lib/stellar/config";
 
 type ApprovalState =
   | { phase: "idle" }
@@ -21,6 +29,7 @@ type ApprovalState =
   | { phase: "submitting" }
   | { phase: "submitted"; txHash: string }
   | { phase: "rejected"; reason: string }
+  | { phase: "security_warning"; issues: SigningVerificationIssue[] }
   | { phase: "expired" }
   | { phase: "wallet_error"; error: string }
   | { phase: "network_mismatch"; expectedNetwork: string; connectedNetwork: string }
@@ -32,8 +41,12 @@ type ApprovalFlowClientProps = {
   chainFamily: "evm" | "stellar";
   network: string;
   sourceAccount?: string;
+  /** The preview the user actually reviewed. Required before any signature. */
+  preview?: Preview | null;
   onComplete?: (txHash: string) => void;
   onDismiss?: () => void;
+  onRefresh?: () => void;
+  refreshLabel?: string;
 };
 
 const RISK_THRESHOLD = 60;
@@ -52,14 +65,69 @@ function formatCountdown(ms: number): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+function parseExpiry(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value > 1e12 ? value : value * 1000;
+  if (typeof value !== "string" || !value.trim()) return undefined;
+
+  if (/^\d+$/.test(value.trim())) {
+    const numeric = Number(value);
+    return numeric > 1e12 ? numeric : numeric * 1000;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+function blockingIssues(verdict: SigningVerificationResult): SigningVerificationIssue[] {
+  return verdict.issues.filter((issue) => issue.blocking);
+}
+
+/** Final gate: no wallet prompt unless this resolves to an empty list. */
+async function verifyBeforeWallet(input: {
+  preview?: Preview | null;
+  payload?: PreparedTransactionPayload | null;
+  walletAddress: string;
+  sourceAccount?: string;
+}): Promise<SigningVerificationIssue[]> {
+  if (!input.preview) {
+    return [{
+      code: "malformed_payload",
+      field: "preview",
+      message: "No reviewed preview is available. Refresh and prepare the transaction again.",
+      blocking: true,
+      refreshRequired: true,
+    }];
+  }
+
+  if (!input.payload) {
+    return [{
+      code: "malformed_payload",
+      field: "payload",
+      message: "No prepared payload was returned. Refresh and prepare the transaction again.",
+      blocking: true,
+      refreshRequired: true,
+    }];
+  }
+
+  return blockingIssues(await verifyPreparedPayloadAgainstPreview({
+    preview: input.preview,
+    payload: input.payload,
+    walletAddress: input.walletAddress,
+    sourceAccount: input.sourceAccount,
+  }));
+}
+
 export function ApprovalFlowClient({
   idempotencyKey,
   walletAddress,
   chainFamily,
   network,
   sourceAccount,
+  preview,
   onComplete,
   onDismiss,
+  onRefresh,
+  refreshLabel,
 }: ApprovalFlowClientProps) {
   const session = useWalletSession();
   const evm = useAccount();
@@ -73,6 +141,11 @@ export function ApprovalFlowClient({
   const [payload, setPayload] = useState<PreparedTransactionPayload | null>(null);
   const [riskAcknowledged, setRiskAcknowledged] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const expectedSourceAccount = sourceAccount ?? (chainFamily === "stellar" ? stellar.address ?? undefined : undefined);
+  const verificationWalletAddress =
+    chainFamily === "stellar"
+      ? stellar.address ?? expectedSourceAccount ?? walletAddress
+      : session.address ?? walletAddress;
 
   // Auto-validate when the component mounts
   const validateApproval = useCallback(async () => {
@@ -123,6 +196,18 @@ export function ApprovalFlowClient({
       }
 
       setPayload(result.payload ?? null);
+
+      const issues = await verifyBeforeWallet({
+        preview,
+        payload: result.payload,
+        walletAddress: verificationWalletAddress,
+        sourceAccount: expectedSourceAccount,
+      });
+      if (issues.length > 0) {
+        setState({ phase: "security_warning", issues });
+        return;
+      }
+
       setState({ phase: "ready_for_signing", result });
     } catch (error) {
       setState({
@@ -130,7 +215,7 @@ export function ApprovalFlowClient({
         error: error instanceof Error ? error.message : "Failed to validate approval.",
       });
     }
-  }, [idempotencyKey, walletAddress, chainFamily, network, sourceAccount, session.address, stellar.network, evm.chain, evm.chainId]);
+  }, [idempotencyKey, walletAddress, chainFamily, network, sourceAccount, preview, session.address, stellar.network, verificationWalletAddress, expectedSourceAccount, evm.chain, evm.chainId]);
 
   useEffect(() => {
     if (state.phase !== "idle") return;
@@ -154,14 +239,19 @@ export function ApprovalFlowClient({
   const isHighRisk = buyRisk >= RISK_THRESHOLD || confidence < CONFIDENCE_THRESHOLD;
 
   const expiresAt = useMemo(() => {
-    const raw = displayParams.expiresAt ?? displayParams.quoteExpiresAt;
-    if (typeof raw === "number") return raw;
-    if (typeof raw === "string") {
-      const parsed = Date.parse(raw);
-      return Number.isNaN(parsed) ? undefined : parsed;
-    }
-    return undefined;
-  }, [displayParams]);
+    const candidates = [
+      displayParams.expiresAt,
+      displayParams.quoteExpiresAt,
+      displayParams.preparationExpiry,
+      preview?.quote?.expiresAt,
+      preview?.lifecycle?.expiresAt,
+      preview?.simulation?.quoteExpiry,
+    ]
+      .map(parseExpiry)
+      .filter((value): value is number => value !== undefined);
+
+    return candidates.length > 0 ? Math.min(...candidates) : undefined;
+  }, [displayParams, preview]);
 
   const quoteExpired = expiresAt !== undefined && expiresAt <= now;
 
@@ -169,6 +259,19 @@ export function ApprovalFlowClient({
     if (actionsDisabled || state.phase !== "ready_for_signing" || !payload) return;
     if (isHighRisk && !riskAcknowledged) return;
     if (quoteExpired) return;
+
+    // Re-verify at click time so an expired quote or swapped payload can never
+    // slip between validation and the wallet prompt.
+    const issues = await verifyBeforeWallet({
+      preview,
+      payload,
+      walletAddress,
+      sourceAccount,
+    });
+    if (issues.length > 0) {
+      setState({ phase: "security_warning", issues });
+      return;
+    }
 
     setState({ phase: "signing" });
 
@@ -231,7 +334,10 @@ export function ApprovalFlowClient({
           return;
         }
 
-        signedPayload = await stellar.signTransaction(stellarPayload.xdr);
+        signedPayload = await stellar.signTransaction(
+          stellarPayload.xdr,
+          normalizeStellarNetworkId(preview?.network ?? network) ?? undefined,
+        );
       }
 
       setState({ phase: "signed", signedPayload });
@@ -263,7 +369,9 @@ export function ApprovalFlowClient({
       }
 
       const submitResult = await submitResponse.json();
-      setState({ phase: "submitted", txHash: submitResult.hash ?? submitResult.transaction?.hash });        onComplete?.(submitResult.hash ?? submitResult.transaction?.hash);
+      const txHash = submitResult.hash ?? submitResult.transaction?.hash;
+      setState({ phase: "submitted", txHash });
+      onComplete?.(txHash);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Signing failed.";
 
@@ -274,7 +382,7 @@ export function ApprovalFlowClient({
         setState({ phase: "wallet_error", error: message });
       }
     }
-  }, [actionsDisabled, state.phase, payload, isHighRisk, riskAcknowledged, quoteExpired, chainFamily, evmChainId, switchChainAsync, walletClient, stellar, network, walletAddress, sourceAccount, idempotencyKey, displayParams, onComplete]);
+  }, [actionsDisabled, state.phase, payload, preview, isHighRisk, riskAcknowledged, quoteExpired, chainFamily, evmChainId, switchChainAsync, walletClient, stellar, network, walletAddress, sourceAccount, idempotencyKey, displayParams, onComplete]);
 
   const signDisabled =
     actionsDisabled ||
@@ -300,6 +408,14 @@ export function ApprovalFlowClient({
           Review the exact balance changes before signing. Nothing is signed until you approve.
         </p>
       </header>
+
+      {state.phase === "security_warning" ? (
+        <SigningVerificationWarning
+          issues={state.issues}
+          onRefresh={onRefresh ?? (() => window.location.reload())}
+          refreshLabel={refreshLabel}
+        />
+      ) : null}
 
       {isHighRisk && (
         <div role="alert" className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
@@ -385,7 +501,7 @@ export function ApprovalFlowClient({
           <p className="mt-1">This quote is no longer valid. Refresh to re-simulate before signing.</p>
           <button
             type="button"
-            onClick={() => void validateApproval()}
+            onClick={onRefresh ?? (() => window.location.reload())}
             className="mt-3 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700"
           >
             Refresh Quote &amp; Re-simulate

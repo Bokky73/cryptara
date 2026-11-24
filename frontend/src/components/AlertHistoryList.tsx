@@ -2,36 +2,23 @@
 
 import { useEffect, useState } from "react";
 import { Check, ChevronRight, Link2, RotateCcw } from "lucide-react";
-import type { Alert, AlertDeliveryChannel, AlertDeliveryStatus, AlertSeverity, AlertStatus } from "@/server/types";
+import {
+  apiRequest,
+  isAbortError,
+  listAlertDeliveries,
+  listAlertHistory,
+  toApiClientError,
+  type AlertDeliveryChannel,
+  type AlertDeliveryStatus,
+  type AlertHistory,
+  type AlertRecord,
+  type AlertSeverity,
+  type AlertStatus,
+  type ApiClientError,
+  type DeliveryAuditRow,
+} from "@/lib/apiClient";
+import { ApiErrorNotice } from "@/components/ApiErrorNotice";
 import { useWalletSession } from "@/hooks/useWalletSession";
-
-type DeliveryAuditRow = {
-  id: string;
-  alertId: string;
-  channel: AlertDeliveryChannel;
-  status: AlertDeliveryStatus;
-  attemptCount: number;
-  terminal?: boolean;
-  errorDetail?: string;
-  nextRetryAt?: string;
-  providerMessageId?: string;
-};
-
-type EnrichedAlert = Alert & {
-  deliverySummary?: {
-    delivered: Array<Alert["deliverySummary"] extends { delivered?: Array<infer T> } | undefined ? T : never>;
-    failed: Array<{ channel: string; error: string }>;
-    skipped: Array<{ channel: string; reason: string }>;
-    pending?: AlertDeliveryChannel[];
-  };
-  deliveryCount: number;
-  matchingRule?: { triggerType: Alert["triggerType"]; severity: AlertSeverity } | null;
-};
-
-type AlertResponse = {
-  alerts: EnrichedAlert[];
-  counts: { triggered: number; recovered: number; acknowledged: number };
-};
 
 const severityTones: Record<AlertSeverity, string> = {
   low: "border-emerald-300/30 bg-emerald-300/8 text-emerald-200",
@@ -55,15 +42,15 @@ const deliveryStatusLabel: Record<AlertDeliveryStatus, string> = {
 
 const VISIBLE_PAGE_SIZE = 30;
 
-export function AlertHistoryList({ initialData }: { initialData?: AlertResponse }) {
+export function AlertHistoryList({ initialData }: { initialData?: AlertHistory }) {
   const { address, isConnected } = useWalletSession();
-  const [data, setData] = useState<AlertResponse | null>(initialData ?? null);
+  const [data, setData] = useState<AlertHistory | null>(initialData ?? null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [batchBusy, setBatchBusy] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [severityFilter, setSeverityFilter] = useState<"all" | "critical" | "warning" | "info" | "unacknowledged">("all");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ApiClientError | null>(null);
   const [deliveryRows, setDeliveryRows] = useState<Record<string, DeliveryAuditRow[]>>({});
   const [retryBusyId, setRetryBusyId] = useState<string | null>(null);
   // Progressive disclosure: render only a page of already-fetched alerts at a
@@ -77,14 +64,13 @@ export function AlertHistoryList({ initialData }: { initialData?: AlertResponse 
 
     // The server uses the cookie-derived wallet; we send no wallet in the
     // query string so a user can not widen the scope by tampering with the URL.
-    fetch(`/api/alerts/alerts?limit=200`, { cache: "no-store", credentials: "include", signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error("Failed to load alerts")))
-      .then((payload: AlertResponse) => {
+    listAlertHistory({ limit: 200 }, { signal: controller.signal, credentials: "include" })
+      .then((payload) => {
         if (!controller.signal.aborted) setData(payload);
       })
-      .catch((err: Error) => {
-        if (err.name === "AbortError" || controller.signal.aborted) return;
-        setError(err.message);
+      .catch((cause: unknown) => {
+        if (isAbortError(cause) || controller.signal.aborted) return;
+        setError(toApiClientError(cause));
       });
 
     return () => controller.abort();
@@ -94,20 +80,15 @@ export function AlertHistoryList({ initialData }: { initialData?: AlertResponse 
     if (!address || !expandedId) return;
     const controller = new AbortController();
 
-    fetch(`/api/alerts/deliveries?alertId=${encodeURIComponent(expandedId)}`, {
-      cache: "no-store",
-      credentials: "include",
-      signal: controller.signal,
-    })
-      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("Failed to load deliveries"))))
-      .then((rows: DeliveryAuditRow[]) => {
+    listAlertDeliveries({ alertId: expandedId }, { signal: controller.signal, credentials: "include" })
+      .then((rows) => {
         if (!controller.signal.aborted) {
           setDeliveryRows((current) => ({ ...current, [expandedId]: rows }));
         }
       })
-      .catch((err: Error) => {
-        if (err.name === "AbortError" || controller.signal.aborted) return;
-        setError(err.message);
+      .catch((cause: unknown) => {
+        if (isAbortError(cause) || controller.signal.aborted) return;
+        setError(toApiClientError(cause));
       });
 
     return () => controller.abort();
@@ -117,22 +98,21 @@ export function AlertHistoryList({ initialData }: { initialData?: AlertResponse 
     if (!address) return;
     setBusyId(alertId);
     setError(null);
-    const response = await fetch(`/api/alerts/alerts/${alertId}/acknowledge`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-    });
-    setBusyId(null);
-    if (!response.ok) {
-      const detail = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(detail.error ?? "Could not acknowledge alert.");
-      return;
+    try {
+      await apiRequest(`/api/alerts/alerts/${encodeURIComponent(alertId)}/acknowledge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      setData((current) => current ? {
+        ...current,
+        alerts: current.alerts.map((alert) => alert.id === alertId ? { ...alert, status: "acknowledged", acknowledgedAt: new Date().toISOString() } : alert),
+        counts: { ...current.counts, triggered: Math.max(0, current.counts.triggered - 1), acknowledged: current.counts.acknowledged + 1 },
+      } : current);
+    } catch (cause) {
+      setError(toApiClientError(cause));
+    } finally {
+      setBusyId(null);
     }
-    setData((current) => current ? {
-      ...current,
-      alerts: current.alerts.map((alert) => alert.id === alertId ? { ...alert, status: "acknowledged", acknowledgedAt: new Date().toISOString() } : alert),
-      counts: { ...current.counts, triggered: Math.max(0, current.counts.triggered - 1), acknowledged: current.counts.acknowledged + 1 },
-    } : current);
   }
 
   async function acknowledgeBatch(idsToAcknowledge: string[]) {
@@ -142,9 +122,8 @@ export function AlertHistoryList({ initialData }: { initialData?: AlertResponse 
     try {
       await Promise.all(
         idsToAcknowledge.map((id) =>
-          fetch(`/api/alerts/alerts/${id}/acknowledge`, {
+          apiRequest(`/api/alerts/alerts/${encodeURIComponent(id)}/acknowledge`, {
             method: "POST",
-            credentials: "include",
             headers: { "Content-Type": "application/json" },
           })
         )
@@ -164,8 +143,8 @@ export function AlertHistoryList({ initialData }: { initialData?: AlertResponse 
         idsToAcknowledge.forEach((id) => next.delete(id));
         return next;
       });
-    } catch {
-      setError("Failed to batch acknowledge some alerts.");
+    } catch (cause) {
+      setError(toApiClientError(cause));
     } finally {
       setBatchBusy(false);
     }
@@ -174,23 +153,21 @@ export function AlertHistoryList({ initialData }: { initialData?: AlertResponse 
   async function retryDelivery(deliveryId: string, alertId: string) {
     setRetryBusyId(deliveryId);
     setError(null);
-    const response = await fetch("/api/alerts/deliveries", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deliveryId }),
-    });
-    setRetryBusyId(null);
-    if (!response.ok) {
-      const detail = (await response.json().catch(() => ({}))) as { error?: string };
-      setError(detail.error ?? "Could not retry delivery.");
-      return;
+    try {
+      const updated = await apiRequest<DeliveryAuditRow>("/api/alerts/deliveries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deliveryId }),
+      });
+      setDeliveryRows((current) => ({
+        ...current,
+        [alertId]: (current[alertId] ?? []).map((row) => (row.id === deliveryId ? { ...row, ...updated } : row)),
+      }));
+    } catch (cause) {
+      setError(toApiClientError(cause));
+    } finally {
+      setRetryBusyId(null);
     }
-    const updated = (await response.json()) as DeliveryAuditRow;
-    setDeliveryRows((current) => ({
-      ...current,
-      [alertId]: (current[alertId] ?? []).map((row) => (row.id === deliveryId ? { ...row, ...updated } : row)),
-    }));
   }
 
   if (!isConnected) {
@@ -202,9 +179,9 @@ export function AlertHistoryList({ initialData }: { initialData?: AlertResponse 
   }
 
   if (!data) {
-    return (
+    return error ? <ApiErrorNotice error={error} title="Alert history unavailable" /> : (
       <section className="glass-panel rounded-lg border border-white/10 p-5 text-sm text-white/58">
-        {error ?? "Loading alerts…"}
+        Loading alerts…
       </section>
     );
   }
@@ -303,7 +280,7 @@ export function AlertHistoryList({ initialData }: { initialData?: AlertResponse 
         ) : null}
       </div>
 
-      {error ? <p className="text-sm text-red-200">{error}</p> : null}
+      {error ? <ApiErrorNotice error={error} title="Alert request failed" /> : null}
 
       <div className="space-y-2">
         {recent.length === 0 ? (
@@ -416,7 +393,7 @@ export function AlertDetail({
   retryBusyId,
   onRetry,
 }: {
-  alert: EnrichedAlert;
+  alert: AlertRecord;
   deliveries?: DeliveryAuditRow[];
   retryBusyId?: string | null;
   onRetry?: (deliveryId: string) => void;
@@ -523,7 +500,7 @@ function EvidencePanel({
   );
 }
 
-function DeliverySummary({ summary }: { summary: NonNullable<EnrichedAlert["deliverySummary"]> }) {
+function DeliverySummary({ summary }: { summary: NonNullable<AlertRecord["deliverySummary"]> }) {
   return (
     <div>
       <div className="text-[10px] uppercase tracking-[0.18em] opacity-55">Delivery</div>
