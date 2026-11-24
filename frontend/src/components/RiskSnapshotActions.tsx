@@ -1,29 +1,67 @@
 "use client";
 
-import { Check, Copy, Download, FileLock2, Loader2, ShieldX } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, Copy, Download, FileLock2, Loader2, ShieldX } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { RiskSnapshotDocument } from "@/server/snapshots/schema";
 import type { RiskSnapshotCreateResponse, TokenScanResult } from "@/server/types";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { hashRiskSnapshotInBrowser } from "@/lib/snapshots/clientHash";
+
+type HashVerification =
+  | { status: "verifying" }
+  | { status: "verified"; computed: string }
+  | { status: "mismatch"; computed: string }
+  | { status: "unavailable"; detail: string };
 
 type Props = {
   source?: TokenScanResult;
   snapshotId?: string;
   shareUrl?: string;
   downloadUrl?: string;
+  /** The public document rendered on this page, used for in-browser hashing. */
+  document?: RiskSnapshotDocument;
+  /** Canonical hash stored with the snapshot (the value published on-chain). */
+  expectedHash?: string;
+  /** Both snapshot ids needed to seed the side-by-side comparison view. */
+  comparisonIds?: { left: string; right: string };
 };
 
-export function RiskSnapshotActions({ source, snapshotId, shareUrl, downloadUrl }: Props) {
+export function RiskSnapshotActions({ source, snapshotId, shareUrl, downloadUrl, document, expectedHash, comparisonIds }: Props) {
   const [created, setCreated] = useState<RiskSnapshotCreateResponse>();
   const [busy, setBusy] = useState<"create" | "revoke">();
   const [copied, setCopied] = useState(false);
   const [tokenCopied, setTokenCopied] = useState(false);
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
+  const [verification, setVerification] = useState<HashVerification | undefined>();
   const { actionsDisabled } = useOnlineStatus();
   const activeId = created?.id ?? snapshotId;
   const activeShareUrl = created?.shareUrl ?? shareUrl ?? (activeId ? `/snapshots/${activeId}` : undefined);
   const activeDownloadUrl = created?.downloadUrl ?? downloadUrl ?? (activeId ? `/api/snapshots/${activeId}?download=1` : undefined);
+
+  useEffect(() => {
+    if (!document || !expectedHash) return;
+    let cancelled = false;
+    setVerification({ status: "verifying" });
+    hashRiskSnapshotInBrowser(document)
+      .then((computed) => {
+        if (cancelled) return;
+        setVerification(computed === expectedHash
+          ? { status: "verified", computed }
+          : { status: "mismatch", computed });
+      })
+      .catch((cause: unknown) => {
+        if (cancelled) return;
+        setVerification({
+          status: "unavailable",
+          detail: cause instanceof Error ? cause.message : "Web Crypto verification is unavailable.",
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [document, expectedHash]);
 
   async function createSnapshot() {
     if (actionsDisabled || !source) return;
@@ -127,13 +165,47 @@ export function RiskSnapshotActions({ source, snapshotId, shareUrl, downloadUrl 
           </button>
         ) : null}
       </div>
+      {verification ? (
+        <div role="status" aria-live="polite" className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-semibold ${
+            verification.status === "verified"
+              ? "border-emerald-300/30 bg-emerald-400/10 text-emerald-200"
+              : verification.status === "mismatch"
+                ? "border-red-300/35 bg-red-400/10 text-red-200"
+                : "border-white/15 bg-white/5 text-white/60"
+          }`}>
+            {verification.status === "verifying" ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : verification.status === "verified" ? <CheckCircle2 className="h-3.5 w-3.5" />
+              : verification.status === "mismatch" ? <ShieldX className="h-3.5 w-3.5" />
+              : <AlertTriangle className="h-3.5 w-3.5" />}
+            {verification.status === "verifying" ? "Verifying hash in browser…"
+              : verification.status === "verified" ? "Canonical hash verified"
+              : verification.status === "mismatch" ? "Hash mismatch"
+              : "Verification unavailable"}
+          </span>
+          {verification.status === "verified" || verification.status === "mismatch" ? (
+            <span className="break-all font-mono text-white/45">{verification.computed}</span>
+          ) : null}
+          {verification.status === "unavailable" ? (
+            <span className="text-white/50">{verification.detail}</span>
+          ) : null}
+        </div>
+      ) : null}
       {activeId ? (
-        <p className="mt-3 text-xs text-white/60">
+        <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-white/60">
+          {comparisonIds ? (
+            <Link
+              href={`/insights/report-comparison?left=${encodeURIComponent(comparisonIds.left)}&right=${encodeURIComponent(comparisonIds.right)}`}
+              className="underline underline-offset-2 hover:text-white"
+            >
+              Compare with latest scan
+            </Link>
+          ) : null}
           <Link
             href={`/insights/report-comparison?right=${encodeURIComponent(activeId)}`}
             className="underline underline-offset-2 hover:text-white"
           >
-            Compare this snapshot with an earlier one
+            {comparisonIds ? "Compare with another snapshot" : "Compare this snapshot with an earlier one"}
           </Link>
         </p>
       ) : null}

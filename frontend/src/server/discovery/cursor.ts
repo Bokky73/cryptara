@@ -6,6 +6,49 @@ import type {
 } from "@/server/discovery/types";
 import type { BackoffConfig } from "@/server/discovery/types";
 
+// ─── Durable persistence adapter ─────────────────────────────────────────────
+// Cursors must survive process restarts. The scheduler wires a durable sink
+// (e.g. Postgres / file-backed store) via `setCursorPersistence`; when no sink
+// is configured the store falls back to in-memory only (tests / fixture replay).
+
+export interface CursorPersistence {
+  /** Persist the full cursor snapshot. Must be idempotent. */
+  save(snapshot: Record<string, unknown>[]): void | Promise<void>;
+  /** Load a previously persisted snapshot, or null when none exists. */
+  load(): Record<string, unknown>[] | null | Promise<Record<string, unknown>[] | null>;
+}
+
+let cursorPersistence: CursorPersistence | null = null;
+
+export function setCursorPersistence(persistence: CursorPersistence | null): void {
+  cursorPersistence = persistence;
+}
+
+export function getCursorPersistence(): CursorPersistence | null {
+  return cursorPersistence;
+}
+
+/**
+ * Flush the current cursor snapshot to the configured durable sink.
+ * No-op when no persistence adapter is configured.
+ */
+export async function persistCursors(): Promise<void> {
+  if (!cursorPersistence) return;
+  await cursorPersistence.save(dumpCursors());
+}
+
+/**
+ * Load cursors from the configured durable sink (if any) into memory.
+ * Returns the number of cursors restored.
+ */
+export async function restoreCursors(): Promise<number> {
+  if (!cursorPersistence) return 0;
+  const dumped = await cursorPersistence.load();
+  if (!dumped) return 0;
+  loadCursors(dumped);
+  return cursorStore.size;
+}
+
 // ─── Zod schema for runtime validation ───────────────────────────────────────
 
 export const discoveryCursorSchema = z.object({
@@ -37,6 +80,12 @@ export function getCursor(kind: DiscoveryProviderKind, chainId: DiscoveryChainId
 
 export function upsertCursor(cursor: DiscoveryCursor): void {
   cursorStore.set(storeKey(cursor.providerKind, cursor.chainId), { ...cursor });
+  // Fire-and-forget durable write; failures must not break the poll loop.
+  if (cursorPersistence) {
+    void Promise.resolve(persistCursors()).catch(() => {
+      /* durable write failures are surfaced via metrics, not thrown */
+    });
+  }
 }
 
 export function listCursors(): DiscoveryCursor[] {
@@ -128,4 +177,9 @@ export function loadCursors(dumped: Record<string, unknown>[]): void {
  */
 export function resetCursors(): void {
   cursorStore.clear();
+  if (cursorPersistence) {
+    void Promise.resolve(persistCursors()).catch(() => {
+      /* ignore */
+    });
+  }
 }

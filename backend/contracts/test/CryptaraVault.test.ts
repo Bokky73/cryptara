@@ -62,6 +62,22 @@ describe("CryptaraVault", function () {
       ).to.be.revertedWithCustomError(vault, "FeeOnTransferNotSupported");
 
       expect(await vault.userBalance(user.address, feeToken.target)).to.equal(0);
+    it("should reject zero-amount deposit", async function () {
+      const { vault, token, user } = await loadFixture(deployFixture);
+      await expect(
+        vault.connect(user).deposit(token.target, 0),
+      ).to.be.revertedWith("Vault: zero amount");
+    });
+
+    it("should accumulate balances across multiple deposits", async function () {
+      const { vault, token, user } = await loadFixture(deployFixture);
+
+      await token.transfer(user.address, ethers.parseEther("100"));
+      await token.connect(user).approve(vault.target, ethers.parseEther("100"));
+
+      await vault.connect(user).deposit(token.target, ethers.parseEther("30"));
+      await vault.connect(user).deposit(token.target, ethers.parseEther("20"));
+      expect(await vault.userBalance(user.address, token.target)).to.equal(ethers.parseEther("50"));
     });
   });
 
@@ -256,6 +272,8 @@ describe("CryptaraVault", function () {
       await expect(
         vault.connect(agent).withdraw(token.target, ethers.parseEther("60"), user.address, intentHash),
       ).to.be.revertedWith("Vault: insufficient balance");
+      await vault.connect(agent).withdraw(token.target, ethers.parseEther("3"), user.address, intentHash);
+      expect(await vault.userBalance(user.address, token.target)).to.equal(ethers.parseEther("47"));
     });
   });
 });

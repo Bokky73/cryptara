@@ -28,11 +28,19 @@ contract CryptaraPolicy {
     }
 
     // ──────────────────────────────────────────────
+    //  Constants
+    // ──────────────────────────────────────────────
+
+    uint256 public constant MAX_TRACKED_ASSETS = 256;
+
+    // ──────────────────────────────────────────────
     //  State
     // ──────────────────────────────────────────────
 
     address public owner;
+    address public pendingOwner;
     address public emergencyAdmin;
+    address public pendingEmergencyAdmin;
     address public agent;
     address public vault;
 
@@ -46,8 +54,13 @@ contract CryptaraPolicy {
 
     mapping(address => bool) public allowedAssets;
     mapping(address => bool) public blockedAssets;
-    address[] public allowedAssetList;
-    address[] public blockedAssetList;
+
+    // Index-tracked sets for O(1) add/remove (swap-and-pop).
+    // Index is 1-based; 0 means "not tracked".
+    address[] private _allowedAssetList;
+    mapping(address => uint256) private _allowedAssetIndex;
+    address[] private _blockedAssetList;
+    mapping(address => uint256) private _blockedAssetIndex;
 
     mapping(bytes32 => PolicyDecision) public policyDecisions;
     mapping(bytes32 => Intent) public intents;
@@ -75,6 +88,15 @@ contract CryptaraPolicy {
     event AssetAllowed(address indexed asset);
     event AssetBlocked(address indexed asset, bool blocked);
     event LimitsUpdated(uint256 maxTxValue, uint256 maxSlippageBps, uint256 maxDailySpend);
+    event Paused(address indexed actor, bool paused, bytes32 reasonHash, uint256 timestamp);
+    event Unpaused(address indexed actor, bool paused, bytes32 reasonHash, uint256 timestamp);
+    event AssetAllowed(address indexed asset);
+    event AssetBlocked(address indexed asset, bool blocked);
+    event LimitsUpdated(uint256 maxTxValue, uint256 maxSlippageBps, uint256 maxDailySpend);
+    event DailySpendReset(uint256 timestamp);
+    event AdminTransferProposed(address indexed currentAdmin, address indexed pendingAdmin);
+    event AdminTransferAccepted(address indexed previousAdmin, address indexed newAdmin);
+    event AdminTransferCancelled(address indexed currentAdmin, address indexed cancelledPendingAdmin);
 
     // ──────────────────────────────────────────────
     //  Modifiers
@@ -122,6 +144,7 @@ contract CryptaraPolicy {
     // ──────────────────────────────────────────────
 
     constructor() {
+        require(msg.sender != address(0), "Policy: zero owner");
         owner = msg.sender;
         emergencyAdmin = msg.sender;
         _status = 0;
@@ -135,12 +158,58 @@ contract CryptaraPolicy {
         require(newOwner != address(0), "Policy: zero owner");
         address previousOwner = owner;
         owner = newOwner;
+        pendingOwner = address(0);
         emit OwnerTransferred(previousOwner, newOwner);
+    }
+
+    function proposeAdmin(address pending) external onlyOwner {
+        require(pending != address(0), "Policy: zero admin");
+        require(pending != owner, "Policy: already owner");
+        pendingOwner = pending;
+        emit AdminTransferProposed(owner, pending);
+    }
+
+    function acceptAdmin() external {
+        require(msg.sender == pendingOwner, "Policy: not pending admin");
+        address previousOwner = owner;
+        owner = pendingOwner;
+        pendingOwner = address(0);
+        emit AdminTransferAccepted(previousOwner, owner);
+    }
+
+    function cancelPendingAdmin() external onlyOwner {
+        address cancelled = pendingOwner;
+        require(cancelled != address(0), "Policy: no pending admin");
+        pendingOwner = address(0);
+        emit AdminTransferCancelled(owner, cancelled);
+    }
+
+    function proposeEmergencyAdmin(address pending) external onlyOwner {
+        require(pending != address(0), "Policy: zero admin");
+        require(pending != emergencyAdmin, "Policy: already emergency admin");
+        pendingEmergencyAdmin = pending;
+        emit AdminTransferProposed(emergencyAdmin, pending);
+    }
+
+    function acceptEmergencyAdmin() external {
+        require(msg.sender == pendingEmergencyAdmin, "Policy: not pending admin");
+        address previousAdmin = emergencyAdmin;
+        emergencyAdmin = pendingEmergencyAdmin;
+        pendingEmergencyAdmin = address(0);
+        emit AdminTransferAccepted(previousAdmin, emergencyAdmin);
+    }
+
+    function cancelPendingEmergencyAdmin() external onlyOwner {
+        address cancelled = pendingEmergencyAdmin;
+        require(cancelled != address(0), "Policy: no pending admin");
+        pendingEmergencyAdmin = address(0);
+        emit AdminTransferCancelled(emergencyAdmin, cancelled);
     }
 
     function setEmergencyAdmin(address admin) external onlyOwner {
         require(admin != address(0), "Policy: zero admin");
         emergencyAdmin = admin;
+        pendingEmergencyAdmin = address(0);
         emit EmergencyAdminSet(admin);
     }
 
@@ -168,17 +237,28 @@ contract CryptaraPolicy {
         require(asset != address(0), "Policy: zero asset");
         require(!allowedAssets[asset], "Policy: already allowed");
         require(!blockedAssets[asset], "Policy: blocked asset");
+        require(_allowedAssetList.length < MAX_TRACKED_ASSETS, "Policy: allowlist full");
         allowedAssets[asset] = true;
-        allowedAssetList.push(asset);
+        _allowedAssetList.push(asset);
+        _allowedAssetIndex[asset] = _allowedAssetList.length;
         emit AssetAllowed(asset);
     }
 
     function blockAsset(address asset, bool blocked) external onlyOwner {
         require(asset != address(0), "Policy: zero asset");
-        blockedAssets[asset] = blocked;
         if (blocked) {
-            allowedAssets[asset] = false;
-            blockedAssetList.push(asset);
+            require(!blockedAssets[asset], "Policy: already blocked");
+            require(_blockedAssetList.length < MAX_TRACKED_ASSETS, "Policy: blocklist full");
+            blockedAssets[asset] = true;
+            _blockedAssetList.push(asset);
+            _blockedAssetIndex[asset] = _blockedAssetList.length;
+            if (allowedAssets[asset]) {
+                _removeAllowedAsset(asset);
+            }
+        } else {
+            require(blockedAssets[asset], "Policy: not blocked");
+            blockedAssets[asset] = false;
+            _removeBlockedAsset(asset);
         }
         emit AssetBlocked(asset, blocked);
     }
@@ -186,22 +266,75 @@ contract CryptaraPolicy {
     function isAssetAllowed(address asset) public view returns (bool) {
         if (blockedAssets[asset]) return false;
         if (allowedAssets[asset]) return true;
-        if (allowedAssetList.length == 0) return true;
+        if (_allowedAssetList.length == 0) return true;
         return false;
+    }
+
+    function allowedAssetCount() external view returns (uint256) {
+        return _allowedAssetList.length;
+    }
+
+    function blockedAssetCount() external view returns (uint256) {
+        return _blockedAssetList.length;
+    }
+
+    function allowedAssetAt(uint256 index) external view returns (address) {
+        return _allowedAssetList[index];
+    }
+
+    function blockedAssetAt(uint256 index) external view returns (address) {
+        return _blockedAssetList[index];
+    }
+
+    // ──────────────────────────────────────────────
+    //  Internal set helpers (O(1) swap-and-pop)
+    // ──────────────────────────────────────────────
+
+    function _removeAllowedAsset(address asset) internal {
+        uint256 idx = _allowedAssetIndex[asset];
+        if (idx == 0) return;
+        uint256 lastIdx = _allowedAssetList.length;
+        if (idx != lastIdx) {
+            address lastAsset = _allowedAssetList[lastIdx - 1];
+            _allowedAssetList[idx - 1] = lastAsset;
+            _allowedAssetIndex[lastAsset] = idx;
+        }
+        _allowedAssetList.pop();
+        delete _allowedAssetIndex[asset];
+        allowedAssets[asset] = false;
+    }
+
+    function _removeBlockedAsset(address asset) internal {
+        uint256 idx = _blockedAssetIndex[asset];
+        if (idx == 0) return;
+        uint256 lastIdx = _blockedAssetList.length;
+        if (idx != lastIdx) {
+            address lastAsset = _blockedAssetList[lastIdx - 1];
+            _blockedAssetList[idx - 1] = lastAsset;
+            _blockedAssetIndex[lastAsset] = idx;
+        }
+        _blockedAssetList.pop();
+        delete _blockedAssetIndex[asset];
     }
 
     // ──────────────────────────────────────────────
     //  Pause / Emergency
     // ──────────────────────────────────────────────
 
-    function pause() external onlyOwnerOrEmergency {
+    /// @notice Instant circuit-breaker. Either governance (owner) or the
+    ///         emergencyAdmin may pause with zero delay.
+    function pause(bytes32 reasonHash) external onlyOwnerOrEmergency {
+        require(!paused, "Policy: already paused");
         paused = true;
-        emit Paused(msg.sender);
+        emit Paused(msg.sender, true, reasonHash, block.timestamp);
     }
 
-    function unpause() external onlyOwnerOrEmergency {
+    /// @notice Only governance (owner / timelocked multisig) may unpause.
+    ///         emergencyAdmin is explicitly forbidden from lifting the pause.
+    function unpause(bytes32 reasonHash) external onlyOwner {
+        require(paused, "Policy: not paused");
         paused = false;
-        emit Unpaused(msg.sender);
+        emit Unpaused(msg.sender, false, reasonHash, block.timestamp);
     }
 
     // ──────────────────────────────────────────────
@@ -272,5 +405,85 @@ contract CryptaraPolicy {
 
         emit PolicyApplied(_user, decisionHash);
         return decisionHash;
+    }
+
+    function revokePolicy(bytes32 decisionHash) external onlyOwnerOrEmergency {
+        PolicyDecision storage decision = policyDecisions[decisionHash];
+        require(decision.user != address(0), "Policy: unknown decision");
+        require(!decision.revoked, "Policy: already revoked");
+        decision.revoked = true;
+        emit IntentRevoked(decisionHash);
+    }
+
+    // ──────────────────────────────────────────────
+    //  Intent Lifecycle
+    // ──────────────────────────────────────────────
+
+    function createIntent(
+        bytes32 policyCommitment,
+        address targetToken,
+        uint256 amount,
+        uint64 expiry
+    ) external whenNotPaused returns (bytes32) {
+        require(targetToken != address(0), "Policy: zero token");
+        require(amount > 0, "Policy: zero amount");
+        require(expiry > block.timestamp, "Policy: expired");
+        require(isAssetAllowed(targetToken), "Policy: asset not allowed");
+
+        PolicyDecision storage decision = policyDecisions[policyCommitment];
+        require(decision.user == msg.sender, "Policy: not decision owner");
+        require(!decision.revoked, "Policy: decision revoked");
+        require(decision.expiry > block.timestamp, "Policy: decision expired");
+        require(amount <= decision.maxTransactionValue, "Policy: exceeds max tx value");
+
+        uint256 nonce = userNonce[msg.sender] + 1;
+        userNonce[msg.sender] = nonce;
+
+        bytes32 intentHash = hashIntent(policyCommitment, targetToken, amount, nonce, expiry);
+
+        intents[intentHash] = Intent({
+            intentHash: intentHash,
+            policyCommitment: policyCommitment,
+            targetToken: targetToken,
+            amount: amount,
+            nonce: nonce,
+            expiry: expiry,
+            executed: false
+        });
+
+        emit IntentCreated(intentHash, policyCommitment);
+        return intentHash;
+    }
+
+    function executeIntent(bytes32 intentHash) external whenNotPaused nonReentrant {
+        Intent storage intent = intents[intentHash];
+        require(intent.intentHash != bytes32(0), "Policy: unknown intent");
+        require(!intent.executed, "Policy: already executed");
+        require(intent.expiry > block.timestamp, "Policy: intent expired");
+
+        PolicyDecision storage decision = policyDecisions[intent.policyCommitment];
+        require(decision.user == msg.sender, "Policy: not decision owner");
+        require(!decision.revoked, "Policy: decision revoked");
+
+        if (block.timestamp >= lastDailyReset + 1 days) {
+            dailySpend[msg.sender] = 0;
+            lastDailyReset = block.timestamp;
+            emit DailySpendReset(block.timestamp);
+        }
+
+        uint256 newSpend = dailySpend[msg.sender] + intent.amount;
+        require(maxDailySpend == 0 || newSpend <= maxDailySpend, "Policy: exceeds daily spend");
+        dailySpend[msg.sender] = newSpend;
+
+        intent.executed = true;
+        emit IntentExecuted(intentHash);
+    }
+
+    function revokeIntent(bytes32 intentHash) external onlyOwnerOrEmergency {
+        Intent storage intent = intents[intentHash];
+        require(intent.intentHash != bytes32(0), "Policy: unknown intent");
+        require(!intent.executed, "Policy: already executed");
+        intent.executed = true;
+        emit IntentRevoked(intentHash);
     }
 }

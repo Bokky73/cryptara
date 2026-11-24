@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useAccount, useWalletClient, useSwitchChain, useChainId } from "wagmi";
 import { useStellarWallet } from "@/providers/StellarWalletProvider";
 import { useWalletSession } from "@/hooks/useWalletSession";
@@ -10,7 +10,15 @@ import type {
   PreparedTransactionPayload,
   EvmPreparedTransactionPayload,
   StellarPreparedTransactionPayload,
+  TransactionPreview as Preview,
 } from "@/server/types";
+import {
+  verifyPreparedPayloadAgainstPreview,
+  type SigningVerificationIssue,
+  type SigningVerificationResult,
+} from "@/lib/signing/previewVerification";
+import { SigningVerificationWarning } from "@/components/SigningVerificationWarning";
+import { normalizeStellarNetworkId } from "@/lib/stellar/config";
 
 type ApprovalState =
   | { phase: "idle" }
@@ -21,6 +29,7 @@ type ApprovalState =
   | { phase: "submitting" }
   | { phase: "submitted"; txHash: string }
   | { phase: "rejected"; reason: string }
+  | { phase: "security_warning"; issues: SigningVerificationIssue[] }
   | { phase: "expired" }
   | { phase: "wallet_error"; error: string }
   | { phase: "network_mismatch"; expectedNetwork: string; connectedNetwork: string }
@@ -32,9 +41,81 @@ type ApprovalFlowClientProps = {
   chainFamily: "evm" | "stellar";
   network: string;
   sourceAccount?: string;
+  /** The preview the user actually reviewed. Required before any signature. */
+  preview?: Preview | null;
   onComplete?: (txHash: string) => void;
   onDismiss?: () => void;
+  onRefresh?: () => void;
+  refreshLabel?: string;
 };
+
+const RISK_THRESHOLD = 60;
+const CONFIDENCE_THRESHOLD = 50;
+
+function formatUsd(value: number | undefined): string {
+  if (value === undefined || Number.isNaN(value)) return "—";
+  return `$${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+
+function formatCountdown(ms: number): string {
+  if (ms <= 0) return "Expired";
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function parseExpiry(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value > 1e12 ? value : value * 1000;
+  if (typeof value !== "string" || !value.trim()) return undefined;
+
+  if (/^\d+$/.test(value.trim())) {
+    const numeric = Number(value);
+    return numeric > 1e12 ? numeric : numeric * 1000;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+function blockingIssues(verdict: SigningVerificationResult): SigningVerificationIssue[] {
+  return verdict.issues.filter((issue) => issue.blocking);
+}
+
+/** Final gate: no wallet prompt unless this resolves to an empty list. */
+async function verifyBeforeWallet(input: {
+  preview?: Preview | null;
+  payload?: PreparedTransactionPayload | null;
+  walletAddress: string;
+  sourceAccount?: string;
+}): Promise<SigningVerificationIssue[]> {
+  if (!input.preview) {
+    return [{
+      code: "malformed_payload",
+      field: "preview",
+      message: "No reviewed preview is available. Refresh and prepare the transaction again.",
+      blocking: true,
+      refreshRequired: true,
+    }];
+  }
+
+  if (!input.payload) {
+    return [{
+      code: "malformed_payload",
+      field: "payload",
+      message: "No prepared payload was returned. Refresh and prepare the transaction again.",
+      blocking: true,
+      refreshRequired: true,
+    }];
+  }
+
+  return blockingIssues(await verifyPreparedPayloadAgainstPreview({
+    preview: input.preview,
+    payload: input.payload,
+    walletAddress: input.walletAddress,
+    sourceAccount: input.sourceAccount,
+  }));
+}
 
 export function ApprovalFlowClient({
   idempotencyKey,
@@ -42,8 +123,11 @@ export function ApprovalFlowClient({
   chainFamily,
   network,
   sourceAccount,
+  preview,
   onComplete,
   onDismiss,
+  onRefresh,
+  refreshLabel,
 }: ApprovalFlowClientProps) {
   const session = useWalletSession();
   const evm = useAccount();
@@ -55,10 +139,18 @@ export function ApprovalFlowClient({
 
   const [state, setState] = useState<ApprovalState>({ phase: "idle" });
   const [payload, setPayload] = useState<PreparedTransactionPayload | null>(null);
+  const [riskAcknowledged, setRiskAcknowledged] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  const expectedSourceAccount = sourceAccount ?? (chainFamily === "stellar" ? stellar.address ?? undefined : undefined);
+  const verificationWalletAddress =
+    chainFamily === "stellar"
+      ? stellar.address ?? expectedSourceAccount ?? walletAddress
+      : session.address ?? walletAddress;
 
   // Auto-validate when the component mounts
   const validateApproval = useCallback(async () => {
     setState({ phase: "validating" });
+    setRiskAcknowledged(false);
 
     try {
       const connectedWallet = session.address;
@@ -104,6 +196,18 @@ export function ApprovalFlowClient({
       }
 
       setPayload(result.payload ?? null);
+
+      const issues = await verifyBeforeWallet({
+        preview,
+        payload: result.payload,
+        walletAddress: verificationWalletAddress,
+        sourceAccount: expectedSourceAccount,
+      });
+      if (issues.length > 0) {
+        setState({ phase: "security_warning", issues });
+        return;
+      }
+
       setState({ phase: "ready_for_signing", result });
     } catch (error) {
       setState({
@@ -111,7 +215,7 @@ export function ApprovalFlowClient({
         error: error instanceof Error ? error.message : "Failed to validate approval.",
       });
     }
-  }, [idempotencyKey, walletAddress, chainFamily, network, sourceAccount, session.address, stellar.network, evm.chain, evm.chainId]);
+  }, [idempotencyKey, walletAddress, chainFamily, network, sourceAccount, preview, session.address, stellar.network, verificationWalletAddress, expectedSourceAccount, evm.chain, evm.chainId]);
 
   useEffect(() => {
     if (state.phase !== "idle") return;
@@ -119,8 +223,55 @@ export function ApprovalFlowClient({
     return () => window.clearTimeout(timer);
   }, [state.phase, validateApproval]);
 
+  // Tick a clock so the quote expiry countdown stays live.
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const displayParams = useMemo(
+    () => ((payload as { displayParams?: Record<string, unknown> })?.displayParams ?? {}) as Record<string, unknown>,
+    [payload],
+  );
+
+  const buyRisk = Number(displayParams.buyRisk ?? 0);
+  const confidence = Number(displayParams.confidence ?? 100);
+  const isHighRisk = buyRisk >= RISK_THRESHOLD || confidence < CONFIDENCE_THRESHOLD;
+
+  const expiresAt = useMemo(() => {
+    const candidates = [
+      displayParams.expiresAt,
+      displayParams.quoteExpiresAt,
+      displayParams.preparationExpiry,
+      preview?.quote?.expiresAt,
+      preview?.lifecycle?.expiresAt,
+      preview?.simulation?.quoteExpiry,
+    ]
+      .map(parseExpiry)
+      .filter((value): value is number => value !== undefined);
+
+    return candidates.length > 0 ? Math.min(...candidates) : undefined;
+  }, [displayParams, preview]);
+
+  const quoteExpired = expiresAt !== undefined && expiresAt <= now;
+
   const handleSignAndSubmit = useCallback(async () => {
     if (actionsDisabled || state.phase !== "ready_for_signing" || !payload) return;
+    if (isHighRisk && !riskAcknowledged) return;
+    if (quoteExpired) return;
+
+    // Re-verify at click time so an expired quote or swapped payload can never
+    // slip between validation and the wallet prompt.
+    const issues = await verifyBeforeWallet({
+      preview,
+      payload,
+      walletAddress,
+      sourceAccount,
+    });
+    if (issues.length > 0) {
+      setState({ phase: "security_warning", issues });
+      return;
+    }
 
     setState({ phase: "signing" });
 
@@ -183,7 +334,10 @@ export function ApprovalFlowClient({
           return;
         }
 
-        signedPayload = await stellar.signTransaction(stellarPayload.xdr);
+        signedPayload = await stellar.signTransaction(
+          stellarPayload.xdr,
+          normalizeStellarNetworkId(preview?.network ?? network) ?? undefined,
+        );
       }
 
       setState({ phase: "signed", signedPayload });
@@ -191,7 +345,6 @@ export function ApprovalFlowClient({
       // Submit the signed payload
       setState({ phase: "submitting" });
 
-      const displayParams = (payload as { displayParams?: Record<string, unknown> })?.displayParams ?? {};
       const submitResponse = await fetch("/api/execute/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -216,558 +369,168 @@ export function ApprovalFlowClient({
       }
 
       const submitResult = await submitResponse.json();
-      setState({ phase: "submitted", txHash: submitResult.hash ?? submitResult.transaction?.hash });        onComplete?.(submitResult.hash ?? submitResult.transaction?.hash);
+      const txHash = submitResult.hash ?? submitResult.transaction?.hash;
+      setState({ phase: "submitted", txHash });
+      onComplete?.(txHash);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Signing failed.";
 
       // Detect user rejection
-      if (
-        message.toLowerCase().includes("rejected") ||
-        message.toLowerCase().includes("cancelled") ||
-        message.toLowerCase().includes("canceled") ||
-        message.toLowerCase().includes("denied")
-      ) {
-        // Record rejection server-side (best-effort)
-        try {
-          await fetch("/api/execute/approve", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "reject",
-              idempotencyKey,
-              walletAddress,
-              reason: message,
-            }),
-          });
-        } catch {
-          // Best-effort
-        }
-
-        // Set rejection as a visible terminal state — do NOT call
-        // onDismiss here so the rejection panel stays visible.
-        // The user must click Close in the StatusPanel to dismiss.
+      if (/reject|denied|cancel/i.test(message)) {
         setState({ phase: "rejected", reason: message });
       } else {
         setState({ phase: "wallet_error", error: message });
       }
     }
-  }, [actionsDisabled, state, payload, chainFamily, network, walletAddress, sourceAccount, idempotencyKey, walletClient, evmChainId, switchChainAsync, stellar, onComplete]);
+  }, [actionsDisabled, state.phase, payload, preview, isHighRisk, riskAcknowledged, quoteExpired, chainFamily, evmChainId, switchChainAsync, walletClient, stellar, network, walletAddress, sourceAccount, idempotencyKey, displayParams, onComplete]);
 
-  const handleReject = useCallback(async () => {
-    if (actionsDisabled) return;
-    try {
-      await fetch("/api/execute/approve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "reject",
-          idempotencyKey,
-          walletAddress,
-          reason: "User rejected in the frontend UI.",
-        }),
-      });
-    } catch {
-      // Best-effort
-    }
+  const signDisabled =
+    actionsDisabled ||
+    state.phase !== "ready_for_signing" ||
+    !payload ||
+    quoteExpired ||
+    (isHighRisk && !riskAcknowledged);
 
-    // Keep the rejection panel visible so the user sees the terminal state.
-    // The user must click Close in the StatusPanel to dismiss.
-    setState({ phase: "rejected", reason: "User rejected in the frontend UI." });
-  }, [actionsDisabled, idempotencyKey, walletAddress, onDismiss]);
+  const targetContract = String(displayParams.targetContract ?? displayParams.to ?? "");
+  const explorerUrl = String(displayParams.explorerUrl ?? "");
+  const verified = displayParams.verified === true;
+  const youSend = String(displayParams.youSend ?? displayParams.amount ?? "—");
+  const minReceive = String(displayParams.minReceive ?? displayParams.minimumReceive ?? "—");
+  const maxSlippage = displayParams.maxSlippagePct ?? displayParams.slippagePct;
+  const gasLabel = chainFamily === "stellar" ? "Stellar Stroops" : "Estimated Gas";
+  const gasValue = String(displayParams.gas ?? displayParams.stroops ?? "—");
 
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
-      {/* Step indicator */}
-      <TransactionFlowSteps phase={state.phase} />
+    <div className="flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+      <header className="flex flex-col gap-1">
+        <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Execution Review</h2>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">
+          Review the exact balance changes before signing. Nothing is signed until you approve.
+        </p>
+      </header>
 
-      {/* Payload details */}
-      {payload && (
-        <div className="mt-4 space-y-3">
-          <h3 className="text-sm font-medium text-white">Transaction details</h3>
-          {chainFamily === "evm" ? (
-            <EvmPayloadDetails payload={payload as EvmPreparedTransactionPayload} />
-          ) : (
-            <StellarPayloadDetails payload={payload as StellarPreparedTransactionPayload} />
-          )}
-          {/* Policy status */}
-          {(() => {
-            const dp = (payload as { displayParams?: Record<string, unknown> })?.displayParams;
-            if (!dp) return null;
-            const policyAllowed = dp.policyAllowed;
-            const policyViolations = dp.policyViolations as string[] | undefined;
-            if (policyAllowed === undefined) return null;
-            return (
-              <div className="rounded-xl border border-slate-700 bg-slate-950/50 px-4 py-3 text-xs">
-                <div className="mb-1 flex items-center justify-between">
-                  <span className="text-slate-400">Policy status</span>
-                  <span className={policyAllowed ? "text-emerald-300" : "text-rose-300"}>
-                    {policyAllowed ? "Allowed" : "Blocked"}
-                  </span>
-                </div>
-                {policyViolations && policyViolations.length > 0 && (
-                  <ul className="mt-1 space-y-1">
-                    {policyViolations.map((v, i) => (
-                      <li key={i} className="text-rose-300/70">{v}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            );
-          })()}
-        </div>
-      )}
-
-      {/* Wallet/network identity */}
-      <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950/50 px-4 py-3 text-xs text-slate-300">
-        <div className="flex items-center justify-between">
-          <span>Connected wallet:</span>
-          <span className="font-mono text-emerald-300">
-            {session.address ? `${session.address.slice(0, 8)}...${session.address.slice(-4)}` : "Not connected"}
-          </span>
-        </div>
-        <div className="mt-1 flex items-center justify-between">
-          <span>Network:</span>
-          <span className="text-sky-300">{chainFamily === "stellar" ? stellar.network : evm.chain?.name ?? `Chain ${evm.chainId}`}</span>
-        </div>
-        <div className="mt-1 flex items-center justify-between">
-          <span>Prepared for:</span>
-          <span className="text-slate-400">{network}</span>
-        </div>
-      </div>
-
-      {/* Status-specific UI */}
-      <div className="mt-4">
-        <StatusPanel
-          state={state}
-          actionsDisabled={actionsDisabled}
-          onRetry={validateApproval}
-          onSign={handleSignAndSubmit}
-          onReject={handleReject}
-          onClose={handleReject}
+      {state.phase === "security_warning" ? (
+        <SigningVerificationWarning
+          issues={state.issues}
+          onRefresh={onRefresh ?? (() => window.location.reload())}
+          refreshLabel={refreshLabel}
         />
-      </div>
-    </div>
-  );
-}
+      ) : null}
 
-/* ─── Sub-components ─── */
-
-function TransactionFlowSteps({ phase }: { phase: ApprovalState["phase"] }) {
-  const steps = [
-    { key: "validating", label: "Validate" },
-    { key: "ready_for_signing", label: "Review" },
-    { key: "signing", label: "Sign" },
-    { key: "submitting", label: "Submit" },
-    { key: "submitted", label: "Done" },
-  ] as const;
-
-  const currentStepIndex = steps.findIndex((s) => s.key === phase);
-  const resolvedIndex = currentStepIndex >= 0 ? currentStepIndex : 0;
-
-  return (
-    <div className="flex items-center gap-2 text-xs">
-      {steps.map((step, i) => {
-        const isActive = i <= resolvedIndex;
-        const isCurrent = i === resolvedIndex;
-        return (
-          <div key={step.key} className="flex items-center gap-2">
-            <span
-              className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-medium transition-colors ${
-                isActive && phase !== "error" && phase !== "rejected"
-                  ? "bg-emerald-500/20 text-emerald-300"
-                  : "bg-slate-800 text-slate-500"
-              } ${isCurrent ? "ring-1 ring-emerald-500/30" : ""}`}
-            >
-              {i + 1}
-            </span>
-            <span
-              className={`${
-                isActive && phase !== "error" && phase !== "rejected"
-                  ? "text-slate-300"
-                  : "text-slate-600"
-              }`}
-            >
-              {step.label}
-            </span>
-            {i < steps.length - 1 && <span className="text-slate-700">→</span>}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function formatExpiry(expiryIso?: string): string | null {
-  if (!expiryIso) return null;
-  const expiry = new Date(expiryIso);
-  const now = Date.now();
-  const remainingMs = expiry.getTime() - now;
-  if (remainingMs <= 0) return "Expired";
-  const remainingMin = Math.ceil(remainingMs / 60_000);
-  return `in ${remainingMin} min (${expiry.toLocaleTimeString()})`;
-}
-
-function EvmPayloadDetails({ payload }: { payload: EvmPreparedTransactionPayload }) {
-  const calldataPreview = payload.data && payload.data !== "0x"
-    ? `${payload.data.slice(0, 42)}...`
-    : "None";
-  const disp = payload.displayParams ?? {};
-  const valueUsd = typeof disp.valueUsd === "number" ? `$${disp.valueUsd.toFixed(2)}` : null;
-  const action = typeof disp.action === "string" ? disp.action.replaceAll("_", " ") : "Unknown";
-  const expiryStr = formatExpiry(disp.preparationExpiry as string | undefined);
-  const minOutput = disp.minOutputAmount as string | undefined;
-
-  return (
-    <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-950/50 px-4 py-3 text-xs">
-      <div className="flex items-center justify-between">
-        <span className="text-slate-400">Action</span>
-        <span className="capitalize text-sky-300">{action}</span>
-      </div>
-      <div className="flex items-center justify-between">
-        <span className="text-slate-400">Target contract</span>
-        <span className="font-mono text-white text-[10px]">{payload.to}</span>
-      </div>
-      {valueUsd && (
-        <div className="flex items-center justify-between">
-          <span className="text-slate-400">Estimated value</span>
-          <span className="text-emerald-300">{valueUsd}</span>
+      {isHighRisk && (
+        <div role="alert" className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+          <p className="font-semibold">High-risk transaction</p>
+          <p className="mt-1">
+            Buy risk {buyRisk}% · Confidence {confidence}%. Review carefully before proceeding.
+          </p>
+          <label className="mt-3 flex items-start gap-2">
+            <input
+              type="checkbox"
+              checked={riskAcknowledged}
+              onChange={(e) => setRiskAcknowledged(e.target.checked)}
+              className="mt-0.5 h-4 w-4"
+            />
+            <span>I understand the risks and want to continue.</span>
+          </label>
         </div>
       )}
-      {minOutput && (
-        <div className="flex items-center justify-between">
-          <span className="text-slate-400">Min. output (est.)</span>
-          <span className="text-amber-300">{minOutput}</span>
-        </div>
-      )}
-      {expiryStr && (
-        <div className="flex items-center justify-between">
-          <span className="text-slate-400">Preparation expires</span>
-          <span className="text-rose-300">{expiryStr}</span>
-        </div>
-      )}
-      <div className="flex items-center justify-between">
-        <span className="text-slate-400">Method</span>
-        <span className="text-white">{payload.method ?? "Unknown"}</span>
-      </div>
-      <div className="flex items-center justify-between">
-        <span className="text-slate-400">Chain ID</span>
-        <span className="text-white">{payload.chainId}</span>
-      </div>
-      <div className="flex items-center justify-between">
-        <span className="text-slate-400">Value</span>
-        <span className="text-white">{payload.value} wei</span>
-      </div>
-      {payload.gas && (
-        <div className="flex items-center justify-between">
-          <span className="text-slate-400">Gas limit</span>
-          <span className="text-white">{payload.gas}</span>
-        </div>
-      )}
-      <div className="flex flex-col gap-1">
-        <span className="text-slate-400">Calldata (truncated)</span>
-        <span className="break-all font-mono text-[10px] text-slate-300">{calldataPreview}</span>
-      </div>
-      {Array.isArray(payload.displayParams?.expectedEffects) && (
+
+      <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
-          <span className="text-slate-400">Expected effects</span>
-          <ul className="mt-1 space-y-1 pl-2">
-            {(payload.displayParams.expectedEffects as Array<{ kind: string; from?: string; to?: string; amount?: string }>).map(
-              (effect, i) => (
-                <li key={i} className="text-slate-300">
-                  <span className="capitalize">{effect.kind}</span>
-                  {effect.amount ? `: ${effect.amount}` : ""}
-                  {effect.to ? ` → ${effect.to.slice(0, 10)}...` : ""}
-                </li>
-              ),
+          <dt className="text-xs uppercase tracking-wide text-neutral-500">You Send</dt>
+          <dd className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{youSend}</dd>
+        </div>
+        <div>
+          <dt className="text-xs uppercase tracking-wide text-neutral-500">Minimum You Receive</dt>
+          <dd className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+            {minReceive}
+            {maxSlippage !== undefined && (
+              <span className="ml-1 text-xs text-neutral-500">(max slippage {String(maxSlippage)}%)</span>
             )}
-          </ul>
+          </dd>
         </div>
-      )}
-    </div>
-  );
-}
-
-function StellarPayloadDetails({ payload }: { payload: StellarPreparedTransactionPayload }) {
-  const xdrPreview = payload.xdr ? `${payload.xdr.slice(0, 32)}...` : "None";
-  const disp = payload.displayParams ?? {};
-  const valueUsd = typeof disp.valueUsd === "number" ? `$${disp.valueUsd.toFixed(2)}` : null;
-  const action = typeof disp.action === "string" ? disp.action.replaceAll("_", " ") : "Unknown";
-  const expiryStr = formatExpiry(disp.preparationExpiry as string | undefined);
-  const minOutput = disp.minOutputAmount as string | undefined;
-
-  return (
-    <div className="space-y-2 rounded-xl border border-slate-700 bg-slate-950/50 px-4 py-3 text-xs">
-      <div className="flex items-center justify-between">
-        <span className="text-slate-400">Action</span>
-        <span className="capitalize text-sky-300">{action}</span>
-      </div>
-      <div className="flex items-center justify-between">
-        <span className="text-slate-400">Source account</span>
-        <span className="font-mono text-white text-[10px]">{payload.sourceAccount}</span>
-      </div>
-      {valueUsd && (
-        <div className="flex items-center justify-between">
-          <span className="text-slate-400">Estimated value</span>
-          <span className="text-emerald-300">{valueUsd}</span>
-        </div>
-      )}
-      {minOutput && (
-        <div className="flex items-center justify-between">
-          <span className="text-slate-400">Min. output (est.)</span>
-          <span className="text-amber-300">{minOutput}</span>
-        </div>
-      )}
-      {expiryStr && (
-        <div className="flex items-center justify-between">
-          <span className="text-slate-400">Preparation expires</span>
-          <span className="text-rose-300">{expiryStr}</span>
-        </div>
-      )}
-      <div className="flex items-center justify-between">
-        <span className="text-slate-400">Network</span>
-        <span className="text-sky-300">{payload.networkPassphrase}</span>
-      </div>
-      <div className="flex items-center justify-between">
-        <span className="text-slate-400">Operations</span>
-        <span className="text-white">{payload.operations.length}</span>
-      </div>
-      {payload.fee !== undefined && (
-        <div className="flex items-center justify-between">
-          <span className="text-slate-400">Fee</span>
-          <span className="text-white">{payload.fee} stroops</span>
-        </div>
-      )}
-      {payload.sequence && (
-        <div className="flex items-center justify-between">
-          <span className="text-slate-400">Sequence</span>
-          <span className="font-mono text-white">{payload.sequence.slice(0, 12)}...</span>
-        </div>
-      )}
-      {payload.timeBounds && (
-        <div className="flex items-center justify-between">
-          <span className="text-slate-400">Time bounds</span>
-          <span className="text-white">
-            {payload.timeBounds.minTime ?? "-"} - {payload.timeBounds.maxTime ?? "-"}
-          </span>
-        </div>
-      )}
-      <div className="flex flex-col gap-1">
-        <span className="text-slate-400">XDR envelope (truncated)</span>
-        <span className="break-all font-mono text-[10px] text-slate-300">{xdrPreview}</span>
-      </div>
-      {payload.operations.length > 0 && (
         <div>
-          <span className="text-slate-400">Operation details</span>
-          <ul className="mt-1 space-y-1 pl-2">
-            {payload.operations.map((op, i) => (
-              <li key={i} className="text-slate-300">
-                <span className="capitalize">{op.type}</span>
-                {op.amount ? `: ${op.amount}` : ""}
-                {op.asset ? ` ${op.asset}` : ""}
-                {op.destination ? ` → ${op.destination.slice(0, 8)}...` : ""}
-              </li>
-            ))}
-          </ul>
+          <dt className="text-xs uppercase tracking-wide text-neutral-500">USD Equivalent</dt>
+          <dd className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+            {formatUsd(Number(displayParams.valueUsd ?? NaN))}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs uppercase tracking-wide text-neutral-500">Network &amp; Target Contract</dt>
+          <dd className="flex flex-wrap items-center gap-2 text-sm font-medium text-neutral-900 dark:text-neutral-100">
+            <span>{network}</span>
+            <span
+              className={
+                verified
+                  ? "rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-800 dark:bg-green-900 dark:text-green-200"
+                  : "rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-900 dark:text-amber-200"
+              }
+            >
+              {verified ? "Verified" : "Unverified"}
+            </span>
+            {targetContract && (
+              <span className="font-mono text-xs break-all text-neutral-600 dark:text-neutral-300">{targetContract}</span>
+            )}
+            {explorerUrl && (
+              <a
+                href={explorerUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-600 underline dark:text-blue-400"
+              >
+                View on explorer
+              </a>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs uppercase tracking-wide text-neutral-500">{gasLabel}</dt>
+          <dd className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{gasValue}</dd>
+        </div>
+        <div>
+          <dt className="text-xs uppercase tracking-wide text-neutral-500">Quote Expiry</dt>
+          <dd className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+            {expiresAt !== undefined ? formatCountdown(expiresAt - now) : "—"}
+          </dd>
+        </div>
+      </dl>
+
+      {quoteExpired && (
+        <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          <p className="font-semibold">Quote expired</p>
+          <p className="mt-1">This quote is no longer valid. Refresh to re-simulate before signing.</p>
+          <button
+            type="button"
+            onClick={onRefresh ?? (() => window.location.reload())}
+            className="mt-3 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700"
+          >
+            Refresh Quote &amp; Re-simulate
+          </button>
         </div>
       )}
+
+      <div className="flex flex-col gap-2 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+        <button
+          type="button"
+          onClick={() => void handleSignAndSubmit()}
+          disabled={signDisabled}
+          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Review in Wallet
+        </button>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          Approval-Only: Cryptara never signs for you.
+        </p>
+        {onDismiss && (
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="text-xs text-neutral-500 underline hover:text-neutral-700 dark:text-neutral-400"
+          >
+            Cancel
+          </button>
+        )}
+      </div>
     </div>
   );
-}
-
-function StatusPanel({
-  state,
-  onRetry,
-  onSign,
-  onReject,
-  onClose,
-  actionsDisabled,
-}: {
-  state: ApprovalState;
-  actionsDisabled: boolean;
-  onRetry: () => void;
-  onSign: () => void;
-  onReject: () => void;
-  onClose?: () => void;
-}) {
-  switch (state.phase) {
-    case "idle":
-    case "validating":
-      return (
-        <div className="flex items-center justify-center gap-3 py-4 text-sm text-slate-400">
-          <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-            />
-          </svg>
-          Validating transaction...
-        </div>
-      );
-
-    case "ready_for_signing":
-      return (
-        <div className="flex flex-col gap-3">
-          <button
-            onClick={onSign}
-            disabled={actionsDisabled}
-            className="w-full rounded-xl bg-emerald-500/20 px-4 py-3 text-sm font-semibold text-emerald-200 transition-colors hover:bg-emerald-500/30"
-          >
-            Sign &amp; submit in wallet
-          </button>
-          <button
-            onClick={onReject}
-            disabled={actionsDisabled}
-            className="w-full rounded-xl border border-rose-500/20 bg-rose-500/5 px-4 py-2 text-sm font-medium text-rose-300 transition-colors hover:bg-rose-500/15"
-          >
-            Reject
-          </button>
-        </div>
-      );
-
-    case "signing":
-      return (
-        <div className="flex items-center justify-center gap-3 py-4 text-sm text-slate-400">
-          <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-            />
-          </svg>
-          Waiting for wallet signature...
-        </div>
-      );
-
-    case "signed":
-      return (
-        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-          Transaction signed. Proceeding to submission...
-        </div>
-      );
-
-    case "submitting":
-      return (
-        <div className="flex items-center justify-center gap-3 py-4 text-sm text-slate-400">
-          <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-            />
-          </svg>
-          Submitting transaction...
-        </div>
-      );
-
-    case "submitted":
-      return (
-        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-4">
-          <div className="text-sm font-semibold text-sky-200">Transaction broadcast</div>
-          <div className="mt-1 text-xs text-slate-400">Hash: {state.txHash}</div>
-          <p className="mt-2 text-xs text-white/55">Broadcast acceptance is not finality. Wait for the required confirmation depth; replacement, reorg, or provider disagreement will require review.</p>
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="mt-3 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
-            >
-              Close
-            </button>
-          )}
-        </div>
-      );
-
-    case "rejected":
-      return (
-        <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-4">
-          <div className="text-sm font-semibold text-amber-200">Transaction rejected</div>
-          <div className="mt-1 text-xs text-amber-300/70">{state.reason}</div>
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="mt-3 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
-            >
-              Close
-            </button>
-          )}
-        </div>
-      );
-
-    case "expired":
-      return (
-        <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-4">
-          <div className="text-sm font-semibold text-rose-200">Plan expired</div>
-          <div className="mt-1 text-xs text-rose-300/70">
-            The prepared transaction expired after 10 minutes. Please prepare a new plan.
-          </div>
-          <button
-            onClick={onRetry}
-            disabled={actionsDisabled}
-            className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-300 hover:bg-emerald-500/20"
-          >
-            Retry validation
-          </button>
-        </div>
-      );
-
-    case "wallet_error":
-      return (
-        <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-4">
-          <div className="text-sm font-semibold text-rose-200">Wallet error</div>
-          <div className="mt-1 text-xs text-rose-300/70">{state.error}</div>
-          <div className="mt-3 flex gap-2">
-            <button
-              onClick={onRetry}
-              disabled={actionsDisabled}
-              className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
-            >
-              Try again
-            </button>
-            <button
-              onClick={onReject}
-              disabled={actionsDisabled}
-              className="rounded-lg border border-rose-500/20 px-3 py-1.5 text-xs text-rose-300 hover:bg-rose-500/10"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      );
-
-    case "network_mismatch":
-      return (
-        <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-4">
-          <div className="text-sm font-semibold text-rose-200">Network mismatch</div>
-          <div className="mt-1 text-xs text-rose-300/70">
-            Connected to {state.connectedNetwork}, but the transaction expects {state.expectedNetwork}.
-            Switch networks in your wallet and try again.
-          </div>
-          <button
-            onClick={onRetry}
-            disabled={actionsDisabled}
-            className="mt-3 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
-          >
-            Try again
-          </button>
-        </div>
-      );
-
-    case "error":
-      return (
-        <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-4">
-          <div className="text-sm font-semibold text-rose-200">Error</div>
-          <div className="mt-1 text-xs text-rose-300/70">{state.error}</div>
-          <button
-            onClick={onRetry}
-            disabled={actionsDisabled}
-            className="mt-3 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
-          >
-            Try again
-          </button>
-        </div>
-      );
-  }
 }

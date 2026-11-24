@@ -2,6 +2,7 @@ import { stellarNetworks, validateStellarNetworkConfig } from "@/lib/stellar/con
 import { getApprovedPubnetConfig, isPubnetRequested, missingApprovedValues } from "@/server/stellar/config";
 import { featureFlagRegistry } from "@/server/features/registry";
 import { evaluateFeature, getFeatureConfigIssues, getFeatureEnvironment } from "@/server/features/evaluator";
+import { getCacheConfig } from "@/server/cache/config";
 import type { FeatureFlagKey } from "@/server/features/types";
 
 type EnvCheck = {
@@ -64,6 +65,20 @@ const serverEnvKeys = [
   "OTEL_EXPORTER_OTLP_HEADERS",
   "OTEL_SERVICE_NAME",
   "OTEL_LOG_LEVEL",
+  "TRUSTED_PROXY_HOPS",
+  "RATE_LIMIT_STORE",
+  "RATE_LIMIT_MAX_KEYS",
+  "UPSTASH_REDIS_REST_URL",
+  "UPSTASH_REDIS_REST_TOKEN",
+  "REDIS_URL",
+  "RATE_LIMIT_POSTGRES_URL",
+  "CACHE_STORE",
+  "CACHE_L1_MAX_ENTRIES",
+  "CACHE_INVALIDATION_POLL_MS",
+  "CACHE_UPSTASH_REST_URL",
+  "CACHE_UPSTASH_REST_TOKEN",
+  "CACHE_REDIS_URL",
+  "CACHE_POSTGRES_URL",
 ] as const;
 
 const publicEnvKeys = [
@@ -98,6 +113,64 @@ function boundedInteger(name: string, fallback: number, minimum: number, maximum
   if (!raw) return fallback;
   const value = Number(raw);
   return Number.isInteger(value) && value >= minimum && value <= maximum ? value : fallback;
+}
+
+export type RateLimitStoreKind = "memory" | "upstash" | "redis" | "postgres";
+
+const rateLimitStoreKinds: readonly RateLimitStoreKind[] = ["memory", "upstash", "redis", "postgres"];
+
+/**
+ * Rate-limit configuration derived from the environment.
+ *
+ * `distributed` is only true when the selected store kind is a distributed
+ * adapter *and* its connection settings are present. When it is false the
+ * limiter must fall back to the bounded in-memory store, and `detail` explains
+ * why so the fallback is observable from the health surface.
+ */
+export function getRateLimitConfig() {
+  const rawStore = (process.env.RATE_LIMIT_STORE ?? "").trim().toLowerCase();
+  const requestedStore: RateLimitStoreKind = (rateLimitStoreKinds as readonly string[]).includes(rawStore)
+    ? (rawStore as RateLimitStoreKind)
+    : "memory";
+  const storeValid = rawStore === "" || requestedStore === rawStore;
+
+  const trustedProxyHops = boundedInteger("TRUSTED_PROXY_HOPS", 0, 0, 10);
+  const maxKeys = boundedInteger("RATE_LIMIT_MAX_KEYS", 10_000, 100, 1_000_000);
+
+  const upstashReady = Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+  const redisReady = Boolean(process.env.REDIS_URL);
+  const postgresReady = Boolean(process.env.RATE_LIMIT_POSTGRES_URL);
+
+  const storeReady =
+    requestedStore === "memory"
+      ? true
+      : requestedStore === "upstash"
+        ? upstashReady
+        : requestedStore === "redis"
+          ? redisReady
+          : postgresReady;
+
+  const distributed = requestedStore !== "memory" && storeReady;
+
+  const detail = !storeValid
+    ? `RATE_LIMIT_STORE="${rawStore}" is not one of ${rateLimitStoreKinds.join(", ")}; falling back to the in-memory store.`
+    : requestedStore === "memory"
+      ? "In-memory rate-limit store is active; counters are process-local and reset on cold starts."
+      : storeReady
+        ? `Distributed ${requestedStore} rate-limit store is configured.`
+        : `RATE_LIMIT_STORE=${requestedStore} is selected but its connection settings are missing; falling back to the in-memory store.`;
+
+  return {
+    store: requestedStore,
+    storeValid,
+    distributed,
+    trustedProxyHops,
+    maxKeys,
+    upstashReady,
+    redisReady,
+    postgresReady,
+    detail,
+  };
 }
 
 export function getProviderResilienceConfig() {
@@ -179,6 +252,8 @@ export function getEnvHealth() {
     stellarConfig,
     pubnetApproval,
     providerResilience: getProviderResilienceConfig(),
+    rateLimit: getRateLimitConfig(),
+    cache: getCacheConfig(),
     detail:
       configuredLiveSources.length > 0
         ? "At least one live data source is configured. Missing sources must stay transparent in UI."

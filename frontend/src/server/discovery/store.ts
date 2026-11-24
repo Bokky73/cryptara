@@ -2,6 +2,7 @@ import type {
   CandidateObservation,
   CanonicalIdentity,
   DiscoveryCandidate,
+  DiscoveryClassification,
   DiscoveryProviderKind,
 } from "@/server/discovery/types";
 import { createHash } from "node:crypto";
@@ -17,6 +18,20 @@ type ObservationBucket = {
 };
 
 const store = new Map<string, ObservationBucket>();
+
+// ─── Durable classification provenance ───────────────────────────────────────
+// Provenance is keyed by canonical identity and survives observation pruning.
+// Each entry records the latest classification plus the full transition history
+// so downstream consumers can audit how a candidate was classified.
+
+export type ProvenanceEntry = {
+  canonicalKey: string;
+  classification: DiscoveryClassification;
+  updatedAt: string;
+  history: { classification: DiscoveryClassification; at: string }[];
+};
+
+const provenance = new Map<string, ProvenanceEntry>();
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -102,7 +117,49 @@ export function pruneObservations(canonicalKey: string, keep: number): number {
 }
 
 /**
- * Get all discovery candidates (latest observation per canonical key).
+ * Persist classification provenance for a canonical key. The latest
+ * classification is stored and the transition is appended to history.
+ */
+export function storeProvenance(
+  canonicalKey: string,
+  classification: DiscoveryClassification,
+  at: string = new Date().toISOString(),
+): ProvenanceEntry {
+  const existing = provenance.get(canonicalKey);
+  if (existing) {
+    existing.classification = classification;
+    existing.updatedAt = at;
+    existing.history.push({ classification, at });
+    return existing;
+  }
+
+  const entry: ProvenanceEntry = {
+    canonicalKey,
+    classification,
+    updatedAt: at,
+    history: [{ classification, at }],
+  };
+  provenance.set(canonicalKey, entry);
+  return entry;
+}
+
+/**
+ * Get the persisted provenance for a canonical key, or null if none.
+ */
+export function getProvenance(canonicalKey: string): ProvenanceEntry | null {
+  return provenance.get(canonicalKey) ?? null;
+}
+
+/**
+ * Get the latest classification for a canonical key, or null if none.
+ */
+export function getClassification(canonicalKey: string): DiscoveryClassification | null {
+  return provenance.get(canonicalKey)?.classification ?? null;
+}
+
+/**
+ * Get all discovery candidates (latest observation per canonical key),
+ * ordered deterministically by canonical key.
  * This is the primary output of the discovery service.
  */
 export function listCandidates(): DiscoveryCandidate[] {
@@ -126,10 +183,32 @@ export function listCandidates(): DiscoveryCandidate[] {
       observationCount: bucket.observations.length,
       riskScore: latest.riskScore,
       riskLevel: latest.riskLevel,
+      classification: provenance.get(bucket.identity.canonicalKey)?.classification ?? null,
     });
   }
 
-  return candidates;
+  return candidates.sort((a, b) => (a.canonicalKey < b.canonicalKey ? -1 : a.canonicalKey > b.canonicalKey ? 1 : 0));
+}
+
+/**
+ * Deterministically ordered listing of candidates for cursor pagination.
+ * Ordering is by canonical key (ascending), which is stable across calls.
+ * `afterKey` is an exclusive lower bound (the last key of the previous page).
+ */
+export function listCandidatesPage(options: {
+  afterKey?: string | null;
+  limit: number;
+}): { items: DiscoveryCandidate[]; nextCursor: string | null } {
+  const limit = Math.max(0, Math.floor(options.limit));
+  const afterKey = options.afterKey ?? null;
+
+  const ordered = listCandidates().filter((c) => (afterKey === null ? true : c.canonicalKey > afterKey));
+
+  const items = ordered.slice(0, limit);
+  const hasMore = ordered.length > items.length;
+  const nextCursor = hasMore && items.length > 0 ? items[items.length - 1].canonicalKey : null;
+
+  return { items, nextCursor };
 }
 
 /**
@@ -169,6 +248,7 @@ export function getUniqueIdentityCount(): number {
  */
 export function resetStore(): void {
   store.clear();
+  provenance.clear();
 }
 
 /**
@@ -194,4 +274,13 @@ export function dumpStore(): Record<string, unknown>[] {
     }
   }
   return dumped;
+}
+
+/**
+ * Dump all persisted provenance (for serialisation / inspection).
+ */
+export function dumpProvenance(): ProvenanceEntry[] {
+  return [...provenance.values()].sort((a, b) =>
+    a.canonicalKey < b.canonicalKey ? -1 : a.canonicalKey > b.canonicalKey ? 1 : 0,
+  );
 }

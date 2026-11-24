@@ -16,6 +16,31 @@ import {
 import { redactApproval, redactDecision, redactTransaction } from "@/server/privacy/auditRedaction";
 import { verifyAuditBundle } from "@/server/privacy/auditVerify";
 import type { RecommendationRecord, TransactionRecord, UserApprovalRecord } from "@/server/types";
+import { AUDIT_CSV_HEADERS, auditBundleToCsv, escapeCsvValue } from "@/lib/audit/auditCsv";
+
+function parseCsvRow(line: string): string[] {
+  const fields: string[] = [];
+  let field = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === '"') {
+      if (quoted && line[index + 1] === '"') {
+        field += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === "," && !quoted) {
+      fields.push(field);
+      field = "";
+    } else {
+      field += char;
+    }
+  }
+  fields.push(field);
+  return fields;
+}
 
 const WALLET = "0x1111111111111111111111111111111111111111";
 
@@ -111,6 +136,43 @@ function main(): void {
     failures.push("unknown bundle version did not fail closed");
   }
 
+  // 6. CSV export format: stable header, one row per redacted record, integrity anchor.
+  const csv = auditBundleToCsv(bundle, hash);
+  const csvLines = csv.trimEnd().split("\r\n");
+  const expectedRows = bundle.decisions.length + bundle.approvals.length + bundle.transactions.length;
+  if (csvLines[0] !== AUDIT_CSV_HEADERS.join(",")) {
+    failures.push("CSV header does not match the documented format");
+  }
+  if (csvLines.length !== expectedRows + 1) {
+    failures.push(`CSV row count ${csvLines.length - 1} does not match ${expectedRows}`);
+  }
+  for (const [index, line] of csvLines.slice(1).entries()) {
+    const fields = parseCsvRow(line);
+    if (fields.length !== AUDIT_CSV_HEADERS.length) {
+      failures.push(`CSV row ${index + 1} has ${fields.length} fields, expected ${AUDIT_CSV_HEADERS.length}`);
+    }
+    if (fields[13] !== hash) failures.push(`CSV row ${index + 1} is missing the bundle hash`);
+    if (fields[14] !== "redacted") failures.push(`CSV row ${index + 1} is not marked redacted`);
+  }
+  for (const value of forbidden) {
+    if (value && csv.includes(value)) {
+      failures.push(`raw sensitive value leaked into CSV: ${value.slice(0, 24)}…`);
+    }
+  }
+
+  // 7. CSV field escaping must survive commas and quotes verbatim.
+  const special = 'summary, with "quotes"';
+  if (escapeCsvValue(special) !== '"summary, with ""quotes"""') {
+    failures.push("CSV field escaping is not RFC 4180 compliant");
+  }
+  const escapedBundle: AuditBundle = {
+    ...bundle,
+    decisions: [{ ...bundle.decisions[0], summary: special }],
+  };
+  if (!auditBundleToCsv(escapedBundle, hash).includes('"summary, with ""quotes"""')) {
+    failures.push("CSV export did not preserve an escaped summary field");
+  }
+
   if (failures.length > 0) {
     console.error("\nAudit-bundle export verification failed:");
     for (const failure of failures) console.error(`  - ${failure}`);
@@ -119,7 +181,7 @@ function main(): void {
   }
 
   console.log(`Audit-bundle export verification passed (hash ${hash.slice(0, 12)}…).`);
-  console.log(`  decisions=${bundle.decisions.length} approvals=${bundle.approvals.length} transactions=${bundle.transactions.length}`);
+  console.log(`  decisions=${bundle.decisions.length} approvals=${bundle.approvals.length} transactions=${bundle.transactions.length} csvRows=${expectedRows}`);
 }
 
 main();

@@ -269,6 +269,15 @@ function buildTypedPayload(record: TransactionRecord): PreparedTransactionPayloa
   return buildStellarPayload(record);
 }
 
+/**
+ * Build the same unsigned payload the approval endpoint returns, directly
+ * from a prepared record. The prepare endpoint uses this so the browser can
+ * verify the payload against the preview before the approval step.
+ */
+export function buildPreparedPayloadForTransaction(record: TransactionRecord): PreparedTransactionPayload {
+  return buildTypedPayload(record);
+}
+
 function buildEvmPayload(record: TransactionRecord): EvmPreparedTransactionPayload {
   // Extract the target contract from expected effects or fall back to the asset
   const toContract =

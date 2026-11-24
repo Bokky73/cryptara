@@ -1,6 +1,14 @@
 -- Cryptara production storage contract.
 -- Target: Supabase Postgres. This file is intentionally idempotent so the
 -- MVP can apply the schema in one clean migration.
+--
+-- GENERATED FILE — DO NOT EDIT BY HAND.
+-- This file is generated from the canonical migration chain in
+-- `db/migrations/` (ordered `.up.sql` migrations) by:
+--   node scripts/schema-drift-check.mjs --write
+-- Any hand edits will be overwritten. Drift between this file and the applied
+-- migrations is enforced in CI by `node scripts/schema-drift-check.mjs`, which
+-- fails when the generated schema diverges from the canonical migration chain.
 
 create extension if not exists pgcrypto;
 -- pgcrypto is preserved for backwards compatibility with deployments that

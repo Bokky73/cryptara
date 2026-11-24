@@ -13,6 +13,8 @@ contract CryptaraVault is ReentrancyGuard {
 
     CryptaraPolicy public immutable policy;
     address public immutable agent;
+    address public timelock;
+    address public pendingTimelock;
 
     mapping(address => mapping(address => uint256)) public balances;
     mapping(bytes32 => bool) public consumedIntents;
@@ -33,6 +35,11 @@ contract CryptaraVault is ReentrancyGuard {
         if (msg.sender != agent) revert NotAgent();
         _;
     }
+    event Withdrawn(address indexed user, address indexed token, uint256 amount, bytes32 indexed intentHash);
+    event TimelockUpdated(address indexed oldTimelock, address indexed newTimelock);
+    event AdminTransferProposed(address indexed currentAdmin, address indexed pendingAdmin);
+    event AdminTransferAccepted(address indexed oldAdmin, address indexed newAdmin);
+    event AdminTransferCancelled(address indexed currentAdmin, address indexed cancelledPendingAdmin);
 
     constructor(address _policy, address _agent) {
         policy = CryptaraPolicy(_policy);
@@ -41,6 +48,17 @@ contract CryptaraVault is ReentrancyGuard {
 
     function userBalance(address user, address token) external view returns (uint256) {
         return balances[user][token];
+    modifier onlyTimelock() {
+        require(msg.sender == timelock, "Vault: not timelock");
+        _;
+    }
+
+    function deposit(address token, uint256 amount) external {
+        require(token != address(0), "Vault: zero token");
+        require(amount > 0, "Vault: zero amount");
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        balances[msg.sender][token] += amount;
+        emit Deposited(msg.sender, token, amount);
     }
 
     function deposit(address token, uint256 amount) external nonReentrant {
@@ -92,5 +110,29 @@ contract CryptaraVault is ReentrancyGuard {
 
         IERC20(token).safeTransfer(recipient, amount);
         emit Withdrawn(intentUser, token, amount, recipient);
+    function proposeAdmin(address pending) external onlyTimelock {
+        require(pending != address(0), "Vault: zero pending admin");
+        require(pending != timelock, "Vault: already admin");
+        pendingTimelock = pending;
+        emit AdminTransferProposed(timelock, pending);
+    }
+
+    function acceptAdmin() external {
+        require(msg.sender == pendingTimelock, "Vault: not pending admin");
+        address old = timelock;
+        timelock = pendingTimelock;
+        pendingTimelock = address(0);
+        emit AdminTransferAccepted(old, timelock);
+    }
+
+    function cancelPendingAdmin() external onlyTimelock {
+        address cancelled = pendingTimelock;
+        require(cancelled != address(0), "Vault: no pending admin");
+        pendingTimelock = address(0);
+        emit AdminTransferCancelled(timelock, cancelled);
+    }
+
+    function userBalance(address user, address token) external view returns (uint256) {
+        return balances[user][token];
     }
 }

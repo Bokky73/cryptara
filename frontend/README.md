@@ -37,6 +37,17 @@ GOPLUS_API_KEY=
 GOPLUS_APP_KEY=
 GOPLUS_APP_SECRET=
 
+# Optional distributed server cache. Default is process-local memory mode.
+# Supported: memory | upstash | redis | postgres
+CACHE_STORE=memory
+CACHE_L1_MAX_ENTRIES=1000
+CACHE_INVALIDATION_POLL_MS=1000
+# One adapter's connection settings is required when CACHE_STORE is not memory.
+CACHE_UPSTASH_REST_URL=
+CACHE_UPSTASH_REST_TOKEN=
+CACHE_REDIS_URL=
+CACHE_POSTGRES_URL=
+
 # Server-only x402 premium deep scan production config.
 X402_PAY_TO=0x3ED3E93047b4bCF2e6Ab0744Db08a132d0c97D7d
 X402_PRICE_USD=\$0.99

@@ -1,0 +1,51 @@
+{
+  "walletAddress": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+  "alerts": [
+    {
+      "id": "alert_1",
+      "walletAddress": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      "ruleId": "rule_1",
+      "triggerType": "critical_risk",
+      "observationKey": "risk-score",
+      "status": "triggered",
+      "severity": "critical",
+      "message": "Risk score crossed the critical threshold.",
+      "beforeValue": 42,
+      "afterValue": 78,
+      "triggeredAt": "2026-09-12T00:00:00.000Z",
+      "evidenceBefore": {
+        "runId": "run_1",
+        "agent": "risk",
+        "label": "Before",
+        "detail": "Score before update",
+        "sourceLabels": ["Stellar RPC"]
+      },
+      "evidenceAfter": {
+        "runId": "run_2",
+        "agent": "risk",
+        "label": "After",
+        "detail": "Score after update",
+        "sourceLabels": ["Stellar RPC"],
+        "sourceSnapshotHash": "sha256:after"
+      },
+      "evidenceData": {
+        "runId": "run_2",
+        "observationId": "obs_2",
+        "sourceSnapshotHashAfter": "sha256:after",
+        "evidenceAfterObservationId": "obs_2",
+        "evidenceAfterHash": "sha256:after",
+        "deteriorationObservationIds": []
+      },
+      "deliveryCount": 1,
+      "observableHistoryCount": 2,
+      "deliverySummary": {
+        "delivered": ["in_app"],
+        "failed": [],
+        "skipped": [],
+        "pending": []
+      },
+      "matchingRule": { "triggerType": "critical_risk", "severity": "critical" }
+    }
+  ],
+  "counts": { "triggered": 1, "recovered": 0, "acknowledged": 0 }
+}

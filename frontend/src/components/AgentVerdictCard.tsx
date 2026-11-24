@@ -1,18 +1,107 @@
 import Link from "next/link";
 import type { TokenScanResult } from "@/server/types";
-import { ArrowRight, ShieldAlert } from "lucide-react";
+import { ArrowRight, ShieldAlert, ShieldCheck, ShieldQuestion, ShieldX } from "lucide-react";
+
+type VerdictTier = {
+  label: string;
+  icon: typeof ShieldAlert;
+  tone: string;
+  border: string;
+  bg: string;
+};
+
+function resolveVerdict(scan: TokenScanResult): VerdictTier {
+  const risk = typeof scan.buyRisk === "number" ? scan.buyRisk : null;
+  if (risk === null) {
+    return {
+      label: "Insufficient data",
+      icon: ShieldQuestion,
+      tone: "text-white/70",
+      border: "border-white/15",
+      bg: "bg-white/5",
+    };
+  }
+  if (risk >= 70) {
+    return {
+      label: "Avoid",
+      icon: ShieldX,
+      tone: "text-[#ff6b6b]",
+      border: "border-[#ff6b6b]/30",
+      bg: "bg-[#ff6b6b]/8",
+    };
+  }
+  if (risk >= 45) {
+    return {
+      label: "Caution",
+      icon: ShieldAlert,
+      tone: "text-[#d9a441]",
+      border: "border-[#d9a441]/25",
+      bg: "bg-[#d9a441]/8",
+    };
+  }
+  if (risk >= 25) {
+    return {
+      label: "Watch",
+      icon: ShieldQuestion,
+      tone: "text-[#f2c86d]",
+      border: "border-[#f2c86d]/25",
+      bg: "bg-[#f2c86d]/8",
+    };
+  }
+  return {
+    label: "Favorable",
+    icon: ShieldCheck,
+    tone: "text-[#4ade80]",
+    border: "border-[#4ade80]/25",
+    bg: "bg-[#4ade80]/8",
+  };
+}
 
 export function AgentVerdictCard({ scan }: { scan: TokenScanResult }) {
+  const verdict = resolveVerdict(scan);
+  const VerdictIcon = verdict.icon;
+  const confidence = typeof scan.confidence === "number" ? scan.confidence : null;
+  const lowConfidence = confidence !== null && confidence < 60;
+
   return (
-    <section className="rounded-[28px] border border-[#d9a441]/25 bg-[#d9a441]/8 p-6">
+    <section className={`rounded-[28px] border ${verdict.border} ${verdict.bg} p-6`}>
       <div className="flex items-start gap-4">
-        <div className="rounded-2xl bg-[#d9a441]/14 p-3 text-[#d9a441]">
-          <ShieldAlert className="h-5 w-5" />
+        <div className={`rounded-2xl ${verdict.bg} p-3 ${verdict.tone}`}>
+          <VerdictIcon className="h-5 w-5" aria-hidden="true" />
         </div>
         <div className="min-w-0">
-          <div className="text-sm uppercase tracking-[0.18em] text-[#d9a441]">Latest agent verdict</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm uppercase tracking-[0.18em] text-white/50">Latest agent verdict</span>
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full border ${verdict.border} ${verdict.bg} px-3 py-1 text-xs font-semibold ${verdict.tone}`}
+            >
+              <VerdictIcon className="h-3.5 w-3.5" aria-hidden="true" />
+              {verdict.label}
+            </span>
+            {confidence !== null ? (
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${
+                  lowConfidence
+                    ? "border-[#d9a441]/40 bg-[#d9a441]/10 text-[#f2c86d]"
+                    : "border-white/15 bg-white/5 text-white/70"
+                }`}
+              >
+                Confidence {confidence}%
+                {lowConfidence ? " · low" : ""}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-white/20 px-3 py-1 text-xs font-semibold text-white/50">
+                Confidence unavailable
+              </span>
+            )}
+          </div>
           <h2 className="mt-3 text-2xl font-semibold">{scan.symbol} needs protection review</h2>
           <p className="mt-3 text-sm leading-6 text-white/58">{scan.summary}</p>
+          {lowConfidence ? (
+            <p className="mt-3 text-xs leading-5 text-[#f2c86d]">
+              Low confidence — some data sources are missing. Treat this verdict as provisional.
+            </p>
+          ) : null}
           <div className="mt-5 flex flex-col gap-3 sm:flex-row">
             <Link
               href="/agents"
@@ -28,6 +117,7 @@ export function AgentVerdictCard({ scan }: { scan: TokenScanResult }) {
               Run Token Scan
             </Link>
           </div>
+          <p className="mt-4 text-[11px] leading-4 text-white/40">Not financial advice.</p>
         </div>
       </div>
     </section>

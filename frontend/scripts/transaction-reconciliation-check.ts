@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { configureEvmSimulator, clearEvmSimulator, getEvmChainAdapter } from "../src/server/transactions/adapters/evm";
 import { configureStellarSimulator, clearStellarSimulator, getStellarChainAdapter } from "../src/server/transactions/adapters/stellar";
-import { assertLifecycleTransition, reconcileObservation } from "../src/server/transactions/lifecycleManager";
+import { assertLifecycleTransition, reconcileObservation, runReconciliationSweep } from "../src/server/transactions/lifecycleManager";
 import { createTransactionObservation, listTransactionObservations } from "../src/server/storage";
 import type { TransactionObservation, TransactionRecord } from "../src/server/types";
 
@@ -86,6 +86,36 @@ assert.equal((await stellar.poll(stellarHash)).observationStatus, "duplicate");
 assert.equal((await stellar.poll(stellarHash)).status, "confirming");
 assert.equal((await stellar.poll(stellarHash)).status, "confirmed");
 assert.equal((await stellar.poll(stellarHash)).status, "failed");
+clearStellarSimulator();
+
+// Bounded reconciliation sweep: EVM nonce replacement + Stellar ledger expiry.
+configureEvmSimulator("evm", "ethereum", { pollSequence: [
+  { status: "replaced", confirmations: 0, replacementHash: `0x${"4".repeat(64)}` },
+] });
+configureStellarSimulator("stellar", "stellar-testnet", { pollSequence: [
+  { status: "not_found" },
+] });
+const sweepRecords: TransactionRecord[] = [
+  record({ hash: evmHash, chainFamily: "evm", network: "ethereum", lifecycleStatus: "pending", status: "pending" }),
+  record({ hash: stellarHash, chainFamily: "stellar", network: "stellar-testnet", lifecycleStatus: "submitted", status: "submitted", timeBounds: { maxTime: "2026-08-26T00:00:00.000Z" } }),
+];
+const sweep = await runReconciliationSweep({
+  records: sweepRecords,
+  now: new Date(now),
+  limit: 10,
+  adapters: {
+    evm: getEvmChainAdapter({ network: "ethereum", confirmationDepth: 3 }),
+    stellar: getStellarChainAdapter({ network: "stellar-testnet", confirmationDepth: 2 }),
+  },
+});
+assert.equal(sweep.processed, 2);
+const evmResult = sweep.results.find((item) => item.hash === evmHash);
+assert.equal(evmResult?.status, "replaced");
+assert.equal(evmResult?.reason, "nonce_replaced");
+const stellarResult = sweep.results.find((item) => item.hash === stellarHash);
+assert.equal(stellarResult?.status, "expired");
+assert.equal(stellarResult?.reason, "time_bounds_expired");
+clearEvmSimulator();
 clearStellarSimulator();
 
 console.log("transaction reconciliation fixtures passed");

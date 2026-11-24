@@ -18,6 +18,11 @@ const VALUE_SECRET_PATTERNS: RegExp[] = [
 
 const TRUNCATED_FIELDS = new Set(["detail", "label", "message", "summary"]);
 
+const SIGNATURE_HEADER_PATTERN = /\b(x-cryptara-signature-256|x-cryptara-delivery-id|signature|hmac)\s*[=:]\s*\S+/gi;
+const DELIVERY_ID_PATTERN = /\bdelivery[_-]?id\s*[=:]\s*\S+/gi;
+const HEX_SIGNATURE_PATTERN = /\b[0-9a-f]{64}\b/gi;
+const TIMESTAMP_PATTERN = /\btimestamp\s*[=:]\s*\d{9,13}\b/gi;
+
 function isForbiddenKey(field: string): boolean {
   return FORBIDDEN_KEY_PATTERNS.some((pattern) => pattern.test(field));
 }
@@ -154,6 +159,76 @@ export function sanitizeDeliveryErrorDetail(detail: string | undefined): string 
   out = out.replace(/\bbot\d+:[A-Za-z0-9_-]+/gi, "[token-redacted]");
   out = out.replace(/\b(Bearer|token|secret|api[_-]?key)\s*[=:]\s*\S+/gi, "$1=[redacted]");
   out = out.replace(/\/api\/webhooks\/\d+\/[A-Za-z0-9_-]+/gi, "/api/webhooks/[redacted]");
+  out = out.replace(SIGNATURE_HEADER_PATTERN, "$1=[redacted]");
+  out = out.replace(DELIVERY_ID_PATTERN, "delivery_id=[redacted]");
+  out = out.replace(TIMESTAMP_PATTERN, "timestamp=[redacted]");
+  out = out.replace(HEX_SIGNATURE_PATTERN, "[signature-redacted]");
 
   return out.length > 400 ? `${out.slice(0, 397)}…` : out;
+}
+
+/**
+ * Deterministically serialize a sanitized delivery payload into the exact
+ * raw body that is transmitted to webhook consumers and signed with
+ * HMAC-SHA256. Keys are sorted so the same payload always yields the same
+ * bytes, which lets consumers recompute the signature over the received body.
+ */
+export function buildWebhookRawBody(payload: AlertDelivery["sanitizedPayload"]): string {
+  return stableStringify(payload);
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || value === undefined) return "null";
+
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableStringify(entry)).join(",")}]`;
+  }
+
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const keys = Object.keys(record).sort();
+    const entries = keys
+      .filter((key) => record[key] !== undefined)
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`);
+
+    return `{${entries.join(",")}}`;
+  }
+
+  return "null";
+}
+
+/**
+ * Redact secrets, signatures, delivery IDs, and webhook URLs from an outbound
+ * webhook payload before it is logged or persisted for dead-letter review.
+ * The transmitted payload itself is already sanitized; this is a defense in
+ * depth pass for anything that echoes back headers or transport metadata.
+ */
+export function sanitizeWebhookPayloadForPersistence(payload: unknown): unknown {
+  if (typeof payload === "string") {
+    return sanitizeDeliveryErrorDetail(payload);
+  }
+
+  if (Array.isArray(payload)) {
+    return payload.map((entry) => sanitizeWebhookPayloadForPersistence(entry));
+  }
+
+  if (payload && typeof payload === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(payload as Record<string, unknown>)) {
+      if (isForbiddenKey(key) || /signature|delivery[_-]?id/i.test(key)) {
+        out[key] = "[redacted]";
+        continue;
+      }
+
+      out[key] = sanitizeWebhookPayloadForPersistence(child);
+    }
+
+    return out;
+  }
+
+  return payload;
 }
