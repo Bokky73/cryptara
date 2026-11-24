@@ -1,7 +1,7 @@
 import { cacheMetrics } from "./metrics";
 import { cacheSingleFlight, type SingleFlight } from "./coalesce";
 import { negativeCacheOptions } from "./negative";
-import type { CacheStore } from "./store";
+import type { CacheRead, CacheStore } from "./store";
 
 export type CachedRead<T> = { value: T; state: "fresh" | "stale"; error?: undefined } | { value?: undefined; state: "negative"; error: Error };
 
@@ -19,9 +19,10 @@ type CacheLoadInput<T> = {
 
 export async function getOrLoad<T>(input: CacheLoadInput<T>): Promise<CachedRead<T>> {
   const flight = input.flight ?? cacheSingleFlight;
-  let cached;
+  let cached: CacheRead<T>;
   try {
-    cached = input.store.get<T>(input.key, input.now);
+    await input.store.refreshInvalidations?.();
+    cached = await readCache(input.store, input.key, input.now);
   } catch {
     cacheMetrics.increment("backendError");
     return loadThrough(input, flight);
@@ -45,18 +46,40 @@ export async function getOrLoad<T>(input: CacheLoadInput<T>): Promise<CachedRead
   return loadThrough(input, flight);
 }
 
+async function readCache<T>(store: CacheStore, key: string, now?: number): Promise<CacheRead<T>> {
+  const local = store.get<T>(key, now);
+  if (local.state !== "miss" || !store.loadFromBackend) return local;
+
+  try {
+    const remote = await store.loadFromBackend<T>(key, now);
+    if (remote && remote.state !== "miss") return remote;
+  } catch {
+    cacheMetrics.increment("backendError");
+  }
+  return { state: "miss" };
+}
+
 async function loadThrough<T>(input: CacheLoadInput<T>, flight: SingleFlight): Promise<CachedRead<T>> {
   try {
     const value = await flight.run(input.key, input.loader);
     try {
-      input.store.set(input.key, value, { ttlMs: input.ttlMs, staleMs: input.staleMs, tags: input.tags });
+      if (input.store.persistSet) {
+        await input.store.persistSet(input.key, value, { ttlMs: input.ttlMs, staleMs: input.staleMs, tags: input.tags });
+      } else {
+        input.store.set(input.key, value, { ttlMs: input.ttlMs, staleMs: input.staleMs, tags: input.tags });
+      }
     } catch {
       cacheMetrics.increment("backendError");
     }
     return { state: "fresh", value };
   } catch (error) {
     try {
-      input.store.setNegative(input.key, error, { ...negativeCacheOptions(input.negativeTtlMs), tags: input.tags });
+      const options = { ...negativeCacheOptions(input.negativeTtlMs), tags: input.tags };
+      if (input.store.persistNegative) {
+        await input.store.persistNegative(input.key, error, options);
+      } else {
+        input.store.setNegative(input.key, error, options);
+      }
     } catch {
       cacheMetrics.increment("backendError");
     }

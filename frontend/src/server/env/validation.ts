@@ -2,6 +2,7 @@ import { stellarNetworks, validateStellarNetworkConfig } from "@/lib/stellar/con
 import { getApprovedPubnetConfig, isPubnetRequested, missingApprovedValues } from "@/server/stellar/config";
 import { featureFlagRegistry } from "@/server/features/registry";
 import { evaluateFeature, getFeatureConfigIssues, getFeatureEnvironment } from "@/server/features/evaluator";
+import { getCacheConfig } from "@/server/cache/config";
 import type { FeatureFlagKey } from "@/server/features/types";
 
 type EnvCheck = {
@@ -71,6 +72,13 @@ const serverEnvKeys = [
   "UPSTASH_REDIS_REST_TOKEN",
   "REDIS_URL",
   "RATE_LIMIT_POSTGRES_URL",
+  "CACHE_STORE",
+  "CACHE_L1_MAX_ENTRIES",
+  "CACHE_INVALIDATION_POLL_MS",
+  "CACHE_UPSTASH_REST_URL",
+  "CACHE_UPSTASH_REST_TOKEN",
+  "CACHE_REDIS_URL",
+  "CACHE_POSTGRES_URL",
 ] as const;
 
 const publicEnvKeys = [
@@ -245,6 +253,7 @@ export function getEnvHealth() {
     pubnetApproval,
     providerResilience: getProviderResilienceConfig(),
     rateLimit: getRateLimitConfig(),
+    cache: getCacheConfig(),
     detail:
       configuredLiveSources.length > 0
         ? "At least one live data source is configured. Missing sources must stay transparent in UI."

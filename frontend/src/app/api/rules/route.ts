@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { withCacheHeaders } from "@/server/cache/strategy";
+import { withCacheHeaders, withCacheStatus } from "@/server/cache/strategy";
+import { createCacheKey, getOrLoad, RULES_CACHE_TAG, ruleCacheTag, serverCache } from "@/server/cache";
 import { assertApprovalOnly } from "@/server/security/policy";
 import { checkRateLimit } from "@/server/security/rateLimit";
 import { getUserRuleRecord, upsertUserRuleRecord } from "@/server/storage";
@@ -45,7 +46,7 @@ const ruleSchema = z.object({
   }
 });
 
-export function GET(request: NextRequest) {
+export async function GET(request: NextRequest) {
   const rateLimited = checkRateLimit(request, { namespace: "rules", limit: 60, windowMs: 60_000 });
 
   if (rateLimited) {
@@ -58,15 +59,26 @@ export function GET(request: NextRequest) {
   );
   const network = request.nextUrl.searchParams.get("network") ?? undefined;
 
-  return withCacheHeaders(
-    NextResponse.json(
-      getUserRuleRecord(walletAddress, {
-        chainFamily: chainFamily.success ? chainFamily.data : undefined,
-        network,
-      }),
-    ),
-    "rules",
-  );
+  const resolvedWallet = walletAddress ?? "0xDemoWallet";
+  const cached = await getOrLoad({
+    store: serverCache,
+    key: createCacheKey({
+      chainFamily: chainFamily.success ? chainFamily.data : "evm",
+      network: network ?? "legacy-evm",
+      walletAddress: resolvedWallet,
+      resource: "rules",
+    }),
+    loader: async () => getUserRuleRecord(resolvedWallet, {
+      chainFamily: chainFamily.success ? chainFamily.data : undefined,
+      network,
+    }),
+    ttlMs: 30_000,
+    staleMs: 30_000,
+    tags: [RULES_CACHE_TAG, ruleCacheTag(resolvedWallet)],
+  });
+
+  const response = withCacheHeaders(NextResponse.json(cached.value ?? null), "rules");
+  return withCacheStatus(response, cached.state);
 }
 
 export const POST = withApiHandler(

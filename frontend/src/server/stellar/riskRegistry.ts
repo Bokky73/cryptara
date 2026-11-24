@@ -8,6 +8,7 @@ import {
 } from "@/server/stellar/client";
 import type { StellarNetworkId } from "@/lib/stellar/config";
 import { getStellarNetwork, getStellarRegistryContractId } from "@/lib/stellar/config";
+import { invalidateRiskRecordCacheAsync } from "@/server/cache/invalidation";
 
 export type RiskRegistryPublication = {
   publisher: string;
@@ -50,7 +51,7 @@ function requireRegistry(network: StellarNetworkId) {
   return new Contract(contractId);
 }
 
-function assertRiskPublicationTransaction(transaction: ReturnType<typeof TransactionBuilder.fromXDR>, contractId: string) {
+function parseRiskPublicationTransaction(transaction: ReturnType<typeof TransactionBuilder.fromXDR>, contractId: string) {
   if ("innerTransaction" in transaction) throw new Error("Fee-bump transactions are not accepted by the risk registry relay.");
   if (transaction.operations.length !== 1) throw new Error("Risk publication must contain exactly one operation.");
   if (transaction.signatures.length === 0) throw new Error("Risk publication transaction is not signed.");
@@ -72,6 +73,12 @@ function assertRiskPublicationTransaction(transaction: ReturnType<typeof Transac
   if (!publisher || publisher !== transaction.source) {
     throw new Error("The transaction source must match the risk publication publisher.");
   }
+
+  const assetIdArgument = invocation.args()[1];
+  const assetId = assetIdArgument ? Buffer.from(assetIdArgument.bytes() as Uint8Array).toString("hex") : undefined;
+  if (!assetId) throw new Error("Risk publication is missing the asset identifier.");
+
+  return { publisher, assetId };
 }
 
 export async function prepareRiskPublication(networkId: StellarNetworkId, publication: RiskRegistryPublication) {
@@ -118,10 +125,11 @@ export async function submitRiskPublication(networkId: StellarNetworkId, signedX
   const { network } = createStellarRpcServer(networkId);
   const registry = requireRegistry(network.id);
   const transaction = TransactionBuilder.fromXDR(signedXdr, network.networkPassphrase);
-  assertRiskPublicationTransaction(transaction, registry.contractId());
+  const { assetId } = parseRiskPublicationTransaction(transaction, registry.contractId());
   const submitted = await createStellarRpcDataLayer(networkId).submitTransaction(
     transaction,
   );
+  await invalidateRiskRecordCacheAsync(network.id, assetId);
 
   return {
     network: network.id,

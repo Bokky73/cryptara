@@ -65,7 +65,7 @@ export {
   pruneExpiredRecordsFromPg,
 };
 import { clearPortfolioCacheForWallet } from "@/server/stellar/portfolio";
-import { invalidatePortfolioForWallet, invalidateWalletCache } from "@/server/cache";
+import { invalidatePortfolioForWallet, invalidateRulesCache, invalidateWalletCache } from "@/server/cache";
 import { resetDevEnvironment, seedDevEnvironment } from "./bootstrap";
 
 export const devReset = resetDevEnvironment;
@@ -1075,6 +1075,7 @@ export function upsertUserRuleRecord(input: UserRule) {
     getUserRules().unshift(record);
   }
 
+  invalidateRulesCache(input.walletAddress);
   return record;
 }
 

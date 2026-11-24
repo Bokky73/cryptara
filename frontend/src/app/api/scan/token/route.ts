@@ -6,7 +6,7 @@ import { gateFeature } from "@/server/features/evaluator";
 import { withCacheHeaders } from "@/server/cache/strategy";
 import { runTokenScan } from "@/server/scan/tokenScan";
 import { buildServerTimingHeader, createPhaseTimer, recordApiTiming } from "@/server/observability/timing";
-import { createCacheKey, getOrLoad, serverCache, walletCacheTag, resourceCacheTag } from "@/server/cache";
+import { createCacheKey, getOrLoad, serverCache, walletCacheTag, resourceCacheTag, RISK_REGISTRY_CACHE_TAG } from "@/server/cache";
 
 const API_TIMING_ROUTE = "scan:token";
 
@@ -36,7 +36,7 @@ export const POST = withApiHandler(
       loader: () => runTokenScan(data.query, data.chain, data.walletAddress, timer),
       ttlMs: 15_000,
       staleMs: 30_000,
-      tags: [resourceCacheTag("scan"), data.walletAddress ? walletCacheTag(data.walletAddress) : "anonymous"],
+      tags: [resourceCacheTag("scan"), RISK_REGISTRY_CACHE_TAG, data.walletAddress ? walletCacheTag(data.walletAddress) : "anonymous"],
     });
     if (cached.state === "negative") {
       return jsonError({ code: "provider_timeout", message: "Scan provider is temporarily unavailable.", status: 503 });
