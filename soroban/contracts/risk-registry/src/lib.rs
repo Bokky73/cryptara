@@ -20,7 +20,8 @@ const MAX_ASSET_LABEL_BYTES: u32 = 64;
 const MAX_EVIDENCE_URI_BYTES: u32 = 512;
 const MAX_SCORE: u32 = 100;
 const MAX_CONFIDENCE_BPS: u32 = 10_000; // 100.00%
-const CONTRACT_VERSION: u32 = 1;
+const MAX_BATCH_SIZE: u32 = 10;
+const CONTRACT_VERSION: u32 = 2;
 
 // ─── Data Keys ─────────────────────────────────────────────────────
 #[contracttype]
@@ -45,11 +46,28 @@ pub struct RiskRecord {
     pub confidence_bps: u32,
     pub verdict: Symbol,
     pub report_hash: BytesN<32>,
+    pub prev_report_hash: BytesN<32>,
+    pub revision: u32,
     pub evidence_uri: String,
     pub publisher: Address,
     pub version: u32,
     pub updated_at: u64,
     pub ledger: u32,
+}
+
+// ─── Batch Input ────────────────────────────────────────────────────
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RiskRecordInput {
+    pub asset_id: BytesN<32>,
+    pub network: Symbol,
+    pub asset_label: String,
+    pub score: u32,
+    pub confidence_bps: u32,
+    pub verdict: Symbol,
+    pub report_hash: BytesN<32>,
+    pub evidence_uri: String,
+    pub updated_at: u64,
 }
 
 // ─── Events (stable, indexed) ──────────────────────────────────────
@@ -105,6 +123,8 @@ pub struct RiskPublished {
     pub confidence_bps: u32,
     pub verdict: Symbol,
     pub report_hash: BytesN<32>,
+    pub prev_report_hash: BytesN<32>,
+    pub revision: u32,
     pub version: u32,
     pub updated_at: u64,
 }
@@ -125,6 +145,7 @@ pub enum RegistryError {
     InvalidEvidenceUri = 9,
     StaleTimestamp = 10,
     InvalidVersion = 11,
+    BatchTooLarge = 12,
     GovernanceNotSet = 12,
 }
 
@@ -345,6 +366,150 @@ impl RiskRegistry {
             env.ledger().timestamp(),
         )?;
 
+        let input = RiskRecordInput {
+            asset_id,
+            network,
+            asset_label,
+            score,
+            confidence_bps,
+            verdict,
+            report_hash,
+            evidence_uri,
+            updated_at,
+        };
+
+        Self::write_record(&env, &publisher, input)
+    }
+
+    /// Publish a bounded batch of risk records in a single transaction.
+    /// Enforces MAX_BATCH_SIZE and validates every record before any write,
+    /// so an invalid record rolls back the whole batch atomically.
+    pub fn publish_batch(
+        env: Env,
+        publisher: Address,
+        records: Vec<RiskRecordInput>,
+    ) -> Result<Vec<RiskRecord>, RegistryError> {
+        require_initialized(&env)?;
+        publisher.require_auth();
+
+        if !Self::is_publisher(env.clone(), publisher.clone()) {
+            return Err(RegistryError::UnauthorizedPublisher);
+        }
+
+        if records.len() > MAX_BATCH_SIZE {
+            return Err(RegistryError::BatchTooLarge);
+        }
+
+        let ledger_timestamp = env.ledger().timestamp();
+
+        // Validate every record up-front so a single bad entry aborts the batch.
+        for input in records.iter() {
+            validate_bounds(
+                input.score,
+                input.confidence_bps,
+                &input.asset_label,
+                &input.evidence_uri,
+                input.updated_at,
+                ledger_timestamp,
+            )?;
+        }
+
+        let mut published: Vec<RiskRecord> = Vec::new(&env);
+        for input in records.iter() {
+            published.push_back(Self::write_record(&env, &publisher, input)?);
+        }
+
+        Ok(published)
+    }
+
+    /// Persist a single record, chaining prev_report_hash and bumping revision.
+    fn write_record(
+        env: &Env,
+        publisher: &Address,
+        input: RiskRecordInput,
+    ) -> Result<RiskRecord, RegistryError> {
+        let key = DataKey::Record(input.asset_id.clone(), input.network.clone());
+
+        // Chain to previous revision if one exists (genesis uses zero bytes).
+        let (prev_report_hash, revision) = match env.storage().persistent().get::<DataKey, RiskRecord>(&key) {
+            Some(prev) => (prev.report_hash, prev.revision.saturating_add(1)),
+            None => (BytesN::from_array(env, &[0u8; 32]), 1u32),
+        };
+
+        let record = RiskRecord {
+            asset_id: input.asset_id,
+            network: input.network,
+            asset_label: input.asset_label,
+            score: input.score,
+            confidence_bps: input.confidence_bps,
+            verdict: input.verdict,
+            report_hash: input.report_hash,
+            prev_report_hash: prev_report_hash.clone(),
+            revision,
+            evidence_uri: input.evidence_uri,
+            publisher: publisher.clone(),
+            version: CONTRACT_VERSION,
+            updated_at: input.updated_at,
+            ledger: env.ledger().sequence(),
+        };
+
+        env.storage().persistent().set(&key, &record);
+        bump_record_ttl(env, &key);
+
+        RiskPublished {
+            asset_id: record.asset_id.clone(),
+            network: record.network.clone(),
+            publisher: record.publisher.clone(),
+            score: record.score,
+            confidence_bps: record.confidence_bps,
+            verdict: record.verdict.clone(),
+            report_hash: record.report_hash.clone(),
+            prev_report_hash,
+            revision,
+            version: record.version,
+            updated_at: record.updated_at,
+        }
+        .publish(env);
+
+        Ok(record)
+    }
+
+    /// Check whether an address is an authorized publisher.
+    pub fn is_publisher(env: Env, publisher: Address) -> bool {
+        let key = DataKey::Publisher(publisher);
+        let authorized = env
+            .storage()
+            .persistent()
+            .get::<DataKey, bool>(&key)
+            .unwrap_or(false);
+        if authorized {
+            bump_publisher_ttl(&env, &key);
+        }
+        authorized
+    }
+
+    /// Fetch the current risk record for an asset/network pair.
+    pub fn get_risk(
+        env: Env,
+        asset_id: BytesN<32>,
+        network: Symbol,
+    ) -> Option<RiskRecord> {
+        let key = DataKey::Record(asset_id, network);
+        let record = env.storage().persistent().get::<DataKey, RiskRecord>(&key);
+        if record.is_some() {
+            bump_record_ttl(&env, &key);
+        }
+        record
+    }
+
+    /// Return the current contract version.
+    pub fn version(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::Version)
+            .unwrap_or(CONTRACT_VERSION)
+    }
+}
         // Compute vers
 
 /* … truncated 4784 chars — edit only what you need near the top … */

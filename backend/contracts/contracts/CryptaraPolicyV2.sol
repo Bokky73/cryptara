@@ -12,6 +12,7 @@ contract CryptaraPolicyV2 is CryptaraPolicy, EIP712 {
 
     string public constant V2_VERSION = "2.0.0";
     address public timelock;
+    address public pendingTimelock;
 
     // Bounded asset tracking: O(1) add/remove via EnumerableSet, capped size.
     uint256 public constant MAX_TRACKED_ASSETS = 256;
@@ -26,6 +27,9 @@ contract CryptaraPolicyV2 is CryptaraPolicy, EIP712 {
     mapping(address => uint256) public nonces;
 
     event TimelockUpdated(address indexed oldTimelock, address indexed newTimelock);
+    event TimelockTransferProposed(address indexed currentTimelock, address indexed pendingTimelock);
+    event TimelockTransferAccepted(address indexed oldTimelock, address indexed newTimelock);
+    event TimelockTransferCancelled(address indexed cancelledTimelock);
     event PolicyCommitmentAuthorized(
         address indexed user,
         bytes32 policyCommitment,
@@ -50,7 +54,28 @@ contract CryptaraPolicyV2 is CryptaraPolicy, EIP712 {
         require(_timelock != address(0), "PolicyV2: zero timelock");
         address old = timelock;
         timelock = _timelock;
+        pendingTimelock = address(0);
         emit TimelockUpdated(old, _timelock);
+    }
+
+    function proposeTimelock(address _pendingTimelock) external onlyOwner {
+        require(_pendingTimelock != address(0), "PolicyV2: zero pending timelock");
+        pendingTimelock = _pendingTimelock;
+        emit TimelockTransferProposed(timelock, _pendingTimelock);
+    }
+
+    function acceptTimelock() external {
+        require(msg.sender == pendingTimelock, "PolicyV2: not pending timelock");
+        address old = timelock;
+        timelock = pendingTimelock;
+        pendingTimelock = address(0);
+        emit TimelockTransferAccepted(old, timelock);
+    }
+
+    function cancelPendingTimelock() external onlyOwner {
+        address cancelled = pendingTimelock;
+        pendingTimelock = address(0);
+        emit TimelockTransferCancelled(cancelled);
     }
 
     function getTimelock() external view returns (address) {
