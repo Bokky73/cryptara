@@ -1,7 +1,7 @@
 "use client";
 
-import { CheckCircle2, CreditCard, Lock } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { AlertCircle, CheckCircle2, CreditCard, Lock, X } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
 import { x402Client, x402HTTPClient } from "@x402/core/client";
 import type { PaymentRequired } from "@x402/core/types";
 import { toClientEvmSigner } from "@x402/evm";
@@ -15,7 +15,9 @@ import { StellarRiskPublishButton } from "@/components/StellarRiskPublishButton"
 import { LiveRegion } from "@/components/a11y/LiveRegion";
 import { RiskSnapshotActions } from "@/components/RiskSnapshotActions";
 import { captureOfflineScan } from "@/lib/offlineStore";
+import { buildX402Fingerprint, hashX402PaymentHeader, type X402ReceiptEntry } from "@/lib/x402ReceiptStore";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { useX402PaymentReceipts } from "@/hooks/useSigning";
 
 const paymentStatusLabels: Record<PaymentStage, { title: string; detail: string }> = {
   idle: {
@@ -139,14 +141,19 @@ function factorMetaEntries(factor: ScoreFactor) {
     .slice(0, 4);
 }
 
-function buildDeepScanUrl(query: string, chain: string, walletAddress: string) {
-  const params = new URLSearchParams({
-    query,
-    chain,
-  });
-
+function buildX402RequestPayload(query: string, chain: string, walletAddress: string) {
+  const payload = { query: query.trim(), chain };
   if (walletAddress.trim()) {
-    params.set("walletAddress", walletAddress.trim());
+    return { ...payload, walletAddress: walletAddress.trim() };
+  }
+  return payload;
+}
+
+function buildDeepScanUrl(query: string, chain: string, walletAddress: string) {
+  const payload = buildX402RequestPayload(query, chain, walletAddress);
+  const params = new URLSearchParams({ query: payload.query, chain: payload.chain });
+  if (payload.walletAddress) {
+    params.set("walletAddress", payload.walletAddress);
   }
 
   return `/api/x402/deep-scan?${params.toString()}`;
@@ -190,6 +197,8 @@ const SAMPLE_TOKENS = [
 
 export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: string }) {
   const queryErrorId = useId();
+  const paymentModalTitleId = useId();
+  const paymentModalRef = useRef<HTMLButtonElement>(null);
   const { address, chainId, isConnected } = useAccount();
   const { data: walletClient } = useWalletClient();
   const publicClient = usePublicClient();
@@ -206,6 +215,10 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
   const [paymentRequirement, setPaymentRequirement] = useState<PaymentRequired | null>(null);
   const [paymentTerms, setPaymentTerms] = useState<PaymentTerms | null>(null);
   const [isPreparingPremium, setIsPreparingPremium] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [resumeCandidate, setResumeCandidate] = useState<X402ReceiptEntry | null>(null);
+  const [dismissedReceiptHash, setDismissedReceiptHash] = useState<string | null>(null);
+  const receipts = useX402PaymentReceipts();
   const { actionsDisabled } = useOnlineStatus();
   const report = scan?.riskReport;
   const normalizedInput = report?.input ?? scan?.normalizedInput;
@@ -241,6 +254,45 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
     };
   }, []);
 
+  // A refresh or a new visit with the same payload automatically offers the
+  // stored receipt instead of asking the user to sign (and pay) again.
+  useEffect(() => {
+    let active = true;
+    const payload = buildX402RequestPayload(query, chain, walletAddress);
+    if (!payload.query || scan) {
+      setResumeCandidate(null);
+      return;
+    }
+
+    buildX402Fingerprint(payload)
+      .then((fingerprint) => receipts.findReceipt(fingerprint))
+      .then((entry) => {
+        if (active) setResumeCandidate(entry && entry.paymentHeaderHash !== dismissedReceiptHash ? entry : null);
+      })
+      .catch(() => {
+        if (active) setResumeCandidate(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [query, chain, walletAddress, scan, dismissedReceiptHash, receipts]);
+
+  useEffect(() => {
+    if (!showPaymentModal) return;
+    paymentModalRef.current?.focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setShowPaymentModal(false);
+        setPremiumStatus("idle");
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showPaymentModal]);
+
   async function runScan() {
     if (actionsDisabled) return;
     setIsScanning(true);
@@ -271,6 +323,28 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
     }
   }
 
+  function createEvmHttpClient() {
+    if (!walletClient || !address) throw new Error("Connect an EVM wallet first.");
+
+    const protocolClient = new x402Client();
+    const signer = toClientEvmSigner(
+      {
+        address: address as `0x${string}`,
+        signTypedData: (message) =>
+          walletClient.signTypedData({
+            account: address as `0x${string}`,
+            domain: message.domain,
+            types: message.types,
+            primaryType: message.primaryType,
+            message: message.message,
+          }),
+      },
+      publicClient,
+    );
+    registerExactEvmScheme(protocolClient, { signer });
+    return new x402HTTPClient(protocolClient);
+  }
+
   async function runDetailedScan() {
     if (actionsDisabled) return;
     setScanError(null);
@@ -298,23 +372,7 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
 
     try {
       const url = buildDeepScanUrl(query, chain, walletAddress);
-      const protocolClient = new x402Client();
-      const signer = toClientEvmSigner(
-        {
-          address: address as `0x${string}`,
-          signTypedData: (message) =>
-            walletClient.signTypedData({
-              account: address as `0x${string}`,
-              domain: message.domain,
-              types: message.types,
-              primaryType: message.primaryType,
-              message: message.message,
-            }),
-        },
-        publicClient,
-      );
-      registerExactEvmScheme(protocolClient, { signer });
-      const httpClient = new x402HTTPClient(protocolClient);
+      const httpClient = createEvmHttpClient();
       const response = await fetch(url, {
         method: "GET",
         headers: { Accept: "application/json" },
@@ -323,48 +381,17 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
       if (response.status === 402) {
         const body = (await response.json().catch(() => null)) as unknown;
         const required = httpClient.getPaymentRequiredResponse((name) => response.headers.get(name), body);
+        if (!required) {
+          throw new Error("The server did not return valid x402 payment requirements.");
+        }
         setPaymentRequirement(required);
         setPremiumStatus("payment_required");
-        setPremiumDetail("Payment is required for Detailed Scan. Confirm the wallet signature to continue.");
+        setPremiumDetail("Review the exact x402 payment details before your wallet signs anything.");
 
-        const requiredChainId = getPaymentChainId(required);
-
-        if (requiredChainId && chainId !== requiredChainId) {
-          setPremiumDetail(`Switching wallet network to eip155:${requiredChainId} for x402 payment.`);
-          await switchChainAsync({ chainId: requiredChainId });
-        }
-
-        setPremiumStatus("signing");
-        setPremiumDetail("Wallet signature is open. Sign the x402 payment authorization.");
-        const paymentPayload = await httpClient.createPaymentPayload(required);
-        const paymentHeaders = httpClient.encodePaymentSignatureHeader(paymentPayload);
-
-        setPremiumStatus("verifying");
-        setPremiumDetail("Submitting signed payment and generating the detailed AI Risk Report.");
-        setIsScanning(true);
-        const paidResponse = await fetch(url, {
-          method: "GET",
-          headers: {
-            Accept: "application/json",
-            ...paymentHeaders,
-          },
-        });
-
-        if (!paidResponse.ok) {
-          const data = (await paidResponse.json().catch(() => null)) as { detail?: string; error?: string } | null;
-          throw new Error(data?.detail ?? data?.error ?? "Paid scan request failed after payment signature.");
-        }
-
-        const data = (await paidResponse.json()) as { premium?: { receiptId?: string; note?: string }; scan?: TokenScanResult };
-
-        if (!data.scan) {
-          throw new Error("Detailed scan completed without a report payload.");
-        }
-
-        setScan(data.scan);
-        captureOfflineScan(data.scan, "paid detailed scan");
-        setPremiumStatus("verified");
-        setPremiumDetail(`Payment verified. Receipt: ${data.premium?.receiptId ?? "recorded"}.`);
+        const fingerprint = await buildX402Fingerprint(buildX402RequestPayload(query, chain, walletAddress));
+        const existing = await receipts.findReceipt(fingerprint);
+        setResumeCandidate(existing && existing.paymentHeaderHash !== dismissedReceiptHash ? existing : null);
+        setShowPaymentModal(true);
         return;
       }
 
@@ -392,6 +419,171 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
       setIsScanning(false);
       setIsPreparingPremium(false);
     }
+  }
+
+  async function signAndSubmitPayment(required: PaymentRequired) {
+    setShowPaymentModal(false);
+    setScanError(null);
+    setPremiumDetail(null);
+    setScan(null);
+    setIsPreparingPremium(true);
+    setPremiumStatus("signing");
+    setPremiumDetail("Wallet signature is open. Sign the x402 payment authorization.");
+
+    try {
+      const httpClient = createEvmHttpClient();
+      const url = buildDeepScanUrl(query, chain, walletAddress);
+      const requiredChainId = getPaymentChainId(required);
+
+      if (requiredChainId && chainId !== requiredChainId) {
+        setPremiumDetail(`Switching wallet network to eip155:${requiredChainId} for x402 payment.`);
+        await switchChainAsync({ chainId: requiredChainId });
+      }
+
+      setPremiumStatus("signing");
+      setPremiumDetail("Wallet signature is open. Sign the x402 payment authorization.");
+      const paymentPayload = await httpClient.createPaymentPayload(required);
+      const paymentHeaders = httpClient.encodePaymentSignatureHeader(paymentPayload);
+      const paymentSignature = Object.values(paymentHeaders)[0] ?? "";
+      const paymentHeaderHash = await hashX402PaymentHeader(paymentSignature);
+      const fingerprint = await buildX402Fingerprint(buildX402RequestPayload(query, chain, walletAddress));
+
+      // Persist BEFORE submitting: a lost response must not force a second
+      // signature, and the hash matches the server's receipt lookup.
+      receipts.savePending({ fingerprint, paymentSignature, paymentHeaderHash, payer: address });
+
+      setPremiumStatus("verifying");
+      setPremiumDetail("Submitting signed payment and generating the detailed AI Risk Report.");
+      setIsScanning(true);
+      const paidResponse = await fetch(url, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          ...paymentHeaders,
+        },
+      });
+
+      if (!paidResponse.ok) {
+        const data = (await paidResponse.json().catch(() => null)) as { code?: string; detail?: string; error?: string } | null;
+        const settlementLikely = paidResponse.status === 409 || paidResponse.status >= 500 || data?.code === "duplicate_x402_payment";
+        const stored = receipts.findReceipt(fingerprint);
+        if (stored && settlementLikely) setResumeCandidate(stored);
+        throw new Error(
+          data?.detail ??
+            data?.error ??
+            (settlementLikely
+              ? "The scan response was lost after payment. Resume with the stored receipt; do not sign again yet."
+              : "Paid scan request failed after payment signature."),
+        );
+      }
+
+      const data = (await paidResponse.json()) as { premium?: { receiptId?: string; note?: string }; scan?: TokenScanResult };
+
+      if (!data.scan) {
+        throw new Error("Detailed scan completed without a report payload.");
+      }
+
+      setScan(data.scan);
+      captureOfflineScan(data.scan, "paid detailed scan");
+      receipts.markSettled(fingerprint, data.premium?.receiptId);
+      setResumeCandidate(null);
+      setDismissedReceiptHash(null);
+      setPremiumStatus("verified");
+      setPremiumDetail(`Payment verified. Receipt: ${data.premium?.receiptId ?? "recorded"}.`);
+    } catch (error) {
+      const stored = await buildX402Fingerprint(buildX402RequestPayload(query, chain, walletAddress)).then((fingerprint) =>
+        receipts.findReceipt(fingerprint),
+      );
+      if (stored) setResumeCandidate(stored);
+
+      setScan(null);
+      setPremiumStatus("failed");
+      setScanError(error instanceof Error ? error.message : "Scan failed.");
+      setPremiumDetail(
+        stored
+          ? "Payment may have settled. Use “Resume with existing receipt” below instead of signing again."
+          : error instanceof Error
+            ? error.message
+            : "Payment or scan failed.",
+      );
+    } finally {
+      setIsScanning(false);
+      setIsPreparingPremium(false);
+    }
+  }
+
+  async function resumeWithReceipt(entry: X402ReceiptEntry) {
+    if (actionsDisabled) return;
+    setShowPaymentModal(false);
+    setScanError(null);
+    setPremiumDetail(null);
+    setScan(null);
+    setIsScanning(true);
+    setPremiumStatus("verifying");
+    setPremiumDetail("Reusing the stored x402 receipt to retrieve your paid scan. No new payment will be requested.");
+
+    try {
+      const response = await fetch("/api/x402/deep-scan/resume", {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paymentHeaderHash: entry.paymentHeaderHash,
+          ...buildX402RequestPayload(query, chain, walletAddress),
+        }),
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as { code?: string; detail?: string; error?: string } | null;
+        if (
+          response.status === 404 ||
+          response.status === 410 ||
+          data?.code === "receipt_not_found" ||
+          data?.code === "receipt_expired"
+        ) {
+          receipts.discard(entry);
+          setDismissedReceiptHash(entry.paymentHeaderHash);
+          setResumeCandidate(null);
+          throw new Error("The stored receipt is no longer usable. Review the payment details to sign a new payment.");
+        }
+        throw new Error(data?.detail ?? data?.error ?? "Could not resume the paid scan with the stored receipt.");
+      }
+
+      const data = (await response.json()) as { premium?: { receiptId?: string; note?: string }; scan?: TokenScanResult };
+      if (!data.scan) {
+        throw new Error("Resumed scan completed without a report payload.");
+      }
+
+      setScan(data.scan);
+      captureOfflineScan(data.scan, "resumed paid detailed scan");
+      receipts.markSettled(entry, data.premium?.receiptId ?? entry.receiptId);
+      setResumeCandidate(null);
+      setPremiumStatus("verified");
+      setPremiumDetail(`Payment verified from stored receipt. Receipt: ${data.premium?.receiptId ?? "recorded"}.`);
+    } catch (error) {
+      setPremiumStatus("failed");
+      setScanError(error instanceof Error ? error.message : "Could not resume the paid scan.");
+      setPremiumDetail(error instanceof Error ? error.message : "Could not resume the paid scan.");
+    } finally {
+      setIsScanning(false);
+    }
+  }
+
+  function discardStoredReceipt() {
+    if (!resumeCandidate) return;
+    receipts.discard(resumeCandidate);
+    setDismissedReceiptHash(resumeCandidate.paymentHeaderHash);
+    setResumeCandidate(null);
+  }
+
+  function cancelPayment() {
+    setShowPaymentModal(false);
+    setPremiumStatus("idle");
+    setPremiumDetail(null);
+  }
+
+  async function confirmPayment() {
+    if (!paymentRequirement || !walletClient || !address) return;
+    await signAndSubmitPayment(paymentRequirement);
   }
 
   async function preparePremiumScan() {
@@ -517,6 +709,39 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
                       Continue detailed scan
                     </button>
                   ) : null}
+                </div>
+              ) : null}
+
+              {resumeCandidate && premiumStatus !== "verified" ? (
+                <div className="mt-5 rounded-2xl border border-brand/40 bg-black/18 p-4">
+                  <div className="flex items-start gap-2 text-sm text-white/72">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+                    <div>
+                      <div className="font-semibold">Resume with existing receipt</div>
+                      <p className="mt-1 text-xs leading-5 text-white/52">
+                        A recent x402 payment receipt matches this exact scan payload. Reuse it to retrieve the report
+                        without signing (or paying) again.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => resumeWithReceipt(resumeCandidate)}
+                      disabled={isBusy || actionsDisabled}
+                      className="inline-flex h-10 items-center justify-center rounded-full bg-brand px-5 text-xs font-semibold text-[var(--color-fg-inverse)] transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Resume with existing receipt
+                    </button>
+                    <button
+                      type="button"
+                      onClick={discardStoredReceipt}
+                      disabled={isBusy}
+                      className="inline-flex h-10 items-center justify-center rounded-full border border-white/15 px-5 text-xs text-white/60 transition hover:border-white/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Discard receipt
+                    </button>
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -794,6 +1019,111 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
             ) : null}
           </div>
         </section>
+      ) : null}
+
+      {showPaymentModal && paymentRequirement ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) cancelPayment();
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={paymentModalTitleId}
+            className="w-full max-w-lg rounded-2xl border border-brand bg-[var(--color-glass-bg)] p-6 shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-brand">x402 payment required</div>
+                <h2 id={paymentModalTitleId} className="mt-1 text-xl font-semibold">Confirm detailed scan payment</h2>
+              </div>
+              <button
+                type="button"
+                onClick={cancelPayment}
+                aria-label="Close payment details"
+                className="rounded-full p-1 text-white/50 transition hover:bg-white/10 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <p className="mt-3 text-sm leading-6 text-white/60">
+              Review the exact terms below. Your wallet only signs after you confirm; no payment is sent on cancel.
+            </p>
+
+            <dl className="mt-5 space-y-3 rounded-xl border border-white/10 bg-black/22 p-4 text-sm">
+              <div className="flex flex-wrap justify-between gap-2">
+                <dt className="text-white/48">Asset</dt>
+                <dd className="font-medium">{paymentOption?.asset ?? paymentTerms?.asset ?? "USDC"}</dd>
+              </div>
+              <div className="flex flex-wrap justify-between gap-2">
+                <dt className="text-white/48">Amount</dt>
+                <dd className="font-medium">{paymentOption?.amount ?? "Shown by the x402 quote"}</dd>
+              </div>
+              <div className="flex flex-wrap justify-between gap-2">
+                <dt className="text-white/48">Price</dt>
+                <dd className="font-medium">{paymentTerms?.priceUsd ?? "$0.99"}</dd>
+              </div>
+              <div className="flex flex-wrap justify-between gap-2">
+                <dt className="text-white/48">Network</dt>
+                <dd className="font-medium">{paymentOption?.network ?? paymentTerms?.network ?? "Shown by the x402 quote"}</dd>
+              </div>
+              <div className="space-y-1">
+                <dt className="text-white/48">Recipient (X402_PAY_TO)</dt>
+                <dd className="break-all font-mono text-xs text-white/80">
+                  {paymentOption?.payTo ?? paymentTerms?.payTo ?? "Shown by the x402 quote"}
+                </dd>
+              </div>
+            </dl>
+
+            {resumeCandidate ? (
+              <div className="mt-4 rounded-xl border border-brand/40 bg-brand-subtle p-4">
+                <div className="flex items-start gap-2 text-sm text-white/72">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+                  <span>A matching recent receipt already covers this exact scan payload.</span>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => resumeWithReceipt(resumeCandidate)}
+                    disabled={isBusy || actionsDisabled}
+                    className="inline-flex h-10 items-center justify-center rounded-full bg-brand px-5 text-xs font-semibold text-[var(--color-fg-inverse)] transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Resume with existing receipt
+                  </button>
+                  <button
+                    type="button"
+                    onClick={discardStoredReceipt}
+                    className="inline-flex h-10 items-center justify-center rounded-full border border-white/15 px-5 text-xs text-white/60 transition hover:border-white/30 hover:text-white"
+                  >
+                    Sign a new payment instead
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                onClick={cancelPayment}
+                className="h-11 rounded-full border border-white/15 px-5 text-sm text-white/60 transition hover:border-white/30 hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                ref={paymentModalRef}
+                type="button"
+                onClick={confirmPayment}
+                disabled={isPaymentWorking || actionsDisabled}
+                className="h-11 rounded-full bg-brand px-6 text-sm font-semibold text-[var(--color-fg-inverse)] transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Confirm &amp; sign payment
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

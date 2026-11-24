@@ -1,10 +1,17 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAccount, useWalletClient } from "wagmi";
 import { useStellarWallet } from "@/providers/StellarWalletProvider";
 import type { EIP712Domain, SignedPolicyPayload, ExecutionIntentPayload, SignedPolicy, ExecutionIntent } from "@/server/types";
 import { getPolicyTypedData, getIntentTypedData, hashPolicyPayload, hashIntentPayload } from "@/server/security/eip712";
+import {
+  clearX402Receipts,
+  findRecentX402Receipt,
+  markX402PaymentSettled,
+  removeX402Receipt,
+  savePendingX402Payment,
+} from "@/lib/x402ReceiptStore";
 
 const DEFAULT_POLICY_DOMAIN: EIP712Domain = {
   name: "CryptaraPolicy",
@@ -125,4 +132,35 @@ export function useStellarSigning() {
   );
 
   return { signStellarIntent, isReady: stellar.isConnected, address: stellar.address, network: stellar.network };
+}
+
+/**
+ * Client-side x402 receipt lifecycle. Receipts are scoped to the connected
+ * wallet and are dropped as soon as that wallet disconnects or changes, so a
+ * payment authorization can never be replayed by the next wallet user.
+ */
+export function useX402PaymentReceipts() {
+  const { address, isConnected } = useAccount();
+  const previousWallet = useRef<{ address?: string; isConnected: boolean }>({ address, isConnected });
+
+  useEffect(() => {
+    const previous = previousWallet.current;
+    const disconnected = previous.isConnected && !isConnected;
+    const switched =
+      Boolean(previous.address && address) && previous.address?.toLowerCase() !== address?.toLowerCase();
+
+    if (disconnected || switched) clearX402Receipts();
+    previousWallet.current = { address, isConnected };
+  }, [address, isConnected]);
+
+  return useMemo(
+    () => ({
+      findReceipt: findRecentX402Receipt,
+      savePending: savePendingX402Payment,
+      markSettled: markX402PaymentSettled,
+      discard: removeX402Receipt,
+      clear: clearX402Receipts,
+    }),
+    [],
+  );
 }

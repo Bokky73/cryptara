@@ -1086,6 +1086,14 @@ export function getX402PaymentReceiptByHeaderHash(paymentHeaderHash: string) {
   return getX402PaymentReceipts().find((record) => record.paymentHeaderHash === paymentHeaderHash);
 }
 
+/** Replay guard: a settled transaction hash can only redeem one premium scan. */
+export function getX402PaymentReceiptByTxHash(transactionHash: string) {
+  return getX402PaymentReceipts().find((record) => record.transactionHash === transactionHash);
+}
+
+/** Backwards-compatible alias used by the Stellar verification route. */
+export const findX402PaymentReceiptByTxHash = getX402PaymentReceiptByTxHash;
+
 export function createX402PaymentReceipt(input: Omit<X402PaymentReceipt, "id" | "createdAt" | "updatedAt"> & { createdAt?: string; updatedAt?: string }) {
   const existing =  getX402PaymentReceiptByHeaderHash(input.paymentHeaderHash);
 
