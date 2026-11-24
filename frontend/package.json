@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "npm --prefix ../packages/read-client run build",
     "build": "next build",
     "start": "next start",
     "deploy:check": "node ../scripts/check-deploy-readiness.mjs",

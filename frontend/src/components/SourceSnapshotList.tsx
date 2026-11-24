@@ -1,11 +1,22 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { SourceSnapshotDetail } from "@/server/types";
-import { AlertCircle, CheckCircle2, Clock, ExternalLink, WifiOff } from "lucide-react";
+import {
+  getAgentRunSourceSnapshots,
+  isAbortError,
+  toApiClientError,
+  type ApiClientError,
+  type SourceSnapshot,
+} from "@/lib/apiClient";
+import { ApiErrorNotice } from "@/components/ApiErrorNotice";
+import { ExternalLink } from "lucide-react";
 
 type SourceSnapshotListProps = {
-  snapshots: SourceSnapshotDetail[];
+  /** When provided, snapshots are loaded through the typed read client. */
+  runId?: string;
+  /** Pre-validated snapshots (e.g. from a server component) when no runId is available. */
+  snapshots?: SourceSnapshot[] | null;
   loading?: boolean;
   error?: string | null;
 };
@@ -36,8 +47,38 @@ function statusBadge(status: string) {
   }
 }
 
-export function SourceSnapshotList({ snapshots, loading, error }: SourceSnapshotListProps) {
-  if (loading) {
+export function SourceSnapshotList({ runId, snapshots, loading, error }: SourceSnapshotListProps) {
+  const [fetched, setFetched] = useState<SourceSnapshot[] | null>(null);
+  const [fetchError, setFetchError] = useState<ApiClientError | null>(null);
+
+  useEffect(() => {
+    if (!runId) return;
+    const controller = new AbortController();
+    setFetched(null);
+    setFetchError(null);
+    getAgentRunSourceSnapshots(runId, { signal: controller.signal })
+      .then((rows) => {
+        if (!controller.signal.aborted) setFetched(rows);
+      })
+      .catch((cause: unknown) => {
+        if (isAbortError(cause) || controller.signal.aborted) return;
+        setFetchError(toApiClientError(cause));
+      });
+    return () => controller.abort();
+  }, [runId]);
+
+  const legacyError: ApiClientError | null = error ? {
+    kind: "client",
+    code: "source_snapshot_error",
+    message: error,
+    retryable: false,
+    recoveryAction: "stop",
+  } : null;
+  const resolvedError = fetchError ?? legacyError;
+  const isLoading = Boolean(loading) || (Boolean(runId) && fetched === null && !resolvedError);
+  const resolvedSnapshots = runId ? (fetched ?? []) : (snapshots ?? []);
+
+  if (isLoading) {
     return (
       <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/42">
         Loading source snapshots...
@@ -45,19 +86,11 @@ export function SourceSnapshotList({ snapshots, loading, error }: SourceSnapshot
     );
   }
 
-  if (error) {
-    return (
-      <div className="rounded-xl border border-red-300/20 bg-red-500/10 p-4 text-sm text-red-200">
-        <div className="flex items-center gap-2 font-semibold">
-          <AlertCircle className="h-4 w-4" />
-          Source Query Failed
-        </div>
-        <p className="mt-1 text-xs text-red-200/80">{error}</p>
-      </div>
-    );
+  if (resolvedError) {
+    return <ApiErrorNotice error={resolvedError} title="Source Query Failed" />;
   }
 
-  if (snapshots.length === 0) {
+  if (resolvedSnapshots.length === 0) {
     return (
       <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/42">
         No source snapshots recorded for this run.
@@ -65,16 +98,16 @@ export function SourceSnapshotList({ snapshots, loading, error }: SourceSnapshot
     );
   }
 
-  const connectedCount = snapshots.filter((s) => s.status === "connected").length;
-  const unavailableCount = snapshots.filter((s) => s.status === "unavailable").length;
-  const mockCount = snapshots.filter((s) => s.status === "mock").length;
+  const connectedCount = resolvedSnapshots.filter((s) => s.status === "connected").length;
+  const unavailableCount = resolvedSnapshots.filter((s) => s.status === "unavailable").length;
+  const mockCount = resolvedSnapshots.filter((s) => s.status === "mock").length;
 
   return (
     <div className="rounded-xl border border-white/10 bg-white/5 p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-xs font-semibold uppercase tracking-wider text-white/50">
-            Source Snapshots ({snapshots.length})
+            Source Snapshots ({resolvedSnapshots.length})
           </div>
           <p className="mt-1 text-xs text-white/40">
             Verified provider signals, staleness timestamps, and network responses.
@@ -98,7 +131,7 @@ export function SourceSnapshotList({ snapshots, loading, error }: SourceSnapshot
       </div>
 
       <div className="space-y-2.5">
-        {snapshots.map((snap, i) => (
+        {resolvedSnapshots.map((snap, i) => (
           <div
             key={`${snap.agent}-${snap.label}-${i}`}
             className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/5 bg-black/20 px-3.5 py-2.5 text-xs"

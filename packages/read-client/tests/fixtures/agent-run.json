@@ -1,0 +1,27 @@
+{
+  "record": {
+    "id": "run_1",
+    "walletAddress": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+    "status": "complete"
+  },
+  "decisionDetail": null,
+  "sourceSnapshots": [
+    {
+      "agent": "risk",
+      "label": "Stellar RPC",
+      "status": "connected",
+      "reliability": 0.98,
+      "latencyMs": 142,
+      "checkedAt": "2026-09-12T00:00:00.000Z",
+      "url": "https://example.test/rpc"
+    },
+    {
+      "agent": "market",
+      "label": "DEX feed",
+      "status": "unavailable",
+      "reliability": null,
+      "latencyMs": null,
+      "error": "Provider timeout"
+    }
+  ]
+}
