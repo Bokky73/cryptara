@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useWalletSession } from "@/hooks/useWalletSession";
 import type { AgentAnalysisResult } from "@/server/agent";
-import type { TransactionPreview as Preview } from "@/server/types";
+import type { PreparedTransactionPayload, TransactionPreview as Preview } from "@/server/types";
 import { AgentTimeline } from "@/components/AgentTimeline";
 import { RiskScoreCard } from "@/components/RiskScoreCard";
 import { SuggestedActionCard } from "@/components/SuggestedActionCard";
@@ -23,6 +23,7 @@ export function AgentAnalysisClient() {
   const { address } = useWalletSession();
   const [analysis, setAnalysis] = useState<AgentAnalysisResult | null>(null);
   const [preparedPreview, setPreparedPreview] = useState<Preview | null>(null);
+  const [preparedPayload, setPreparedPayload] = useState<PreparedTransactionPayload | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [executionStatus, setExecutionStatus] = useState<ExecutionStatus>("idle");
@@ -32,6 +33,7 @@ export function AgentAnalysisClient() {
     setIsRunning(true);
     setTxHash(null);
     setPreparedPreview(null);
+    setPreparedPayload(null);
     setExecutionStatus("preparing");
     setExecutionError(null);
 
@@ -59,10 +61,15 @@ export function AgentAnalysisClient() {
     });
 
     if (prepareResponse.ok) {
-      setPreparedPreview((await prepareResponse.json()) as Preview);
+      const prepared = (await prepareResponse.json()) as Preview & {
+        payload?: PreparedTransactionPayload | null;
+      };
+      setPreparedPreview(prepared);
+      setPreparedPayload(prepared.payload ?? null);
       setExecutionStatus("ready");
     } else {
       setPreparedPreview(data.preview);
+      setPreparedPayload(null);
       setExecutionStatus("error");
       setExecutionError("Transaction plan could not be refreshed from execution policy.");
     }
@@ -137,7 +144,12 @@ export function AgentAnalysisClient() {
           </div>
           <div className="space-y-5">
             <SuggestedActionCard decision={analysis.decision} />
-            <TransactionPreview preview={preparedPreview ?? analysis.preview} />
+            <TransactionPreview
+              preview={preparedPreview ?? analysis.preview}
+              payload={preparedPayload}
+              walletAddress={address ?? undefined}
+              onRefresh={() => void runAgent()}
+            />
             <div className="flex flex-col gap-3 rounded-[28px] border border-white/10 bg-white/6 p-5 sm:flex-row">
               <button
                 type="button"
