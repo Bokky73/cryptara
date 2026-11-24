@@ -24,6 +24,16 @@ export const goldenFixtureSuite = [
   "stellar_invalid_issuer",
   "stellar_unknown_contract",
   "stellar_unavailable_provider",
+  // EVM L2 edge cases
+  "evm_l2_optimism_clean",
+  "evm_l2_arbitrum_bridged",
+  "evm_l2_base_honeypot",
+  "evm_l2_polygon_low_liquidity",
+  // Stellar classic / Soroban edge cases
+  "stellar_classic_anchored_asset",
+  "stellar_classic_revoked_issuer",
+  "stellar_soroban_clean_contract",
+  "stellar_soroban_honeypot_contract",
 ] as const;
 
 export type GoldenFixtureName = (typeof goldenFixtureSuite)[number];
@@ -60,6 +70,16 @@ export const goldenScoreSnapshots: Record<GoldenFixtureName, { min: number; max:
   stellar_invalid_issuer: { min: 50, max: 90 },
   stellar_unknown_contract: { min: 50, max: 90 },
   stellar_unavailable_provider: { min: 50, max: 90 },
+  // EVM L2 edge cases
+  evm_l2_optimism_clean: { min: 0, max: 35 },
+  evm_l2_arbitrum_bridged: { min: 0, max: 45 },
+  evm_l2_base_honeypot: { min: 75, max: 100, criticalNeverDowngrade: true },
+  evm_l2_polygon_low_liquidity: { min: 50, max: 90 },
+  // Stellar classic / Soroban edge cases
+  stellar_classic_anchored_asset: { min: 0, max: 35 },
+  stellar_classic_revoked_issuer: { min: 50, max: 90 },
+  stellar_soroban_clean_contract: { min: 0, max: 35 },
+  stellar_soroban_honeypot_contract: { min: 75, max: 100, criticalNeverDowngrade: true },
 };
 
 export function assertGoldenScore(name: GoldenFixtureName, score: number) {

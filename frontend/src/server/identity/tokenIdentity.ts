@@ -31,6 +31,23 @@ function normalizeAddress(value?: string) {
   return undefined;
 }
 
+function normalizeEvmChainId(value?: string) {
+  if (!value) return undefined;
+  const trimmed = value.trim().toLowerCase();
+  const caipMatch = trimmed.match(/^eip155:(\d+)$/);
+  if (caipMatch) return caipMatch[1];
+  if (/^\d+$/.test(trimmed)) return trimmed;
+  return undefined;
+}
+
+function normalizeStellarNetwork(value?: string) {
+  const trimmed = value?.trim().toLowerCase();
+  if (!trimmed) return "mainnet";
+  if (trimmed === "public" || trimmed === "pubnet" || trimmed === "mainnet") return "mainnet";
+  if (trimmed === "test" || trimmed === "testnet") return "testnet";
+  return trimmed;
+}
+
 function getConfidenceLabel(confidence: number): ResolvedTokenIdentity["confidenceLabel"] {
   if (confidence >= 0.72) return "high";
   if (confidence >= 0.42) return "medium";
@@ -125,11 +142,11 @@ export function resolveTokenIdentity(input: AgentInputIdentity): ResolvedTokenId
   const boundedConfidence = Math.min(0.96, Math.max(0.08, confidence));
   const identityKey =
     contractAddress && chain
-      ? `${chain}:${contractAddress}`
+      ? buildCanonicalAssetId({ chain, contractAddress, assetKey: input.assetKey, issuer: input.issuer, network: input.network, assetType: input.assetType })
       : contractAddress
         ? contractAddress
         : input.assetKey && chain
-          ? `${chain}:${input.assetKey}`
+          ? buildCanonicalAssetId({ chain, contractAddress: undefined, assetKey: input.assetKey, issuer: input.issuer, network: input.network, assetType: input.assetType })
           : [symbol, tokenName, websiteUrl, input.coingeckoId].filter(Boolean).join(":").toLowerCase() || "unknown-token";
 
   return {
@@ -156,6 +173,66 @@ export function resolveTokenIdentity(input: AgentInputIdentity): ResolvedTokenId
   };
 }
 
+/**
+ * Builds a CAIP-19-style canonical asset identifier.
+ *
+ * EVM:     eip155:<chainId>/erc20:<lowercaseAddress>
+ * Stellar: stellar:<network>/asset:<code:issuer>  (classic)
+ *          stellar:<network>/contract:<C...>       (Soroban SAC)
+ *          stellar:<network>/native                (native XLM)
+ *
+ * Distinct issuers/contracts never collapse into the same key, so spoofed
+ * tickers on different addresses cannot collide in history or watchlists.
+ */
+export function buildCanonicalAssetId(entry: {
+  chain?: string;
+  network?: string;
+  assetType?: string;
+  contractAddress?: string;
+  assetKey?: string;
+  issuer?: string;
+}): string {
+  const chain = normalizeChain(entry.chain) || "unknown-chain";
+
+  if (chain === "stellar") {
+    const network = normalizeStellarNetwork(entry.network);
+    if (entry.assetType === "native") {
+      return `stellar:${network}/native`;
+    }
+    const contract = normalizeAddress(entry.contractAddress);
+    if (contract && StrKey.isValidContract(contract)) {
+      return `stellar:${network}/contract:${contract}`;
+    }
+    const code = entry.assetKey?.trim().toUpperCase();
+    const issuer = entry.issuer?.trim();
+    if (code && issuer) {
+      const normalizedIssuer = StrKey.isValidEd25519PublicKey(issuer) ? issuer.toUpperCase() : issuer;
+      return `stellar:${network}/asset:${code}:${normalizedIssuer}`;
+    }
+    if (code) {
+      return `stellar:${network}/asset:${code}`;
+    }
+    if (contract) {
+      return `stellar:${network}/contract:${contract}`;
+    }
+    return `stellar:${network}/unknown-asset`;
+  }
+
+  // EVM
+  const chainId = normalizeEvmChainId(entry.chain) ?? normalizeEvmChainId(entry.network);
+  const address = normalizeAddress(entry.contractAddress);
+  if (chainId && address && evmAddressPattern.test(address)) {
+    return `eip155:${chainId}/erc20:${address}`;
+  }
+  if (address) {
+    return `${chain}:${address}`;
+  }
+  if (entry.assetKey) {
+    return `${chain}:${entry.assetKey.trim().toLowerCase()}`;
+  }
+  return `${chain}:unknown-asset`;
+}
+
 export function getWatchlistIdentityKey(entry: {
   chain: string;
   network?: string;
@@ -166,32 +243,21 @@ export function getWatchlistIdentityKey(entry: {
   symbol?: string;
 }): string {
   const chain = normalizeChain(entry.chain) || "unknown-chain";
-  const network = entry.network?.trim().toLowerCase() || "mainnet";
 
   if (chain === "stellar") {
-    if (entry.assetType === "native") {
-      return `stellar:${network}:native`;
-    }
-    if (entry.assetKey && entry.issuer) {
-      return `stellar:${network}:${entry.assetKey}:${entry.issuer}`;
-    }
-    if (entry.contractAddress) {
-      return `stellar:${network}:${normalizeAddress(entry.contractAddress) || entry.contractAddress}`;
-    }
-    if (entry.assetKey) {
-      return `stellar:${network}:${entry.assetKey}`;
-    }
+    return buildCanonicalAssetId(entry);
   }
 
   // EVM
   if (entry.contractAddress) {
-    return `${chain}:${network}:${normalizeAddress(entry.contractAddress) || entry.contractAddress}`;
-  }
-  
-  if (entry.assetKey) {
-    return `${chain}:${network}:${entry.assetKey}`;
+    return buildCanonicalAssetId(entry);
   }
 
+  if (entry.assetKey) {
+    return buildCanonicalAssetId(entry);
+  }
+
+  const network = entry.network?.trim().toLowerCase() || "mainnet";
   const symbolStr = entry.symbol ? `:${entry.symbol.trim().toLowerCase()}` : "";
   return `${chain}:${network}:unknown-asset${symbolStr}`;
 }

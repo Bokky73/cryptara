@@ -86,6 +86,35 @@ export function hashQuote(input: {
   return sha256Hex(parts.join("\n"));
 }
 
+/**
+ * Deterministic simulation digest binding an execution approval to the exact
+ * simulation it was produced from.  Covers the chain context, quote identity,
+ * economic bounds, fee estimate, the block/ledger the simulation ran against,
+ * and the simulation TTL.  Any drift in these fields (stale TTL, moved block,
+ * changed min-out or fee) yields a different digest and must abort submission.
+ */
+export function hashSimulation(input: {
+  chainFamily: "evm" | "stellar";
+  network: string;
+  quoteId: string;
+  expectedMinOut: string;
+  feeEstimate: string;
+  simulatedBlockOrLedger: number | string;
+  expiresAt: string;
+}): string {
+  const canonicalParts: string[] = [
+    input.chainFamily,
+    input.network.trim().toLowerCase(),
+    input.quoteId.trim(),
+    input.expectedMinOut.trim(),
+    input.feeEstimate.trim(),
+    String(input.simulatedBlockOrLedger),
+    input.expiresAt.trim(),
+  ];
+
+  return sha256Hex(canonicalParts.join("\n"));
+}
+
 // ─── Redaction ─────────────────────────────────────────────────────────
 
 const STELLAR_SECRET_KEY_PATTERN = /\bS[A-Z2-7]{55}\b/g;
