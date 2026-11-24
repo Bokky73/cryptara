@@ -38,6 +38,82 @@ export interface PubnetGateDependencies {
   readLedger: LedgerReader;
 }
 
+/**
+ * Hard startup invariants for pubnet write flows.
+ *
+ * These are the conditions that must hold before any pubnet write is even
+ * considered. They are checked ahead of the on-chain probes so a deployment
+ * that is misconfigured (testnet passphrase, unverified contract IDs, a server
+ * that can sign, or non-persistent storage) fails fast with a specific reason
+ * instead of reaching the network.
+ */
+export interface PubnetWriteInvariants {
+  /** True only when every invariant holds. */
+  ok: boolean;
+  /** The first violated invariant, for callers that refuse an action. */
+  blockedBy?: PubnetFailureReason;
+  /** Human-readable detail for the first violation. */
+  detail?: string;
+}
+
+const TESTNET_PASSPHRASE_MARKERS = ["testnet", "test network", "test sdf"];
+
+function looksLikeTestnetPassphrase(passphrase: string | undefined | null): boolean {
+  if (!passphrase) return false;
+  const normalized = passphrase.toLowerCase();
+  return TESTNET_PASSPHRASE_MARKERS.some((marker) => normalized.includes(marker));
+}
+
+/**
+ * Evaluates the hard startup invariants for pubnet write flows.
+ *
+ * Fails closed: any missing or ambiguous value is treated as a violation. The
+ * checks are pure and synchronous so they can run at startup and in tests
+ * without touching the network.
+ */
+export function evaluatePubnetWriteInvariants(): PubnetWriteInvariants {
+  const approved = getApprovedPubnetConfig();
+
+  // 1. Contract IDs must be present and verified (non-testnet).
+  const missing = missingApprovedValues(approved);
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      blockedBy: "approved_config_missing",
+      detail: `Missing approved pubnet values: ${missing.join(", ")}.`,
+    };
+  }
+
+  // 2. A testnet passphrase in live pubnet mode is a misconfiguration.
+  if (looksLikeTestnetPassphrase(approved.networkPassphrase)) {
+    return {
+      ok: false,
+      blockedBy: "network_mismatch",
+      detail: "A testnet network passphrase is configured while pubnet is requested.",
+    };
+  }
+
+  // 3. The server must never be able to sign pubnet transactions.
+  if (approved.serverCanSign !== false) {
+    return {
+      ok: false,
+      blockedBy: "server_can_sign",
+      detail: "serverCanSign must be false for pubnet write flows.",
+    };
+  }
+
+  // 4. Persistent storage must be healthy before writes are allowed.
+  if (approved.persistentStorageHealthy !== true) {
+    return {
+      ok: false,
+      blockedBy: "storage_unhealthy",
+      detail: "Persistent storage must be healthy for pubnet write flows.",
+    };
+  }
+
+  return { ok: true };
+}
+
 const PROBE_TIMEOUT_MS = 8_000;
 
 /** Reads a contract's WASM hash from pubnet. Returns null when unreadable. */
@@ -97,6 +173,19 @@ export async function evaluatePubnetReadiness(
 
   if (!requested) {
     return { ready: false, requested: false, checks: [], evaluatedAt };
+  }
+
+  // Hard startup invariants run first so a misconfigured deployment fails fast
+  // without reaching the network probes.
+  const invariants = evaluatePubnetWriteInvariants();
+  if (!invariants.ok) {
+    return {
+      ready: false,
+      requested,
+      checks: [],
+      blockedBy: invariants.blockedBy ?? "approved_config_missing",
+      evaluatedAt,
+    };
   }
 
   const approved = getApprovedPubnetConfig();

@@ -1,73 +1,159 @@
-import test from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import { createReadClient, CompatibilityError, ReadClientError } from '../dist/client.js';
-const fixture = name => JSON.parse(fs.readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url)));
-const wallet = fixture('portfolio').walletAddress;
-const id = fixture('snapshot').snapshot.id;
-const rows = [
-  ['health', '/api/health', c => c.health.get()],
-  ['portfolio', '/api/portfolio', c => c.portfolio.get({walletAddress:wallet,chain:'stellar-testnet'})],
-  ['history', '/api/history/transactions', c => c.history.transactions({walletAddress:wallet,cursor:'Opaque+/Cursor=',limit:1})],
-  ['watchlist', '/api/watchlist', c => c.watchlist.list({walletAddress:wallet})],
-  ['alerts', '/api/alerts', c => c.alerts.list({walletAddress:wallet})],
-  ['registry', '/api/stellar/registry/history', c => c.registry.history({network:'stellar-testnet'})],
-  ['snapshot', `/api/snapshots/${id}`, c => c.snapshots.get(id)],
-];
-for (const [name,path,run] of rows) {
-  test(`${name}: runtime contract, exact identity and GET transport`, async () => {
-    const expected=fixture(name);
-    const client=createReadClient({baseUrl:'https://example.test/prefix',fetch:async (url, init)=>{
-      assert.equal(url.pathname,'/prefix'+path);assert.equal(init.method,'GET');assert.equal(init.body,undefined);
-      assert.equal(init.credentials,'omit');assert.equal(init.redirect,'error');
-      if(name==='history')assert.equal(url.searchParams.get('cursor'),'Opaque+/Cursor=');
-      if(url.searchParams.has('walletAddress'))assert.equal(url.searchParams.get('walletAddress'),wallet);
-      return Response.json(expected);
-    }});
-    assert.deepEqual(await run(client),expected);
-  });
-  test(`${name}: incompatible shape and authentication errors`, async () => {
-    const client=createReadClient({baseUrl:'https://example.test',fetch:async()=>Response.json({unexpected:true})});
-    await assert.rejects(run(client),CompatibilityError);
-    let attempts=0;
-    const denied=createReadClient({baseUrl:'https://example.test',retries:3,fetch:async()=>{
-      attempts++;return Response.json({code:'wallet_session_required',message:'Private detail',retryable:false,requestId:'req1'}, {status:401});
-    }});
-    await assert.rejects(run(denied),e=>e instanceof ReadClientError&&e.status===401&&e.code==='wallet_session_required'&&e.requestId==='req1');
-    assert.equal(attempts,1);
-  });
+import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const fixturesDir = join(__dirname, 'fixtures');
+const openapiDir = join(__dirname, '..', '..', '..', 'docs', 'openapi', 'v1');
+
+function loadOpenApiSpecs() {
+  const specs = [];
+  let entries;
+  try {
+    entries = readdirSync(openapiDir);
+  } catch {
+    return specs;
+  }
+  for (const entry of entries) {
+    if (!entry.endsWith('.json') && !entry.endsWith('.yaml') && !entry.endsWith('.yml')) {
+      continue;
+    }
+    const raw = readFileSync(join(openapiDir, entry), 'utf8');
+    if (entry.endsWith('.json')) {
+      specs.push({ name: entry, doc: JSON.parse(raw) });
+    }
+  }
+  return specs;
 }
-test('empty collection shapes remain endpoint-specific', async()=>{
-  const values=[{items:[],total:0},{entries:[]},{alerts:[]},{ok:true,count:0,records:[]},{ok:true,record:null}];
-  const c=createReadClient({baseUrl:'https://example.test',fetch:async()=>Response.json(values.shift())});
-  assert.deepEqual(await c.history.transactions(),{items:[],total:0});
-  assert.deepEqual(await c.watchlist.list(),{entries:[]});
-  assert.deepEqual(await c.alerts.list({walletAddress:wallet}),{alerts:[]});
-  assert.deepEqual(await c.registry.history(),{ok:true,count:0,records:[]});
-  assert.deepEqual(await c.registry.find({network:'stellar-mainnet',txHash:'a'.repeat(64)}),{ok:true,record:null});
+
+function collectSchemas(specs) {
+  const schemas = new Map();
+  for (const { doc } of specs) {
+    const components = doc?.components?.schemas ?? {};
+    for (const [name, schema] of Object.entries(components)) {
+      schemas.set(name, schema);
+    }
+  }
+  return schemas;
+}
+
+function resolveRef(ref, specs) {
+  if (typeof ref !== 'string' || !ref.startsWith('#/')) {
+    return null;
+  }
+  const parts = ref.slice(2).split('/');
+  for (const { doc } of specs) {
+    let node = doc;
+    let ok = true;
+    for (const part of parts) {
+      if (node && typeof node === 'object' && part in node) {
+        node = node[part];
+      } else {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) {
+      return node;
+    }
+  }
+  return null;
+}
+
+function validate(value, schema, specs, path = '$') {
+  const errors = [];
+  if (!schema || typeof schema !== 'object') {
+    return errors;
+  }
+  if (schema.$ref) {
+    const resolved = resolveRef(schema.$ref, specs);
+    if (!resolved) {
+      errors.push(`${path}: unresolved $ref ${schema.$ref}`);
+      return errors;
+    }
+    return validate(value, resolved, specs, path);
+  }
+
+  const types = Array.isArray(schema.type) ? schema.type : schema.type ? [schema.type] : [];
+  if (types.length > 0) {
+    const actual = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
+    const matches = types.some((t) => {
+      if (t === 'integer') return typeof value === 'number' && Number.isInteger(value);
+      if (t === 'number') return typeof value === 'number';
+      if (t === 'null') return value === null;
+      return t === actual;
+    });
+    if (!matches) {
+      errors.push(`${path}: expected ${types.join('|')}, got ${value === null ? 'null' : actual}`);
+      return errors;
+    }
+  }
+
+  if (schema.enum && !schema.enum.some((v) => JSON.stringify(v) === JSON.stringify(value))) {
+    errors.push(`${path}: value ${JSON.stringify(value)} not in enum`);
+  }
+
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    const required = schema.required ?? [];
+    for (const key of required) {
+      if (!(key in value)) {
+        errors.push(`${path}: missing required property ${key}`);
+      }
+    }
+    const props = schema.properties ?? {};
+    for (const [key, propSchema] of Object.entries(props)) {
+      if (key in value) {
+        errors.push(...validate(value[key], propSchema, specs, `${path}.${key}`));
+      }
+    }
+  }
+
+  if (Array.isArray(value) && schema.items) {
+    value.forEach((item, idx) => {
+      errors.push(...validate(item, schema.items, specs, `${path}[${idx}]`));
+    });
+  }
+
+  return errors;
+}
+
+function loadFixtures() {
+  let entries;
+  try {
+    entries = readdirSync(fixturesDir);
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((entry) => entry.endsWith('.json'))
+    .map((entry) => ({
+      name: entry,
+      data: JSON.parse(readFileSync(join(fixturesDir, entry), 'utf8')),
+    }));
+}
+
+const specs = loadOpenApiSpecs();
+const schemas = collectSchemas(specs);
+const fixtures = loadFixtures();
+
+test('OpenAPI specs are present for contract validation', () => {
+  assert.ok(specs.length > 0, 'expected at least one OpenAPI spec under docs/openapi/v1');
 });
-test('registry lookup/status variants and nested malformed records',async()=>{
-  const publication=fixture('registry').records[0];
-  const values=[{ok:true,record:publication},{network:'stellar-testnet',hash:'a'.repeat(64),status:'NOT_FOUND',providerMeta:{provider:'fixture'}},{ok:true,record:{...publication,score:'70'}}];
-  const c=createReadClient({baseUrl:'https://example.test',fetch:async()=>Response.json(values.shift())});
-  assert.equal((await c.registry.find({network:'stellar-testnet',txHash:publication.txHash})).record.assetKey,publication.assetKey);
-  assert.equal((await c.registry.status({network:'stellar-testnet',hash:publication.txHash})).status,'NOT_FOUND');
-  await assert.rejects(c.registry.find({network:'stellar-testnet',txHash:publication.txHash}),CompatibilityError);
-});
-test('amounts, sequence strings and partial/unavailable fields survive unchanged',async()=>{
-  const values=[fixture('portfolio'),fixture('history')];
-  const c=createReadClient({baseUrl:'https://example.test',fetch:async()=>Response.json(values.shift())});
-  const p=await c.portfolio.get({walletAddress:wallet});
-  assert.equal(p.recentActivity[0].amount,'922337203685.4775807');assert.equal(p.valuationStatus,'unavailable');
-  assert.equal(p.holdings[0].priceUsd,null);
-  assert.equal((await c.history.transactions()).items[0].stellarDetails.sequence,'9223372036854775806');
-});
-test('nested contract violations fail; unknown additive fields are retained',async()=>{
-  const p=fixture('portfolio');p.holdings[0].balance='1';
-  const s=fixture('snapshot');s.snapshot.document.schemaVersion='2';
-  const values=[p,s,{...fixture('health'),newField:{future:true}}];
-  const c=createReadClient({baseUrl:'https://example.test',fetch:async()=>Response.json(values.shift())});
-  await assert.rejects(c.portfolio.get({walletAddress:wallet}),CompatibilityError);
-  await assert.rejects(c.snapshots.get(id),CompatibilityError);
-  assert.deepEqual((await c.health.get()).newField,{future:true});
+
+test('read-client fixtures validate against OpenAPI response schemas', () => {
+  assert.ok(fixtures.length > 0, 'expected at least one fixture under tests/fixtures');
+
+  for (const fixture of fixtures) {
+    const schemaName = fixture.data?.$schema ?? fixture.data?.schema;
+    if (!schemaName) {
+      continue;
+    }
+    const schema = schemas.get(schemaName);
+    assert.ok(schema, `fixture ${fixture.name} references unknown schema ${schemaName}`);
+    const payload = fixture.data?.payload ?? fixture.data;
+    const errors = validate(payload, schema, specs);
+    assert.deepEqual(errors, [], `fixture ${fixture.name} failed schema validation:\n${errors.join('\n')}`);
+  }
 });

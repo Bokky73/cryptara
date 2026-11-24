@@ -8,7 +8,7 @@
  * canonicalized and hashed so any material change fails verification.
  */
 
-import { createHash } from "node:crypto";
+import { createHash, createHmac, sign as edSign, type KeyObject } from "node:crypto";
 
 import type {
   RecommendationRecord,
@@ -68,6 +68,25 @@ export interface AuditBundleScope {
   recordIds: string[];
 }
 
+/**
+ * Tamper-evident integrity manifest. `sha256` is the digest of the canonical
+ * bundle body (everything except the manifest itself). `signature` is an
+ * optional detached signature over the manifest digest.
+ */
+export interface AuditBundleManifest {
+  algorithm: "sha256";
+  sha256: string;
+  signature?: AuditBundleSignature;
+}
+
+export interface AuditBundleSignature {
+  algorithm: "hmac-sha256" | "ed25519";
+  /** Hex-encoded signature bytes (HMAC digest or Ed25519 signature). */
+  value: string;
+  /** Optional key identifier for rotation/verification lookup. */
+  keyId?: string;
+}
+
 export interface AuditBundle {
   version: typeof AUDIT_BUNDLE_VERSION;
   generatedAt: string;
@@ -76,6 +95,7 @@ export interface AuditBundle {
   decisions: AuditDecisionEntry[];
   approvals: AuditApprovalEntry[];
   transactions: AuditTransactionEntry[];
+  manifest?: AuditBundleManifest;
 }
 
 export type AuditBundleSection = "decisions" | "approvals" | "transactions";
@@ -100,6 +120,15 @@ export function buildAuditBundleHash(bundle: AuditBundle): string {
   return createHash("sha256").update(canonicalize(bundle), "utf8").digest("hex");
 }
 
+/**
+ * SHA-256 digest of the bundle body, excluding the manifest. This is the value
+ * recorded in the manifest and is stable regardless of signature presence.
+ */
+export function buildAuditBundleBodyHash(bundle: AuditBundle): string {
+  const { manifest: _manifest, ...body } = bundle;
+  return createHash("sha256").update(canonicalize(body), "utf8").digest("hex");
+}
+
 /** One-way wallet identifier used in the bundle scope and audit events. */
 export function hashWalletIdentifier(walletAddress: string): string {
   return createHash("sha256").update(walletAddress.trim(), "utf8").digest("hex");
@@ -112,6 +141,36 @@ export function digestEvidence(
   payload: string,
 ): AuditEvidenceDigest {
   return { id, kind, sha256: createHash("sha256").update(payload, "utf8").digest("hex") };
+}
+
+/** Optional detached signature configuration for a bundle export. */
+export type AuditBundleSigner =
+  | { algorithm: "hmac-sha256"; secret: string | Buffer; keyId?: string }
+  | { algorithm: "ed25519"; privateKey: KeyObject | string | Buffer; keyId?: string };
+
+function signManifestDigest(digest: string, signer: AuditBundleSigner): AuditBundleSignature {
+  if (signer.algorithm === "hmac-sha256") {
+    const value = createHmac("sha256", signer.secret).update(digest, "utf8").digest("hex");
+    return { algorithm: "hmac-sha256", value, keyId: signer.keyId };
+  }
+  const value = edSign(null, Buffer.from(digest, "utf8"), signer.privateKey).toString("hex");
+  return { algorithm: "ed25519", value, keyId: signer.keyId };
+}
+
+/**
+ * Attach a SHA-256 integrity manifest (and optional detached signature) to a
+ * bundle. Returns a new bundle; the input is not mutated.
+ */
+export function attachAuditBundleManifest(
+  bundle: AuditBundle,
+  signer?: AuditBundleSigner,
+): AuditBundle {
+  const sha256 = buildAuditBundleBodyHash(bundle);
+  const manifest: AuditBundleManifest = { algorithm: "sha256", sha256 };
+  if (signer) {
+    manifest.signature = signManifestDigest(sha256, signer);
+  }
+  return { ...bundle, manifest };
 }
 
 export interface BuildAuditBundleInput {
@@ -127,6 +186,8 @@ export interface BuildAuditBundleInput {
     approval: (a: UserApprovalRecord) => AuditApprovalEntry;
     transaction: (t: TransactionRecord) => AuditTransactionEntry;
   };
+  /** Optional signer; when provided the manifest carries a detached signature. */
+  signer?: AuditBundleSigner;
 }
 
 /** Assemble a versioned bundle from already-redacted entries. */
@@ -141,7 +202,7 @@ export function buildAuditBundle(input: BuildAuditBundleInput): AuditBundle {
     ...transactions.map((t) => t.hash),
   ];
 
-  return {
+  const bundle: AuditBundle = {
     version: AUDIT_BUNDLE_VERSION,
     generatedAt: new Date().toISOString(),
     product: { name: "cryptara", version: input.productVersion },
@@ -155,4 +216,6 @@ export function buildAuditBundle(input: BuildAuditBundleInput): AuditBundle {
     approvals,
     transactions,
   };
+
+  return attachAuditBundleManifest(bundle, input.signer);
 }

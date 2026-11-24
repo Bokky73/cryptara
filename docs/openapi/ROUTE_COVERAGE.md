@@ -11,6 +11,10 @@ Error shape legend:
 - **Legacy** — route returns `LegacyErrorEnvelope` (`{ error, detail? }`) on error.
 - **Migrated** — route returns `MigratedErrorEnvelope` (stable `code`/`message`/`retryable`/`requestId` fields alongside the legacy fields), via `frontend/src/server/api/errors.ts`.
 
+Canonical error responses: every documented operation references the shared
+`Error` response component and declares the applicable subset of
+`400`, `401`, `402`, `403`, `404`, `429`, `500`, `503`.
+
 | Route file | Method | Path | operationId | Error shape | Test coverage |
 |---|---|---|---|---|---|
 | `agent/analyze/route.ts` | POST | `/agent/analyze` | `postAgentAnalyze` | Legacy | `openapi-check.ts` (coverage) |
@@ -50,16 +54,34 @@ Error shape legend:
 | `history/approvals/[id]/route.ts` | PATCH | `/history/approvals/{id}` | `patchApproval` | Legacy | `openapi-check.ts` (coverage) |
 | `history/recommendations/route.ts` | GET | `/history/recommendations` | `getRecommendations` | n/a | `openapi-check.ts` (coverage) |
 | `history/transactions/route.ts` | GET | `/history/transactions` | `getHistoryTransactions` | n/a | `agent-fixture-check.ts` (`runTransactionLifecycleChecks`) |
+| `insights/route.ts` | GET | `/insights` | `getInsights` | Legacy | `openapi-check.ts` (coverage) |
+| `insights/route.ts` | POST | `/insights` | `postInsights` | Legacy | `openapi-check.ts` (coverage) |
+| `insights/[id]/route.ts` | GET | `/insights/{id}` | `getInsight` | Legacy | `openapi-check.ts` (coverage) |
+| `insights/[id]/route.ts` | DELETE | `/insights/{id}` | `deleteInsight` | Legacy | `openapi-check.ts` (coverage) |
+| `insights/generate/route.ts` | POST | `/insights/generate` | `postInsightsGenerate` | Legacy | `openapi-check.ts` (coverage) |
+| `insights/summary/route.ts` | GET | `/insights/summary` | `getInsightsSummary` | Legacy | `openapi-check.ts` (coverage) |
 | `portfolio/route.ts` | GET | `/portfolio` | `getPortfolio` | Legacy | `openapi-check.ts` (coverage) |
 | `portfolio/health/route.ts` | GET | `/portfolio/health` | `getPortfolioHealth` | n/a | `openapi-check.ts` (coverage) |
+| `recovery/route.ts` | GET | `/recovery` | `getRecovery` | Legacy | `openapi-check.ts` (coverage) |
+| `recovery/route.ts` | POST | `/recovery` | `postRecovery` | Legacy | `openapi-check.ts` (coverage) |
+| `recovery/[id]/route.ts` | GET | `/recovery/{id}` | `getRecoveryPlan` | Legacy | `openapi-check.ts` (coverage) |
+| `recovery/[id]/route.ts` | PATCH | `/recovery/{id}` | `patchRecoveryPlan` | Legacy | `openapi-check.ts` (coverage) |
 | `rules/route.ts` | GET | `/rules` | `getRules` | n/a | `openapi-check.ts` (coverage) |
 | `rules/route.ts` | POST | `/rules` | `postRules` | Legacy | `openapi-check.ts` (coverage) |
 | `scan/token/route.ts` | POST | `/scan/token` | `postScanToken` | **Migrated** | `openapi-conformance-check.ts` (`Error`), `openapi-check.ts` |
+| `snapshots/route.ts` | GET | `/snapshots` | `getSnapshots` | Legacy | `openapi-check.ts` (coverage) |
+| `snapshots/route.ts` | POST | `/snapshots` | `postSnapshot` | Legacy | `openapi-check.ts` (coverage) |
+| `snapshots/[id]/route.ts` | GET | `/snapshots/{id}` | `getSnapshot` | Legacy | `openapi-check.ts` (coverage) |
+| `snapshots/[id]/route.ts` | DELETE | `/snapshots/{id}` | `deleteSnapshot` | Legacy | `openapi-check.ts` (coverage) |
 | `stellar/registry/prepare/route.ts` | POST | `/stellar/registry/prepare` | `postStellarRegistryPrepare` | Legacy | `openapi-check.ts` (coverage) |
 | `stellar/registry/record/route.ts` | GET | `/stellar/registry/record` | `getStellarRegistryRecord` | Legacy | `openapi-check.ts` (coverage) |
 | `stellar/registry/status/route.ts` | GET | `/stellar/registry/status` | `getStellarRegistryStatus` | Legacy | `openapi-check.ts` (coverage) |
 | `stellar/registry/submit/route.ts` | POST | `/stellar/registry/submit` | `postStellarRegistrySubmit` | Legacy | `openapi-check.ts` (coverage) |
 | `transactions/route.ts` | GET | `/transactions` | `getTransactions` | n/a | `openapi-check.ts` (coverage) |
+| `wallet-privacy/route.ts` | GET | `/wallet-privacy` | `getWalletPrivacy` | Legacy | `openapi-check.ts` (coverage) |
+| `wallet-privacy/route.ts` | POST | `/wallet-privacy` | `postWalletPrivacy` | Legacy | `openapi-check.ts` (coverage) |
+| `wallet-privacy/[id]/route.ts` | GET | `/wallet-privacy/{id}` | `getWalletPrivacyReport` | Legacy | `openapi-check.ts` (coverage) |
+| `wallet-privacy/[id]/route.ts` | DELETE | `/wallet-privacy/{id}` | `deleteWalletPrivacyReport` | Legacy | `openapi-check.ts` (coverage) |
 | `wallet-session/route.ts` | GET | `/wallet-session` | `getWalletSession` | n/a | `openapi-check.ts` (coverage) |
 | `wallet-session/route.ts` | POST | `/wallet-session` | `postWalletSession` | **Migrated** | `openapi-conformance-check.ts` (`Error`) |
 | `wallet-session/route.ts` | DELETE | `/wallet-session` | `deleteWalletSession` | n/a | `openapi-check.ts` (coverage) |
@@ -68,15 +90,11 @@ Error shape legend:
 | `watchlist/route.ts` | POST | `/watchlist` | `postWatchlist` | Legacy | `openapi-check.ts` (coverage) |
 | `watchlist/[id]/rescan/route.ts` | GET | `/watchlist/{id}/rescan` | `getWatchlistHistory` | Legacy | `openapi-check.ts` (coverage) |
 | `watchlist/[id]/rescan/route.ts` | POST | `/watchlist/{id}/rescan` | `postWatchlistRescan` | Legacy | `openapi-check.ts` (coverage) |
-| `x402/deep-scan/route.ts` | GET | `/x402/deep-scan` | `getX402DeepScan` | Legacy | `agent-fixture-check.ts` (`runX402Checks`) |
-| `x402/terms/route.ts` | GET | `/x402/terms` | `getX402Terms` | n/a | `openapi-check.ts` (coverage) |
+| `x402/deep-scan/route.ts` | GET | `/x402/deep-scan` | `getX402DeepScan` | Legacy | `openapi-check.ts` (coverage) |
+| `x402/deep-scan/route.ts` | POST | `/x402/deep-scan` | `postX402DeepScan` | Legacy | `openapi-check.ts` (coverage) |
 
-## Notes
+## Excluded routes
 
-- "Test coverage" lists the existing fixture scripts that already exercise a
-  route's behavior (unchanged by this OpenAPI work) plus the new
-  `test:openapi` scripts, which validate spec shape/schema conformance
-  rather than route business logic.
-- `openapi-check.ts` fails the build for **every** row in this table if the
-  route file's exported methods drift from what is documented here, so this
-  table (and the underlying spec) cannot silently go stale.
+Routes under `frontend/src/app/api/dev/*` are development-only and are
+explicitly excluded from OpenAPI coverage. `openapi-check.ts` fails CI when
+any non-`dev/*` route/method pair is undocumented.
