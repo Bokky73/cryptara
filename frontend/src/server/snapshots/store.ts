@@ -88,6 +88,31 @@ export async function readRiskSnapshot(id: string, adapter?: IStorageAdapter): P
   return verifyRiskSnapshotRecord(record);
 }
 
+/**
+ * Find the most recent valid snapshot of the same canonical asset identity.
+ * Revoked, expired, tampered and identity-mismatched records fail closed and
+ * are never offered as a comparison target.
+ */
+export async function findLatestRiskSnapshot(
+  identityKey: string,
+  options: { excludeId?: string; now?: number } = {},
+  adapter?: IStorageAdapter,
+): Promise<{ id: string; createdAt: string; canonicalHash: string } | null> {
+  const storage = adapter ?? await getSnapshotStorageAdapter();
+  const now = options.now ?? Date.now();
+  const candidates = (await storage.listRiskSnapshots(identityKey))
+    .filter((record) => record.id !== options.excludeId && !record.revokedAt)
+    .flatMap((record) => {
+      const verified = verifyRiskSnapshotRecord(record, now);
+      return verified.ok
+        ? [{ id: record.id, createdAt: record.createdAt, canonicalHash: record.canonicalHash }]
+        : [];
+    })
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
+
+  return candidates[0] ?? null;
+}
+
 export async function revokeRiskSnapshot(
   id: string,
   token: string,

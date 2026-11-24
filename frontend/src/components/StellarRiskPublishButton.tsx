@@ -42,6 +42,10 @@ function shortHex(hex: string, chars = 8): string {
   return hex.length > chars * 2 + 3 ? hex.slice(0, chars) + "..." + hex.slice(-chars) : hex;
 }
 
+function toHashHex(value: string | undefined): string {
+  return value?.toLowerCase().replace(/^sha256:/, "") ?? "";
+}
+
 export function StellarRiskPublishButton({
   network,
   assetKey,
@@ -49,6 +53,7 @@ export function StellarRiskPublishButton({
   score,
   verdict,
   report,
+  expectedHash,
 }: {
   network?: string;
   assetKey?: string;
@@ -56,6 +61,8 @@ export function StellarRiskPublishButton({
   score: number;
   verdict: string;
   report: unknown;
+  /** Canonical snapshot hash to compare against the registry publication. */
+  expectedHash?: string;
 }) {
   const stellar = useStellarWallet();
   const { actionsDisabled } = useOnlineStatus();
@@ -191,6 +198,10 @@ export function StellarRiskPublishButton({
   const isSimulating = stage === "simulating";
   const previewExpired = preview && now > preview.expiresAt;
   const isTestnet = networkId.includes("testnet");
+  const expectedHashHex = toHashHex(expectedHash);
+  const snapshotMatchesPayload = Boolean(expectedHashHex && preview && expectedHashHex === preview.reportHash.toLowerCase());
+  const snapshotMatchesOnChain = Boolean(expectedHashHex && verifyOutcome?.onchainReportHash
+    && expectedHashHex === toHashHex(verifyOutcome.onchainReportHash));
 
   // Determine current active step (1-4)
   const currentStep =
@@ -310,6 +321,15 @@ export function StellarRiskPublishButton({
               <span className="flex items-center gap-1 text-white/60"><Hash className="h-3 w-3" /> Report hash</span>
               <span className="font-mono text-xs text-white/80" title={preview.reportHash}>{shortHex(preview.reportHash, 8)}</span>
             </div>
+            {expectedHash ? (
+              <div className="flex items-center justify-between rounded-md bg-black/24 px-3 py-2">
+                <span className="flex items-center gap-1 text-white/60"><Hash className="h-3 w-3" /> Snapshot hash</span>
+                <span className={`text-xs font-semibold ${snapshotMatchesPayload ? "text-emerald-300" : "text-amber-300"}`}>
+                  {snapshotMatchesPayload ? "Matches payload" : "Payload differs"}
+                  <span className="ml-2 font-mono font-normal text-white/60" title={expectedHash}>{shortHex(expectedHashHex, 6)}</span>
+                </span>
+              </div>
+            ) : null}
             <div className="flex items-center justify-between rounded-md bg-black/24 px-3 py-2">
               <span className="flex items-center gap-1 text-white/60"><Fuel className="h-3 w-3" /> Fee</span>
               <span className="font-mono text-white">{preview.fee} stroops</span>
@@ -391,6 +411,14 @@ export function StellarRiskPublishButton({
                 {verifyOutcome.hashMatch === true ? "Verified" : verifyOutcome.hashMatch === false ? "MISMATCH" : "Could not verify"}
               </span>
             </div>
+            {expectedHash ? (
+              <div className="flex items-center justify-between rounded-md bg-black/24 px-3 py-2">
+                <span className="text-white/60">Snapshot hash on-chain</span>
+                <span className={verifyOutcome.onchainReportHash ? (snapshotMatchesOnChain ? "text-emerald-300" : "text-red-300") : "text-white/60"}>
+                  {!verifyOutcome.onchainReportHash ? "Not returned" : snapshotMatchesOnChain ? "Verified" : "MISMATCH"}
+                </span>
+              </div>
+            ) : null}
             {verifyOutcome.ledger && (
               <div className="flex items-center justify-between rounded-md bg-black/24 px-3 py-2">
                 <span className="text-white/60">Ledger</span>
