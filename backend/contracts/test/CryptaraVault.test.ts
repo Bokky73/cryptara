@@ -46,6 +46,22 @@ describe("CryptaraVault", function () {
       expect(await vault.userBalance(user.address, token.target)).to.equal(ethers.parseEther("50"));
     });
 
+    it("should reject fee-on-transfer tokens (no phantom balance)", async function () {
+      const { vault, policy, user } = await loadFixture(deployFixture);
+
+      const FeeToken = await ethers.getContractFactory("MockFeeOnTransferERC20");
+      const feeToken = await FeeToken.deploy(100); // 1% fee
+      await feeToken.waitForDeployment();
+      await policy.allowAsset(feeToken.target);
+
+      await feeToken.transfer(user.address, ethers.parseEther("100"));
+      await feeToken.connect(user).approve(vault.target, ethers.parseEther("50"));
+
+      await expect(
+        vault.connect(user).deposit(feeToken.target, ethers.parseEther("50")),
+      ).to.be.revertedWithCustomError(vault, "FeeOnTransferNotSupported");
+
+      expect(await vault.userBalance(user.address, feeToken.target)).to.equal(0);
     it("should reject zero-amount deposit", async function () {
       const { vault, token, user } = await loadFixture(deployFixture);
       await expect(
@@ -93,6 +109,93 @@ describe("CryptaraVault", function () {
       await expect(
         vault.connect(agent).withdraw(token.target, 1, user.address, fakeHash),
       ).to.be.revertedWith("unknown intent");
+    });
+  });
+
+  describe("User self-withdrawal escape hatch", function () {
+    async function depositForUser() {
+      const ctx = await loadFixture(deployFixture);
+      const { vault, token, user } = ctx;
+      await token.transfer(user.address, ethers.parseEther("100"));
+      await token.connect(user).approve(vault.target, ethers.parseEther("50"));
+      await vault.connect(user).deposit(token.target, ethers.parseEther("50"));
+      return ctx;
+    }
+
+    it("should let a depositor withdraw their own balance without agent", async function () {
+      const { vault, token, user } = await depositForUser();
+
+      const before = await token.balanceOf(user.address);
+      await expect(vault.connect(user).userWithdraw(token.target, ethers.parseEther("20")))
+        .to.emit(vault, "UserWithdrawn")
+        .withArgs(user.address, token.target, ethers.parseEther("20"));
+
+      expect(await vault.userBalance(user.address, token.target)).to.equal(ethers.parseEther("30"));
+      expect(await token.balanceOf(user.address)).to.equal(before + ethers.parseEther("20"));
+    });
+
+    it("should allow full balance withdrawal", async function () {
+      const { vault, token, user } = await depositForUser();
+
+      await vault.connect(user).userWithdraw(token.target, ethers.parseEther("50"));
+      expect(await vault.userBalance(user.address, token.target)).to.equal(0);
+    });
+
+    it("should reject withdrawing more than own balance", async function () {
+      const { vault, token, user } = await depositForUser();
+
+      await expect(
+        vault.connect(user).userWithdraw(token.target, ethers.parseEther("51")),
+      ).to.be.revertedWith("Vault: insufficient balance");
+    });
+
+    it("should reject zero-amount self-withdraw", async function () {
+      const { vault, token, user } = await depositForUser();
+
+      await expect(
+        vault.connect(user).userWithdraw(token.target, 0),
+      ).to.be.revertedWith("Vault: zero amount");
+    });
+
+    it("should not let a user withdraw another user's balance", async function () {
+      const { vault, token, user, otherUser } = await depositForUser();
+
+      await expect(
+        vault.connect(otherUser).userWithdraw(token.target, ethers.parseEther("10")),
+      ).to.be.revertedWith("Vault: insufficient balance");
+
+      expect(await vault.userBalance(user.address, token.target)).to.equal(ethers.parseEther("50"));
+    });
+
+    it("should work even when policy is paused", async function () {
+      const { vault, policy, emergency, token, user } = await depositForUser();
+
+      await policy.connect(emergency).pause();
+      expect(await policy.paused()).to.equal(true);
+
+      await expect(vault.connect(user).userWithdraw(token.target, ethers.parseEther("10")))
+        .to.emit(vault, "UserWithdrawn")
+        .withArgs(user.address, token.target, ethers.parseEther("10"));
+
+      expect(await vault.userBalance(user.address, token.target)).to.equal(ethers.parseEther("40"));
+    });
+  });
+
+  describe("Reentrancy protection", function () {
+    it("should block reentrant deposit via callback token", async function () {
+      const { vault, policy, user } = await loadFixture(deployFixture);
+
+      const Reentrant = await ethers.getContractFactory("MockReentrantERC20");
+      const reentrant = await Reentrant.deploy(vault.target);
+      await reentrant.waitForDeployment();
+      await policy.allowAsset(reentrant.target);
+
+      await reentrant.mint(user.address, ethers.parseEther("100"));
+      await reentrant.connect(user).approve(vault.target, ethers.parseEther("50"));
+
+      await expect(
+        vault.connect(user).deposit(reentrant.target, ethers.parseEther("50")),
+      ).to.be.reverted;
     });
   });
 
@@ -156,40 +259,19 @@ describe("CryptaraVault", function () {
 
       const expiry = await time.latest() + 3600;
       const decision = await policy.connect(agent).applyPolicy.staticCall(
-        user.address, ethers.parseEther("100"), 50, expiry,
-      );
-      await policy.connect(agent).applyPolicy(user.address, ethers.parseEther("100"), 50, expiry);
-
-      const intentExpiry = await time.latest() + 1800;
-      const intentHash = await policy.connect(agent).createIntent.staticCall(
-        decision, token.target, ethers.parseEther("100"), intentExpiry, 25,
-      );
-      await policy.connect(agent).createIntent(decision, token.target, ethers.parseEther("100"), intentExpiry, 25);
-
-      await expect(
-        vault.connect(agent).withdraw(token.target, ethers.parseEther("100"), user.address, intentHash),
-      ).to.be.revertedWith("Vault: insufficient balance");
-    });
-
-    it("should allow withdraw with valid intent and debit balance", async function () {
-      const { vault, policy, agent, user, token } = await loadFixture(deployFixture);
-
-      await token.transfer(user.address, ethers.parseEther("100"));
-      await token.connect(user).approve(vault.target, ethers.parseEther("50"));
-      await vault.connect(user).deposit(token.target, ethers.parseEther("50"));
-
-      const expiry = await time.latest() + 3600;
-      const decision = await policy.connect(agent).applyPolicy.staticCall(
         user.address, ethers.parseEther("10"), 50, expiry,
       );
       await policy.connect(agent).applyPolicy(user.address, ethers.parseEther("10"), 50, expiry);
 
       const intentExpiry = await time.latest() + 1800;
       const intentHash = await policy.connect(agent).createIntent.staticCall(
-        decision, token.target, ethers.parseEther("5"), intentExpiry, 25,
+        decision, token.target, ethers.parseEther("60"), intentExpiry, 25,
       );
-      await policy.connect(agent).createIntent(decision, token.target, ethers.parseEther("5"), intentExpiry, 25);
+      await policy.connect(agent).createIntent(decision, token.target, ethers.parseEther("60"), intentExpiry, 25);
 
+      await expect(
+        vault.connect(agent).withdraw(token.target, ethers.parseEther("60"), user.address, intentHash),
+      ).to.be.revertedWith("Vault: insufficient balance");
       await vault.connect(agent).withdraw(token.target, ethers.parseEther("3"), user.address, intentHash);
       expect(await vault.userBalance(user.address, token.target)).to.equal(ethers.parseEther("47"));
     });

@@ -42,14 +42,15 @@ contract CryptaraPolicy {
     address public emergencyAdmin;
     address public pendingEmergencyAdmin;
     address public agent;
+    address public vault;
 
     uint256 public maxTransactionValue;
     uint256 public maxSlippageBps;
     uint256 public maxDailySpend;
 
     mapping(address => uint256) public userNonce;
-    mapping(address => uint256) public dailySpend;
-    uint256 public lastDailyReset;
+    // Per-user, per-day spend buckets: dailySpend[user][dayBucket]
+    mapping(address => mapping(uint256 => uint256)) public dailySpend;
 
     mapping(address => bool) public allowedAssets;
     mapping(address => bool) public blockedAssets;
@@ -76,10 +77,17 @@ contract CryptaraPolicy {
     event OwnerTransferred(address indexed previousOwner, address indexed newOwner);
     event EmergencyAdminSet(address indexed admin);
     event AgentSet(address indexed agent);
+    event VaultSet(address indexed vault);
     event PolicyApplied(address indexed user, bytes32 indexed decisionHash);
     event IntentCreated(bytes32 indexed intentHash, bytes32 indexed policyCommitment);
     event IntentExecuted(bytes32 indexed intentHash);
     event IntentRevoked(bytes32 indexed intentHash);
+    event IntentConsumed(bytes32 indexed intentHash, address indexed user, address indexed token, uint256 amount);
+    event Paused(address indexed by);
+    event Unpaused(address indexed by);
+    event AssetAllowed(address indexed asset);
+    event AssetBlocked(address indexed asset, bool blocked);
+    event LimitsUpdated(uint256 maxTxValue, uint256 maxSlippageBps, uint256 maxDailySpend);
     event Paused(address indexed actor, bool paused, bytes32 reasonHash, uint256 timestamp);
     event Unpaused(address indexed actor, bool paused, bytes32 reasonHash, uint256 timestamp);
     event AssetAllowed(address indexed asset);
@@ -106,6 +114,11 @@ contract CryptaraPolicy {
 
     modifier onlyAgent() {
         require(msg.sender == agent, "Policy: not agent");
+        _;
+    }
+
+    modifier onlyVault() {
+        require(msg.sender == vault, "Policy: not vault");
         _;
     }
 
@@ -204,6 +217,12 @@ contract CryptaraPolicy {
         require(newAgent != address(0), "Policy: zero agent");
         agent = newAgent;
         emit AgentSet(newAgent);
+    }
+
+    function setVault(address newVault) external onlyOwner {
+        require(newVault != address(0), "Policy: zero vault");
+        vault = newVault;
+        emit VaultSet(newVault);
     }
 
     function setLimits(uint256 _maxTransactionValue, uint256 _maxSlippageBps, uint256 _maxDailySpend) external onlyOwner {
@@ -344,6 +363,18 @@ contract CryptaraPolicy {
     }
 
     // ──────────────────────────────────────────────
+    //  Daily Spend Helpers
+    // ──────────────────────────────────────────────
+
+    function currentDayBucket() public view returns (uint256) {
+        return block.timestamp / 1 days;
+    }
+
+    function getDailySpend(address user) public view returns (uint256) {
+        return dailySpend[user][currentDayBucket()];
+    }
+
+    // ──────────────────────────────────────────────
     //  Policy Application
     // ──────────────────────────────────────────────
 
@@ -360,12 +391,11 @@ contract CryptaraPolicy {
         uint256 nonce = userNonce[_user] + 1;
         userNonce[_user] = nonce;
 
-        bytes32 decisionHash = hashPolicyDecision(_user, agent, _maxTxValue, _maxSlippage, nonce, _expiry);
-
+        bytes32 decisionHash = hashPolicyDecision(_user, msg.sender, _maxTxValue, _maxSlippage, nonce, _expiry);
         policyDecisions[decisionHash] = PolicyDecision({
             decisionHash: decisionHash,
             user: _user,
-            authorizedAgent: agent,
+            authorizedAgent: msg.sender,
             maxTransactionValue: _maxTxValue,
             maxSlippageBps: _maxSlippage,
             nonce: nonce,

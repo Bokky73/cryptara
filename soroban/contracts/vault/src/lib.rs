@@ -47,6 +47,15 @@ pub struct Withdrawn {
 }
 
 #[contractevent]
+pub struct UserWithdrawn {
+    #[topic]
+    pub user: Address,
+    #[topic]
+    pub token: Address,
+    pub amount: i128,
+}
+
+#[contractevent]
 pub struct Deposited {
     #[topic]
     pub user: Address,
@@ -188,6 +197,37 @@ impl VaultContract {
         bump_instance(&env);
     }
 
+    /// Trustless escape hatch: a depositor can always withdraw their own
+    /// balance directly, independent of agent liveness or policy pause state.
+    pub fn user_withdraw(env: Env, user: Address, token: Address, amount: i128) {
+        user.require_auth();
+
+        if amount <= 0 {
+            panic_with_error!(&env, VaultError::ZeroAmount);
+        }
+
+        let balance_key = DataKey::Balance(user.clone(), token.clone());
+        let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
+        if balance < amount {
+            panic_with_error!(&env, VaultError::InsufficientBalance);
+        }
+        env.storage()
+            .persistent()
+            .set(&balance_key, &(balance - amount));
+        extend_entry(&env, &balance_key);
+
+        let contract = env.current_contract_address();
+        token::Client::new(&env, &token).transfer(&contract, &user, &amount);
+
+        UserWithdrawn {
+            user,
+            token,
+            amount,
+        }
+        .publish(&env);
+        bump_instance(&env);
+    }
+
     pub fn user_balance(env: Env, user: Address, token: Address) -> i128 {
         let balance_key = DataKey::Balance(user, token);
         let balance: i128 = env.storage().persistent().get(&balance_key).unwrap_or(0);
@@ -264,18 +304,23 @@ mod test {
     }
 
     #[test]
-    fn reject_reused_intent() {
+    fn user_withdraw_escape_hatch() {
         let (_env, vault, _agent, user, token, _policy) = setup();
 
         vault.deposit(&user, &token, &100_000_000i128);
 
-        let policy_client = cryptara_policy::PolicyContractClient::new(&_env, &_policy);
-        let decision = policy_client.apply_policy(&user, &100_000_000i128, &50, &1_703_600_000);
-        let intent =
-            policy_client.create_intent(&decision, &token, &100_000_000i128, &1_701_800_000, &50);
+        vault.user_withdraw(&user, &token, &40_000_000i128);
 
-        vault.withdraw(&token, &50_000_000i128, &user, &intent);
+        assert_eq!(vault.user_balance(&user, &token), 60_000_000);
+    }
 
+    #[test]
+    fn user_withdraw_rejects_over_balance() {
+        let (_env, vault, _agent, user, token, _policy) = setup();
+
+        vault.deposit(&user, &token, &10_000_000i128);
+
+        let result = vault.try_user_withdraw(&user, &token, &20_000_000i128);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             vault.withdraw(&token, &50_000_000i128, &user, &intent);
         }));
@@ -339,9 +384,11 @@ mod test {
             vault.deposit(&user, &token, &10i128);
         }));
         assert!(result.is_err());
+        assert_eq!(vault.user_balance(&user, &token), 10_000_000);
     }
 
     #[test]
+    fn reject_reused_intent() {
     fn withdraw_insufficient_balance_is_structured_error() {
         let (_env, vault, _agent, user, token, _policy) = setup();
 
@@ -382,6 +429,7 @@ mod test {
         let ttl = env.storage().persistent().get_ttl(&consumed_key);
         assert!(ttl >= LEDGER_TTL_THRESHOLD);
         let policy_client = cryptara_policy::PolicyContractClient::new(&_env, &_policy);
+        let decision = policy_client.apply_po
         let decision = policy_client.apply_policy(&user, &10_000_000i128, &50, &1_703_600_000);
         let intent =
             policy_client.create_intent(&decision, &token, &10_000_000i128, &1_701_800_000, &50);
