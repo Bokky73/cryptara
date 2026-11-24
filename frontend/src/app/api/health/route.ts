@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiCacheStrategy } from "@/server/cache/strategy";
+import { getCacheMetricsReport } from "@/server/cache/metrics";
+import { getCacheStore } from "@/server/cache/config";
 import { getAgentReadiness, getEnvHealth, getFeatureFlagHealth } from "@/server/env/validation";
 import { getRuntimeModeHealth } from "@/server/env/runtimeMode";
 import { getSecurityHealth } from "@/server/security/policy";
@@ -125,6 +127,8 @@ export async function GET() {
       runtimeMode: getRuntimeModeHealth(),
       stellarPubnetGate: pubnetReadiness,
       cache: apiCacheStrategy,
+      cacheRuntime: getCacheStore().backendStatus(),
+      cacheMetrics: getCacheMetricsReport(),
       mockFallbacksEnabled: false,
       liveModeUsesMockData: false,
       professionalRiskLanguage: true,

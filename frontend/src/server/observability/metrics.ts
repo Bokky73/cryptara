@@ -1,6 +1,6 @@
 import type { AgentResult, AgentRunRecord } from "@/server/types";
 import { getExecutionMetrics } from "@/server/observability/executionMetrics";
-import { getCacheMetrics } from "@/server/cache";
+import { getCacheMetricsReport } from "@/server/cache";
 
 function percent(part: number, total: number) {
   return total > 0 ? Math.round((part / total) * 1000) / 10 : 0;
@@ -23,7 +23,7 @@ export function getAgentRunMetrics(records: AgentRunRecord[]) {
     criticalBlockerRate: percent(criticalBlockers, results.length),
     executionBlockedRate: percent(executionBlocked, results.filter((result) => result.agent === "execution").length),
     execution: executionMetrics,
-    cache: getCacheMetrics(),
+    cache: getCacheMetricsReport(),
     sampleSize: {
       runs: records.length,
       agentResults: results.length,
