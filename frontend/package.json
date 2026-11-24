@@ -14,7 +14,7 @@
     "test:authz-coverage": "node --import tsx scripts/authz-coverage-check.ts",
     "test:agent-replay": "node --import tsx scripts/agent-replay-check.ts",
     "test:alerts": "NODE_OPTIONS='--require ./scripts/stub-server-only.cjs' tsx --tsconfig tsconfig.json scripts/alert-fixture-check.ts",
-    "test:simulation": "tsx --tsconfig tsconfig.json scripts/simulation-check.ts",
+    "test:simulation": "tsx --tsconfig tsconfig.json scripts/simulation-check.ts && vitest run tests/features/signing-preview-verification",
     "test:stellar-config": "tsx --tsconfig tsconfig.json scripts/stellar-config-check.ts",
     "test:alerts:ui": "NODE_OPTIONS='--require ./scripts/stub-server-only.cjs' tsx --tsconfig tsconfig.json scripts/alert-fixture-check.ts",
     "test:stellar-portfolio": "tsx --tsconfig tsconfig.json scripts/stellar-portfolio-check.ts",
@@ -105,7 +105,8 @@
     "jsdom": "^31.0.1",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.8",
     "vitest": "^5.1.1"
   }
 }

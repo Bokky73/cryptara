@@ -14,6 +14,7 @@ import { evaluateCapability, subjectFromRequest } from "@/server/security/authz"
 import { getUserRuleRecord } from "@/server/storage";
 import { assertPrepareAllowedByRecovery, getIncidentMode } from "@/server/recovery";
 import { prepareTransaction } from "@/server/transactions/lifecycleManager";
+import { buildPreparedPayloadForTransaction } from "@/server/transactions/approvalFlow";
 import { getStellarNetwork } from "@/lib/stellar/config";
 import type { TransactionRecord, TransactionExpectedEffect, TransactionPreview } from "@/server/types";
 
@@ -247,6 +248,22 @@ function buildRawPayload(
   return buildStellarRawPayload(preview, sourceAccount);
 }
 
+/** Surface the server-trusted recipient so the client can verify the payload. */
+function displayTargetContract(
+  chainFamily: "evm" | "stellar",
+  expectedEffects: TransactionExpectedEffect[] | undefined,
+): string | undefined {
+  for (const effect of expectedEffects ?? []) {
+    const candidate = effect.contractAddress ?? effect.toAddress;
+    if (!candidate) continue;
+
+    if (chainFamily === "evm" && /^0x[0-9a-f]{40}$/i.test(candidate)) return candidate;
+    if (chainFamily === "stellar" && /^C[A-Z2-7]{55}$/.test(candidate)) return candidate;
+  }
+
+  return undefined;
+}
+
 // ── Canonicalization ────────────────────────────────────────────────────────
 
 function canonicalizeSeed(value: string): string {
@@ -381,7 +398,7 @@ export const POST = withApiHandler(
     chainFamily,
     network,
     walletAddress,
-    sourceAccount: data.sourceAccount,
+    sourceAccount: data.sourceAccount ?? preview.stellarQuote?.sorobanSimulation?.sourceAccount,
     decisionId: data.decisionId,
     decisionAction: data.action as TransactionRecord["decisionAction"],
     asset: data.fromToken ?? preview.fromToken ?? "wallet",
@@ -395,9 +412,15 @@ export const POST = withApiHandler(
   };
 
   const prepared = prepareTransaction(prepareInput);
+  const previewForClient: TransactionPreview = {
+    ...preview,
+    targetContract: preview.targetContract ?? displayTargetContract(chainFamily as "evm" | "stellar", data.expectedEffects),
+  };
+  const payload = buildPreparedPayloadForTransaction(prepared.transaction);
 
   return withCacheHeaders(NextResponse.json({
-    ...preview,
+    ...previewForClient,
+    payload,
     lifecycle: {
       ...preview.lifecycle,
       status: "prepared",
