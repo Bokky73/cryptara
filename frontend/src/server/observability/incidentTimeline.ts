@@ -9,6 +9,63 @@ export interface IncidentEvent {
   description: string;
 }
 
+export type OperationalAlertKind = "stellar_ledger_gap";
+
+export interface OperationalAlert {
+  kind: OperationalAlertKind;
+  network: string;
+  contractId: string;
+  requestedStartLedger: number;
+  rpcOldestLedger: number;
+  /** Optional explicit event type; defaults to "open" for new alerts. */
+  type?: IncidentEventType;
+  /** Optional timestamp override (ms since epoch); defaults to Date.now(). */
+  timestamp?: number;
+  /** Optional extra human-readable context appended to the description. */
+  detail?: string;
+}
+
+/**
+ * Build a stable incident id for an operational alert so repeated emissions for
+ * the same underlying condition dedupe/update rather than spawning new entries.
+ */
+export function operationalAlertId(alert: OperationalAlert): string {
+  return [
+    "op-alert",
+    alert.kind,
+    alert.network,
+    alert.contractId,
+    String(alert.requestedStartLedger),
+    String(alert.rpcOldestLedger),
+  ].join(":");
+}
+
+/**
+ * Produce a redacted {@link IncidentEvent} for an operational alert (e.g. a
+ * pruned-ledger gap detected by the Stellar event indexer). The description is
+ * passed through the same {@link redact} logic used by the timeline so no
+ * wallet/secret/payload data leaks into incident records.
+ */
+export function recordOperationalAlert(alert: OperationalAlert): IncidentEvent {
+  const timestamp = alert.timestamp ?? Date.now();
+  const type: IncidentEventType = alert.type ?? "open";
+
+  const base =
+    alert.kind === "stellar_ledger_gap"
+      ? `stellar_ledger_gap network=${alert.network} contractId=${alert.contractId} ` +
+        `requestedStartLedger=${alert.requestedStartLedger} rpcOldestLedger=${alert.rpcOldestLedger}`
+      : `${alert.kind} network=${alert.network} contractId=${alert.contractId}`;
+
+  const description = alert.detail ? `${base} ${alert.detail}` : base;
+
+  return {
+    id: operationalAlertId(alert),
+    timestamp,
+    type,
+    description: redact(description),
+  };
+}
+
 export function generateIncidentTimeline(rawEvents: any[]): IncidentEvent[] {
   // deduplicate and remove sensitive
   const timeline: IncidentEvent[] = [];

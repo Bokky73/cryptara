@@ -75,8 +75,10 @@ const nextConfig: NextConfig = {
   // Trace files from the monorepo root so the standalone bundle includes
   // shared packages (scripts/, db/) that live outside frontend/.
   outputFileTracingRoot: resolve(projectRoot, ".."),
+  // The shared typed read client lives in packages/ outside frontend/, so the
+  // Turbopack root must match the tracing root for module resolution to work.
   turbopack: {
-    root: projectRoot,
+    root: resolve(projectRoot, ".."),
   },
   typescript: {
     ignoreBuildErrors: true,

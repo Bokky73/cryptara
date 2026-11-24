@@ -1,0 +1,25 @@
+[
+  {
+    "id": "delivery_1",
+    "alertId": "alert_1",
+    "channel": "in_app",
+    "status": "delivered",
+    "attemptCount": 1,
+    "terminal": true,
+    "lastAttemptAt": "2026-09-12T00:01:00.000Z",
+    "sentAt": "2026-09-12T00:01:00.000Z",
+    "createdAt": "2026-09-12T00:00:00.000Z",
+    "sanitizedPayload": { "triggerType": "critical_risk" }
+  },
+  {
+    "id": "delivery_2",
+    "alertId": "alert_1",
+    "channel": "email",
+    "status": "failed",
+    "attemptCount": 2,
+    "terminal": false,
+    "errorDetail": "Provider timeout",
+    "nextRetryAt": "2026-09-12T00:10:00.000Z",
+    "createdAt": "2026-09-12T00:00:00.000Z"
+  }
+]

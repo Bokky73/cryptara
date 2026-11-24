@@ -37,6 +37,7 @@ export type StellarRpcTransportFactory = (
 export type StellarProviderErrorCode =
   | "all_providers_failed"
   | "invalid_request"
+  | "ledger_pruned"
   | "malformed_xdr"
   | "missing_entry"
   | "network_mismatch"
@@ -69,6 +70,7 @@ export type StellarProviderMetadata = {
   ledgerHeight?: number;
   highestObservedLedger?: number;
   ledgerLag?: number;
+  oldestLedger?: number;
   providerDisagreement: boolean;
   attempts: StellarProviderAttempt[];
   reliability: number;
@@ -78,6 +80,18 @@ export type StellarProviderMetadata = {
 export type StellarRpcResult<T> = {
   value: T;
   meta: StellarProviderMetadata;
+};
+
+/**
+ * The ledger window currently retained by a Soroban RPC provider. `oldestLedger`
+ * is the earliest ledger the provider can still serve events for; requesting a
+ * start ledger below it means the range has been pruned.
+ */
+export type StellarRpcLedgerWindow = {
+  latestLedger: number;
+  oldestLedger?: number;
+  providerUrl: string;
+  checkedAt: string;
 };
 
 export type StellarProviderHealth = {
@@ -105,6 +119,7 @@ export type StellarHealthReport = {
 
 type Probe = StellarProviderHealth & {
   transport: StellarRpcTransport;
+  oldestLedger?: number;
 };
 
 export type StellarDataLayerOptions = {
@@ -203,6 +218,19 @@ async function withTimeout<T>(
 
 function boundedScore(value: number) {
   return Math.max(0, Math.min(1, Number(value.toFixed(2))));
+}
+
+function readOldestLedger(value: unknown): number | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = (value as { oldestLedger?: unknown }).oldestLedger;
+  if (typeof candidate === "number" && Number.isFinite(candidate)) {
+    return candidate;
+  }
+  if (typeof candidate === "string" && candidate.trim() !== "") {
+    const parsed = Number(candidate);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
 }
 
 export class StellarDataLayerError extends Error {
@@ -359,6 +387,7 @@ export class StellarRpcDataLayer {
         `${providerUrl} health`,
       );
       const latencyMs = this.now() - startedAt;
+      const oldestLedger = readOldestLedger(latestLedger);
 
       if (network.passphrase !== this.network.networkPassphrase) {
         sharedProviderCircuits.failure(circuitKey, latencyMs, false);
@@ -369,6 +398,7 @@ export class StellarRpcDataLayer {
           passphrase: network.passphrase,
           protocolVersion: network.protocolVersion,
           ledgerHeight: latestLedger.sequence,
+          oldestLedger,
           latencyMs,
           checkedAt,
           errorCode: "network_mismatch",
@@ -386,6 +416,7 @@ export class StellarRpcDataLayer {
           passphrase: network.passphrase,
           protocolVersion: network.protocolVersion,
           ledgerHeight: latestLedger.sequence,
+          oldestLedger,
           latencyMs,
           checkedAt,
           errorCode: "rpc_error",
@@ -402,6 +433,7 @@ export class StellarRpcDataLayer {
         passphrase: network.passphrase,
         protocolVersion: network.protocolVersion,
         ledgerHeight: latestLedger.sequence,
+        oldestLedger,
         latencyMs,
         checkedAt,
         error:
@@ -571,6 +603,7 @@ export class StellarRpcDataLayer {
               ledgerHeight: probe.ledgerHeight,
               highestObservedLedger,
               ledgerLag: probe.lag,
+              oldestLedger: probe.oldestLedger,
               providerDisagreement,
               attempts,
               reliability,
@@ -709,5 +742,117 @@ export class StellarRpcDataLayer {
     options: ExecuteOptions = {},
   ) {
     return this.execute((transport) => transport.getEvents(request), options);
+  }
+
+  /**
+   * Returns the ledger window (latest + oldest retained) for the freshest
+   * healthy provider. Callers use `oldestLedger` to detect pruned-ledger gaps
+   * before requesting events that the RPC can no longer serve.
+   */
+  async getRpcLedgerWindow(
+    options: ExecuteOptions = {},
+  ): Promise<StellarRpcResult<StellarRpcLedgerWindow>> {
+    const requestId = options.requestId ?? randomUUID();
+    const probes = await this.probeProviders(requestId);
+    const healthy = probes.filter((probe) => probe.healthy);
+    const candidates = healthy.length > 0 ? healthy : probes;
+
+    const selected = candidates.reduce<Probe | undefined>((best, probe) => {
+      if (!best) return probe;
+      const bestHeight = best.ledgerHeight ?? -1;
+      const probeHeight = probe.ledgerHeight ?? -1;
+      return probeHeight > bestHeight ? probe : best;
+    }, undefined);
+
+    if (!selected || selected.ledgerHeight === undefined) {
+      throw new StellarDataLayerError(
+        "all_providers_failed",
+        `No Stellar RPC provider reported a ledger height for ${this.network.id}.`,
+        true,
+        probes
+          .filter((probe) => !probe.healthy)
+          .map((probe) => ({
+            providerUrl: probe.providerUrl,
+            stage: "health" as const,
+            attempt: 1,
+            ok: false,
+            latencyMs: probe.latencyMs,
+            ledgerHeight: probe.ledgerHeight,
+            errorCode: probe.errorCode,
+            error: probe.error,
+          })),
+      );
+    }
+
+    const heights = probes
+      .map((probe) => probe.ledgerHeight)
+      .filter((height): height is number => height !== undefined);
+    const highestObservedLedger =
+      heights.length > 0 ? Math.max(...heights) : selected.ledgerHeight;
+    const providerDisagreement = new Set(heights).size > 1;
+
+    return {
+      value: {
+        latestLedger: selected.ledgerHeight,
+        oldestLedger: selected.oldestLedger,
+        providerUrl: selected.providerUrl,
+        checkedAt: selected.checkedAt,
+      },
+      meta: {
+        requestId,
+        network: this.network.id,
+        providerUrl: selected.providerUrl,
+        fallbackUsed: !selected.healthy,
+        checkedAt: selected.checkedAt,
+        freshnessMs: Math.max(
+          0,
+          this.now() - new Date(selected.checkedAt).getTime(),
+        ),
+        latencyMs: selected.latencyMs,
+        ledgerHeight: selected.ledgerHeight,
+        highestObservedLedger,
+        ledgerLag: selected.lag,
+        oldestLedger: selected.oldestLedger,
+        providerDisagreement,
+        attempts: probes
+          .filter((probe) => !probe.healthy)
+          .map((probe) => ({
+            providerUrl: probe.providerUrl,
+            stage: "health" as const,
+            attempt: 1,
+            ok: false,
+            latencyMs: probe.latencyMs,
+            ledgerHeight: probe.ledgerHeight,
+            errorCode: probe.errorCode,
+            error: probe.error,
+          })),
+        reliability: boundedScore(selected.healthy ? 0.98 : 0.6),
+        confidence: boundedScore(
+          (selected.healthy ? 0.98 : 0.6) - (providerDisagreement ? 0.12 : 0),
+        ),
+      },
+    };
+  }
+
+  /**
+   * Throws a typed `ledger_pruned` error when `requestedStartLedger` predates
+   * the provider's oldest retained ledger. Returns the window otherwise so
+   * callers can persist it alongside their checkpoint.
+   */
+  async assertLedgerWindow(
+    requestedStartLedger: number,
+    options: ExecuteOptions = {},
+  ): Promise<StellarRpcResult<StellarRpcLedgerWindow>> {
+    const window = await this.getRpcLedgerWindow(options);
+    const oldest = window.value.oldestLedger;
+    if (oldest !== undefined && requestedStartLedger < oldest) {
+      throw new StellarDataLayerError(
+        "ledger_pruned",
+        `Requested start ledger ${requestedStartLedger} is below the RPC oldest retained ledger ${oldest} on ${this.network.id}.`,
+        false,
+        window.meta.attempts,
+      );
+    }
+    return window;
   }
 }

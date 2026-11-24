@@ -28,6 +28,12 @@ contract CryptaraPolicy {
     }
 
     // ──────────────────────────────────────────────
+    //  Constants
+    // ──────────────────────────────────────────────
+
+    uint256 public constant MAX_TRACKED_ASSETS = 256;
+
+    // ──────────────────────────────────────────────
     //  State
     // ──────────────────────────────────────────────
 
@@ -47,8 +53,13 @@ contract CryptaraPolicy {
 
     mapping(address => bool) public allowedAssets;
     mapping(address => bool) public blockedAssets;
-    address[] public allowedAssetList;
-    address[] public blockedAssetList;
+
+    // Index-tracked sets for O(1) add/remove (swap-and-pop).
+    // Index is 1-based; 0 means "not tracked".
+    address[] private _allowedAssetList;
+    mapping(address => uint256) private _allowedAssetIndex;
+    address[] private _blockedAssetList;
+    mapping(address => uint256) private _blockedAssetIndex;
 
     mapping(bytes32 => PolicyDecision) public policyDecisions;
     mapping(bytes32 => Intent) public intents;
@@ -69,8 +80,8 @@ contract CryptaraPolicy {
     event IntentCreated(bytes32 indexed intentHash, bytes32 indexed policyCommitment);
     event IntentExecuted(bytes32 indexed intentHash);
     event IntentRevoked(bytes32 indexed intentHash);
-    event Paused(address indexed by);
-    event Unpaused(address indexed by);
+    event Paused(address indexed actor, bool paused, bytes32 reasonHash, uint256 timestamp);
+    event Unpaused(address indexed actor, bool paused, bytes32 reasonHash, uint256 timestamp);
     event AssetAllowed(address indexed asset);
     event AssetBlocked(address indexed asset, bool blocked);
     event LimitsUpdated(uint256 maxTxValue, uint256 maxSlippageBps, uint256 maxDailySpend);
@@ -207,17 +218,28 @@ contract CryptaraPolicy {
         require(asset != address(0), "Policy: zero asset");
         require(!allowedAssets[asset], "Policy: already allowed");
         require(!blockedAssets[asset], "Policy: blocked asset");
+        require(_allowedAssetList.length < MAX_TRACKED_ASSETS, "Policy: allowlist full");
         allowedAssets[asset] = true;
-        allowedAssetList.push(asset);
+        _allowedAssetList.push(asset);
+        _allowedAssetIndex[asset] = _allowedAssetList.length;
         emit AssetAllowed(asset);
     }
 
     function blockAsset(address asset, bool blocked) external onlyOwner {
         require(asset != address(0), "Policy: zero asset");
-        blockedAssets[asset] = blocked;
         if (blocked) {
-            allowedAssets[asset] = false;
-            blockedAssetList.push(asset);
+            require(!blockedAssets[asset], "Policy: already blocked");
+            require(_blockedAssetList.length < MAX_TRACKED_ASSETS, "Policy: blocklist full");
+            blockedAssets[asset] = true;
+            _blockedAssetList.push(asset);
+            _blockedAssetIndex[asset] = _blockedAssetList.length;
+            if (allowedAssets[asset]) {
+                _removeAllowedAsset(asset);
+            }
+        } else {
+            require(blockedAssets[asset], "Policy: not blocked");
+            blockedAssets[asset] = false;
+            _removeBlockedAsset(asset);
         }
         emit AssetBlocked(asset, blocked);
     }
@@ -225,22 +247,75 @@ contract CryptaraPolicy {
     function isAssetAllowed(address asset) public view returns (bool) {
         if (blockedAssets[asset]) return false;
         if (allowedAssets[asset]) return true;
-        if (allowedAssetList.length == 0) return true;
+        if (_allowedAssetList.length == 0) return true;
         return false;
+    }
+
+    function allowedAssetCount() external view returns (uint256) {
+        return _allowedAssetList.length;
+    }
+
+    function blockedAssetCount() external view returns (uint256) {
+        return _blockedAssetList.length;
+    }
+
+    function allowedAssetAt(uint256 index) external view returns (address) {
+        return _allowedAssetList[index];
+    }
+
+    function blockedAssetAt(uint256 index) external view returns (address) {
+        return _blockedAssetList[index];
+    }
+
+    // ──────────────────────────────────────────────
+    //  Internal set helpers (O(1) swap-and-pop)
+    // ──────────────────────────────────────────────
+
+    function _removeAllowedAsset(address asset) internal {
+        uint256 idx = _allowedAssetIndex[asset];
+        if (idx == 0) return;
+        uint256 lastIdx = _allowedAssetList.length;
+        if (idx != lastIdx) {
+            address lastAsset = _allowedAssetList[lastIdx - 1];
+            _allowedAssetList[idx - 1] = lastAsset;
+            _allowedAssetIndex[lastAsset] = idx;
+        }
+        _allowedAssetList.pop();
+        delete _allowedAssetIndex[asset];
+        allowedAssets[asset] = false;
+    }
+
+    function _removeBlockedAsset(address asset) internal {
+        uint256 idx = _blockedAssetIndex[asset];
+        if (idx == 0) return;
+        uint256 lastIdx = _blockedAssetList.length;
+        if (idx != lastIdx) {
+            address lastAsset = _blockedAssetList[lastIdx - 1];
+            _blockedAssetList[idx - 1] = lastAsset;
+            _blockedAssetIndex[lastAsset] = idx;
+        }
+        _blockedAssetList.pop();
+        delete _blockedAssetIndex[asset];
     }
 
     // ──────────────────────────────────────────────
     //  Pause / Emergency
     // ──────────────────────────────────────────────
 
-    function pause() external onlyOwnerOrEmergency {
+    /// @notice Instant circuit-breaker. Either governance (owner) or the
+    ///         emergencyAdmin may pause with zero delay.
+    function pause(bytes32 reasonHash) external onlyOwnerOrEmergency {
+        require(!paused, "Policy: already paused");
         paused = true;
-        emit Paused(msg.sender);
+        emit Paused(msg.sender, true, reasonHash, block.timestamp);
     }
 
-    function unpause() external onlyOwnerOrEmergency {
+    /// @notice Only governance (owner / timelocked multisig) may unpause.
+    ///         emergencyAdmin is explicitly forbidden from lifting the pause.
+    function unpause(bytes32 reasonHash) external onlyOwner {
+        require(paused, "Policy: not paused");
         paused = false;
-        emit Unpaused(msg.sender);
+        emit Unpaused(msg.sender, false, reasonHash, block.timestamp);
     }
 
     // ──────────────────────────────────────────────

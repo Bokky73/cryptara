@@ -345,6 +345,14 @@ export class SupabaseStorageAdapter implements IStorageAdapter {
 
   // ─── Public risk snapshots ──────────────────────────────────────
 
+  async listRiskSnapshots(identityKey?: string): Promise<RiskSnapshotRecord[]> {
+    let query = this.client.from("risk_snapshots").select("*").order("created_at", { ascending: false });
+    if (identityKey) query = query.eq("identity_key", identityKey);
+    const { data, error } = await query;
+    if (error) throw new StorageError("listRiskSnapshots", error);
+    return (data ?? []).map((row) => rowToRiskSnapshot(row));
+  }
+
   async getRiskSnapshot(id: string): Promise<RiskSnapshotRecord | null> {
     const { data, error } = await this.client.from("risk_snapshots").select("*").eq("id", id).maybeSingle();
     if (error) throw new StorageError("getRiskSnapshot", error);

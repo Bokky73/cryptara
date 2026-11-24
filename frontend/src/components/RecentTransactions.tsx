@@ -18,15 +18,18 @@ export function RecentTransactions({ transactions }: { transactions: Transaction
       <h2 className="text-xl font-semibold">Recent transactions</h2>
       <div className="mt-5 space-y-3">
         {transactions.map((transaction) => (
-          <div key={transaction.hash} className="flex items-center justify-between gap-4 rounded-2xl bg-white/6 p-4">
-            <div>
+          <div
+            key={transaction.hash}
+            className="flex flex-col gap-3 rounded-2xl bg-white/6 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+          >
+            <div className="min-w-0">
               <div className="text-sm font-medium capitalize">{transaction.type.replace("_", " ")}</div>
-              <div className="mt-1 text-xs text-white/42">
+              <div className="mt-1 truncate text-xs text-white/42" title={transaction.hash}>
                 {shortHash(transaction.hash)} · {transaction.asset}
               </div>
             </div>
-            <div className="text-right">
-              <div className="text-sm font-medium">{transaction.valueUsd ? formatUsd(transaction.valueUsd) : "No value"}</div>
+            <div className="text-left sm:text-right">
+              <div className="text-sm font-medium tabular-nums">{transaction.valueUsd ? formatUsd(transaction.valueUsd) : "No value"}</div>
               <div className={`mt-1 text-xs capitalize ${statusTone[transaction.lifecycleStatus]}`}>{transaction.lifecycleStatus.replace("_", " ")}</div>
               {(transaction.lifecycleStatus === "confirming" || transaction.lifecycleStatus === "reorged" || transaction.lifecycleStatus === "manual_review") && (
                 <div className="mt-1 max-w-56 text-[11px] text-white/45">
@@ -35,7 +38,11 @@ export function RecentTransactions({ transactions }: { transactions: Transaction
                     : transaction.manualReviewReason ?? "Provider evidence changed; review before taking another action."}
                 </div>
               )}
-              {transaction.replacementHash && <div className="mt-1 text-[11px] text-amber-200">Replacement: {shortHash(transaction.replacementHash)}</div>}
+              {transaction.replacementHash && (
+                <div className="mt-1 truncate text-[11px] text-amber-200" title={transaction.replacementHash}>
+                  Replacement: {shortHash(transaction.replacementHash)}
+                </div>
+              )}
             </div>
           </div>
         ))}

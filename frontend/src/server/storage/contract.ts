@@ -15,6 +15,9 @@ export const storageSchemaContract = {
     "x402_settlement_ledger",
     "token_identities",
     "source_snapshots",
+    "chain_identities",
+    "watchlist_collections",
+    "watchlist_collection_items",
   ],
   adapterApi: [
     "listAgentRunRecords",
@@ -32,7 +35,7 @@ export const storageSchemaContract = {
     "getUserRuleRecord",
     "upsertUserRuleRecord",
   ],
-  migration: "frontend/src/server/storage/schema.sql",
+  migration: "db/migrations",
   sensitiveColumns: {
     wallets: ["address"],
   },

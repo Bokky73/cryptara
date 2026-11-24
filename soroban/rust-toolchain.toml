@@ -1,3 +1,4 @@
 [toolchain]
-channel = "stable"
-targets = ["wasm32-unknown-unknown"]
+channel = "1.93.0"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32v1-none"]

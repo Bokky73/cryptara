@@ -83,6 +83,9 @@ function collectRouteFiles(): RouteFile[] {
 
 interface OpenApiSpec {
   paths: Record<string, Record<string, unknown>>;
+  components?: {
+    schemas?: Record<string, unknown>;
+  };
 }
 
 function loadSpec(): OpenApiSpec {
@@ -90,6 +93,146 @@ function loadSpec(): OpenApiSpec {
 
   // Fails loudly (rather than silently) if the checked-in spec is not valid JSON.
   return JSON.parse(raw) as OpenApiSpec;
+}
+
+/** Canonical error envelope fields required on every documented error response. */
+const CANONICAL_ERROR_FIELDS = ["code", "message", "retryable", "recoveryAction", "requestId"] as const;
+/** Optional fields that are allowed (but not required) on the canonical error envelope. */
+const OPTIONAL_ERROR_FIELDS = ["traceId", "details"] as const;
+/** Error status codes every route/method pair must document. */
+const REQUIRED_ERROR_STATUSES = ["400", "429", "500"] as const;
+
+type JsonSchema = Record<string, unknown>;
+
+function isJsonSchema(value: unknown): value is JsonSchema {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Resolves a local `$ref` (`#/components/schemas/Name`) against the loaded spec. */
+function resolveRef(spec: OpenApiSpec, ref: string): JsonSchema | undefined {
+  if (!ref.startsWith("#/")) {
+    return undefined;
+  }
+
+  const segments = ref.slice(2).split("/");
+  let current: unknown = spec;
+
+  for (const segment of segments) {
+    if (!isJsonSchema(current)) {
+      return undefined;
+    }
+    current = current[segment];
+  }
+
+  return isJsonSchema(current) ? current : undefined;
+}
+
+/** Follows `$ref` chains (with a small depth guard) until a concrete schema is reached. */
+function derefSchema(spec: OpenApiSpec, schema: unknown, depth = 0): JsonSchema | undefined {
+  if (depth > 10 || !isJsonSchema(schema)) {
+    return undefined;
+  }
+
+  const ref = schema.$ref;
+  if (typeof ref === "string") {
+    return derefSchema(spec, resolveRef(spec, ref), depth + 1);
+  }
+
+  return schema;
+}
+
+/**
+ * Validates that a schema describes the canonical error envelope: required
+ * `code`, `message`, `retryable`, `recoveryAction`, `requestId` and only the
+ * documented optional extras. Returns a list of human-readable problems.
+ */
+function validateErrorSchema(spec: OpenApiSpec, schema: unknown, location: string): string[] {
+  const problems: string[] = [];
+  const resolved = derefSchema(spec, schema);
+
+  if (!resolved) {
+    return [`${location}: error response has no resolvable schema`];
+  }
+
+  const required = Array.isArray(resolved.required) ? (resolved.required as unknown[]) : [];
+  const properties = isJsonSchema(resolved.properties) ? resolved.properties : {};
+
+  for (const field of CANONICAL_ERROR_FIELDS) {
+    if (!required.includes(field)) {
+      problems.push(`${location}: canonical error field "${field}" is not required`);
+    }
+    if (!(field in properties)) {
+      problems.push(`${location}: canonical error field "${field}" is missing from properties`);
+    }
+  }
+
+  const allowed = new Set<string>([...CANONICAL_ERROR_FIELDS, ...OPTIONAL_ERROR_FIELDS]);
+  for (const property of Object.keys(properties)) {
+    if (!allowed.has(property)) {
+      problems.push(`${location}: unexpected error envelope field "${property}"`);
+    }
+  }
+
+  return problems;
+}
+
+/** Extracts the JSON schema for a response, unwrapping `content["application/json"].schema`. */
+function extractResponseSchema(response: unknown): unknown {
+  if (!isJsonSchema(response)) {
+    return undefined;
+  }
+
+  const content = response.content;
+  if (!isJsonSchema(content)) {
+    return undefined;
+  }
+
+  const json = content["application/json"];
+  if (!isJsonSchema(json)) {
+    return undefined;
+  }
+
+  return json.schema;
+}
+
+/**
+ * Validates that every documented error response (4xx/5xx) on an operation
+ * uses the canonical error envelope, and that the required error statuses
+ * (400/429/500) are declared.
+ */
+function validateOperationErrors(spec: OpenApiSpec, operation: unknown, location: string): string[] {
+  const problems: string[] = [];
+
+  if (!isJsonSchema(operation)) {
+    return [`${location}: operation is not an object`];
+  }
+
+  const responses = operation.responses;
+  if (!isJsonSchema(responses)) {
+    return [`${location}: operation has no responses object`];
+  }
+
+  for (const status of REQUIRED_ERROR_STATUSES) {
+    if (!(status in responses)) {
+      problems.push(`${location}: missing required error response "${status}"`);
+    }
+  }
+
+  for (const [status, response] of Object.entries(responses)) {
+    if (!/^[45]\d\d$/.test(status)) {
+      continue;
+    }
+
+    const schema = extractResponseSchema(response);
+    if (schema === undefined) {
+      problems.push(`${location}: error response "${status}" has no application/json schema`);
+      continue;
+    }
+
+    problems.push(...validateErrorSchema(spec, schema, `${location} [${status}]`));
+  }
+
+  return problems;
 }
 
 function main() {
@@ -163,7 +306,39 @@ function main() {
     process.exit(1);
   }
 
+  // Validate that every documented operation uses the canonical error envelope
+  // for its 4xx/5xx responses and declares the required error statuses.
+  const contractProblems: string[] = [];
+
+  for (const route of routeFiles) {
+    const pathItem = spec.paths[route.apiPath];
+    if (!pathItem) {
+      continue;
+    }
+
+    for (const method of route.methods) {
+      const operation = pathItem[method.toLowerCase()];
+      if (!operation) {
+        continue;
+      }
+
+      contractProblems.push(...validateOperationErrors(spec, operation, `${method} ${route.apiPath}`));
+    }
+  }
+
+  if (contractProblems.length > 0) {
+    console.error("\nOpenAPI error contract violations:");
+    for (const entry of contractProblems) {
+      console.error(`  - ${entry}`);
+    }
+    console.error(
+      `\n${contractProblems.length} error contract violation(s) found. Every route/method must document 400/429/500 responses using the canonical error envelope (${CANONICAL_ERROR_FIELDS.join(", ")}; optional: ${OPTIONAL_ERROR_FIELDS.join(", ")}).`,
+    );
+    process.exit(1);
+  }
+
   console.log("All implemented API routes are documented in docs/openapi/v1/openapi.json.");
+  console.log("All documented error responses use the canonical error envelope.");
 }
 
 main();

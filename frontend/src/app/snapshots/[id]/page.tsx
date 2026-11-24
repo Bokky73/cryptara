@@ -2,7 +2,9 @@ import { notFound } from "next/navigation";
 import { AlertTriangle, CheckCircle2, Clock3, Database, FileWarning, ShieldCheck } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { RiskSnapshotActions } from "@/components/RiskSnapshotActions";
-import { readRiskSnapshot } from "@/server/snapshots/store";
+import { StellarRiskPublishButton } from "@/components/StellarRiskPublishButton";
+import { canonicalAssetIdentity } from "@/server/snapshots/canonical";
+import { findLatestRiskSnapshot, readRiskSnapshot } from "@/server/snapshots/store";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +49,14 @@ export default async function RiskSnapshotPage({ params }: { params: Promise<{ i
   const { snapshot } = result;
   const report = snapshot.document;
   const staleAtCreation = Date.parse(snapshot.createdAt) >= Date.parse(report.freshness.staleAt);
+  const latest = await findLatestRiskSnapshot(canonicalAssetIdentity(report.asset), {
+    excludeId: snapshot.id,
+  });
+  const comparisonIds = latest
+    ? Date.parse(latest.createdAt) >= Date.parse(snapshot.createdAt)
+      ? { left: snapshot.id, right: latest.id }
+      : { left: latest.id, right: snapshot.id }
+    : undefined;
 
   return (
     <AppShell>
@@ -79,7 +89,23 @@ export default async function RiskSnapshotPage({ params }: { params: Promise<{ i
             </div>
           </div>
           <p className="mt-6 max-w-3xl text-sm leading-6 text-white/70">{report.summary}</p>
-          <RiskSnapshotActions snapshotId={snapshot.id} />
+          <RiskSnapshotActions
+            snapshotId={snapshot.id}
+            document={report}
+            expectedHash={snapshot.canonicalHash}
+            comparisonIds={comparisonIds}
+          />
+          {report.asset.chainFamily === "stellar" ? (
+            <StellarRiskPublishButton
+              network={report.asset.network}
+              assetKey={report.asset.identity.canonicalId}
+              assetLabel={report.asset.symbol}
+              score={report.scores.buyRisk}
+              verdict={report.verdict}
+              report={report}
+              expectedHash={snapshot.canonicalHash}
+            />
+          ) : null}
         </section>
 
         <section className="grid gap-5 lg:grid-cols-2">

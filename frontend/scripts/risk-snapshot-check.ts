@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { canonicalAssetIdentity, canonicalizeJson, hashRiskSnapshot } from "../src/server/snapshots/canonical";
 import { verifyRiskSnapshotRecord } from "../src/server/snapshots/integrity";
 import { assertPrivacySafeSnapshot, redactRiskReportSnapshot } from "../src/server/snapshots/redaction";
-import { createRiskSnapshot, readRiskSnapshot, revokeRiskSnapshot } from "../src/server/snapshots/store";
+import { createRiskSnapshot, findLatestRiskSnapshot, readRiskSnapshot, revokeRiskSnapshot } from "../src/server/snapshots/store";
+import { hashRiskSnapshotInBrowser } from "../src/lib/snapshots/clientHash";
 import type { RiskSnapshotRecord } from "../src/server/snapshots/schema";
 import { MemoryStorageAdapter } from "../src/server/storage/adapters/memory";
 import type { TokenScanResult } from "../src/server/types";
@@ -112,6 +113,11 @@ async function main() {
     equivalent.riskReport!.sources.reverse();
     const second = redactRiskReportSnapshot(equivalent, { expiresAt: EXPIRES_AT, productVersion: "test" });
     assert.equal(hashRiskSnapshot(first), hashRiskSnapshot(second), `${kind} hash must be deterministic`);
+    assert.equal(
+      await hashRiskSnapshotInBrowser(first),
+      hashRiskSnapshot(first),
+      `${kind} browser Web Crypto hash must match the server canonical hash`,
+    );
     assert.equal(verifyRiskSnapshotRecord(recordFor(first), Date.parse(GENERATED_AT)).ok, true);
   }
 
@@ -146,7 +152,7 @@ async function main() {
   if (!collidedResult.ok) assert.equal(collidedResult.code, "identity_collision");
 
   const adapter = new MemoryStorageAdapter();
-  const created = await createRiskSnapshot(source, { now: Date.parse("2026-08-26T12:00:00Z"), productVersion: "test" }, adapter);
+  const created = await createRiskSnapshot(source, { now: Date.now(), productVersion: "test" }, adapter);
   assert.equal((await readRiskSnapshot(created.id, adapter)).ok, true);
   assert.equal((await revokeRiskSnapshot(created.id, "wrong-token", adapter)).ok, false);
   assert.equal((await revokeRiskSnapshot(created.id, created.revocationToken, adapter)).ok, true);
@@ -180,7 +186,20 @@ async function main() {
   const revokedReadResponse = await readSnapshotGET(new Request(`http://localhost/api/snapshots/${createdApi.id}`), routeContext);
   assert.equal(revokedReadResponse.status, 410);
 
-  console.log("PASS risk snapshots: deterministic EVM/Stellar/Soroban hashes, redaction, tamper detection, expiry, identity collision, API download, and revocation");
+  // Latest-snapshot lookup must return the newest valid record for the same asset.
+  const comparisonAdapter = new MemoryStorageAdapter();
+  const older = await createRiskSnapshot(source, { now: Date.parse("2026-08-26T12:00:00Z"), productVersion: "test" }, comparisonAdapter);
+  const newer = await createRiskSnapshot(source, { now: Date.parse("2026-08-27T12:00:00Z"), productVersion: "test" }, comparisonAdapter);
+  const comparisonNow = Date.parse("2026-08-28T12:00:00Z");
+  const identityKey = canonicalAssetIdentity(document.asset);
+  assert.equal((await findLatestRiskSnapshot(identityKey, { now: comparisonNow }, comparisonAdapter))?.id, newer.id);
+  assert.equal(
+    (await findLatestRiskSnapshot(identityKey, { excludeId: newer.id, now: comparisonNow }, comparisonAdapter))?.id,
+    older.id,
+  );
+  assert.equal(await findLatestRiskSnapshot("evm:nowhere:asset", { now: comparisonNow }, comparisonAdapter), null);
+
+  console.log("PASS risk snapshots: deterministic EVM/Stellar/Soroban hashes, browser/server hash parity, redaction, tamper detection, expiry, identity collision, latest-snapshot lookup, API download, and revocation");
 }
 
 main().catch((error) => {

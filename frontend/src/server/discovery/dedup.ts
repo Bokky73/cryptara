@@ -2,6 +2,7 @@ import type {
   CanonicalIdentity,
   DiscoveryChainId,
 } from "@/server/discovery/types";
+import { resolveCanonicalTokenIdentity } from "@/server/identity/canonicalResolver";
 
 // ─── Canonical key builders ──────────────────────────────────────────────────
 
@@ -111,6 +112,100 @@ export class DedupSet {
   reset(): void {
     this.seen.clear();
   }
+}
+
+// ─── Canonical resolution & cross-source collapsing ──────────────────────────
+
+/**
+ * Minimal shape of a discovery candidate observation that can be deduplicated.
+ * Kept structural so callers are not forced to import the full pipeline types.
+ */
+export type DedupableCandidate = {
+  source: string;
+  chainFamily: "evm" | "stellar";
+  chainId: DiscoveryChainId;
+  address?: string;
+  assetKey?: string;
+  symbol?: string;
+  tokenName?: string;
+  [key: string]: unknown;
+};
+
+/**
+ * Resolve a candidate's canonical chain-aware identity via the shared
+ * `canonicalResolver`. Falls back to the local key builders when the resolver
+ * cannot produce an identity (e.g. malformed addresses).
+ */
+export function resolveCandidateCanonicalKey(candidate: DedupableCandidate): string {
+  const resolved = resolveCanonicalTokenIdentity({
+    chainFamily: candidate.chainFamily,
+    chainId: candidate.chainId,
+    address: candidate.address,
+    assetKey: candidate.assetKey,
+  });
+
+  if (resolved?.canonicalKey) {
+    return resolved.canonicalKey;
+  }
+
+  return buildCanonicalKey({
+    chainFamily: candidate.chainFamily,
+    chainId: candidate.chainId,
+    address: candidate.address,
+    assetKey: candidate.assetKey,
+  });
+}
+
+export type CanonicalCandidateGroup<T extends DedupableCandidate> = {
+  canonicalKey: string;
+  candidate: T;
+  sources: string[];
+  observations: number;
+};
+
+/**
+ * Collapse candidates across multiple sources into a single canonical record
+ * per canonical identity. The first observation wins as the representative
+ * record; subsequent duplicates only contribute their source and count.
+ *
+ * Bounded: memory is O(unique canonical keys), not O(observations).
+ */
+export function collapseCandidatesByCanonicalIdentity<T extends DedupableCandidate>(
+  candidates: readonly T[],
+): CanonicalCandidateGroup<T>[] {
+  const groups = new Map<string, CanonicalCandidateGroup<T>>();
+
+  for (const candidate of candidates) {
+    const canonicalKey = resolveCandidateCanonicalKey(candidate);
+    const existing = groups.get(canonicalKey);
+
+    if (!existing) {
+      groups.set(canonicalKey, {
+        canonicalKey,
+        candidate,
+        sources: [candidate.source],
+        observations: 1,
+      });
+      continue;
+    }
+
+    existing.observations += 1;
+    if (!existing.sources.includes(candidate.source)) {
+      existing.sources.push(candidate.source);
+    }
+  }
+
+  return Array.from(groups.values());
+}
+
+/**
+ * Deduplicate candidates by canonical identity, returning one representative
+ * candidate per canonical key. Intended to be called before scoring/persisting.
+ */
+export function dedupeCandidatesByCanonicalIdentity<T extends DedupableCandidate>(
+  candidates: readonly T[],
+): T[] {
+  return collapseCandidatesByCanonicalIdentity(candidates).map((group) => group.candidate);
 }
 
 // ─── Collision helpers ───────────────────────────────────────────────────────

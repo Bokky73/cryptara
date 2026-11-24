@@ -37,6 +37,7 @@ import {
 } from "../src/server/observability/delivery/email";
 import { buildSanitizedAlertPayload, sanitizeDeliveryErrorDetail } from "../src/server/observability/alertSanitize";
 import { fanOutDeliveries } from "../src/server/observability/alertEngine";
+import { validateWebhookUrl } from "../src/server/observability/urlSafety";
 import type { Alert, AlertDelivery } from "../src/server/types";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -169,6 +170,173 @@ async function testEmailHmacAndSuccess() {
       assert(
         signEmailWebhookPayload("fixture-secret", timestamp, seen?.body ?? "") === signature,
         "signEmailWebhookPayload must match the outbound signature.",
+      );
+    },
+  );
+}
+
+async function testCryptaraSignatureHeaders() {
+  await withEnv(
+    {
+      ALERT_EMAIL_WEBHOOK_URL: "https://hooks.example.test/email",
+      ALERT_EMAIL_WEBHOOK_SECRET: "fixture-secret",
+      ALERT_DELIVERY_BACKOFF_MS: "0",
+    },
+    async () => {
+      let seen: HttpRequest | undefined;
+      installScriptedTransport(async (request) => {
+        seen = request;
+        return jsonResponse(200, { ok: true, id: "email_msg_sig" });
+      });
+
+      const alert = makeAlert();
+      const result = await deliverAlertToChannel("email", samplePayload(), alert, {
+        idempotencyKey: "idem_cryptara_sig",
+        withRetry: false,
+      });
+      assert(result.status === "delivered", "Signed email delivery must succeed.");
+
+      const headers = seen?.headers ?? {};
+      const timestamp = headers["x-cryptara-timestamp"] ?? "";
+      const signature = headers["x-cryptara-signature-256"] ?? "";
+      const deliveryId = headers["x-cryptara-delivery-id"] ?? "";
+
+      assert(timestamp.length > 0, "Outbound webhook must include X-Cryptara-Timestamp.");
+      assert(/^\d+$/.test(timestamp), "X-Cryptara-Timestamp must be a unix timestamp.");
+      assert(signature.startsWith("sha256="), "Outbound webhook must include X-Cryptara-Signature-256.");
+      assert(deliveryId.length > 0, "Outbound webhook must include X-Cryptara-Delivery-Id.");
+
+      const { createHmac } = await import("node:crypto");
+      const expected = createHmac("sha256", "fixture-secret")
+        .update(`${timestamp}.${seen?.body ?? ""}`)
+        .digest("hex");
+      assert(
+        signature === `sha256=${expected}`,
+        "X-Cryptara-Signature-256 must be HMAC-SHA256 over timestamp.rawBody.",
+      );
+    },
+  );
+}
+
+async function testSsrfRejection() {
+  const blocked = [
+    "http://127.0.0.1/hook",
+    "http://localhost/hook",
+    "http://10.0.0.5/hook",
+    "http://192.168.1.10/hook",
+    "http://169.254.169.254/latest/meta-data",
+    "http://[::1]/hook",
+    "file:///etc/passwd",
+  ];
+  for (const url of blocked) {
+    const verdict = validateWebhookUrl(url);
+    assert(!verdict.ok, `SSRF guard must reject private/internal target: ${url}`);
+  }
+
+  const allowed = validateWebhookUrl("https://hooks.example.test/email");
+  assert(allowed.ok, "SSRF guard must allow public https targets.");
+
+  await withEnv(
+    {
+      ALERT_EMAIL_WEBHOOK_URL: "http://127.0.0.1/hook",
+      ALERT_EMAIL_WEBHOOK_SECRET: "fixture-secret",
+      ALERT_DELIVERY_BACKOFF_MS: "0",
+    },
+    async () => {
+      let called = false;
+      installScriptedTransport(async () => {
+        called = true;
+        return jsonResponse(200, { ok: true, id: "should_not_send" });
+      });
+      const alert = makeAlert();
+      const result = await deliverAlertToChannel("email", samplePayload(), alert, {
+        idempotencyKey: "idem_ssrf",
+        withRetry: false,
+      });
+      assert(result.status === "failed" && result.terminal, "SSRF-blocked webhook must fail terminally.");
+      assert(!called, "SSRF-blocked webhook must never reach the transport.");
+    },
+  );
+}
+
+async function testBackoffScheduleAndDeadLetter() {
+  await withEnv(
+    {
+      ALERT_DISCORD_WEBHOOK_URL: "https://discord.example.test/api/webhooks/1/token",
+      ALERT_DELIVERY_BACKOFF_MS: undefined,
+    },
+    async () => {
+      const alert = makeAlert();
+      const delays: number[] = [];
+      const originalSetTimeout = global.setTimeout;
+      // Capture scheduled backoff delays without actually waiting.
+      (global as unknown as { setTimeout: typeof setTimeout }).setTimeout = ((
+        fn: (...args: unknown[]) => void,
+        ms?: number,
+        ...args: unknown[]
+      ) => {
+        if (typeof ms === "number" && ms > 0) delays.push(ms);
+        return originalSetTimeout(fn, 0, ...args);
+      }) as typeof setTimeout;
+
+      try {
+        let calls = 0;
+        installScriptedTransport(async () => {
+          calls += 1;
+          return { status: 503, headers: {}, bodyText: "unavailable" };
+        });
+
+        const result = await deliverAlertToChannel("discord", samplePayload(), alert, {
+          idempotencyKey: "idem_backoff_schedule",
+          withRetry: true,
+        });
+
+        assert(result.status === "failed", "Exhausted retries must fail.");
+        assert(result.terminal === true, "Exhausted retries must be terminal.");
+        assert(calls === 4, "Retry schedule must allow 4 attempts (initial + 3 backoffs).");
+
+        const expected = [30_000, 120_000, 600_000, 1_800_000];
+        const observed = delays.filter((ms) => expected.includes(ms));
+        assert(
+          observed.length >= 3,
+          `Backoff schedule must include 30s/2m/10m delays (observed: ${delays.join(",")}).`,
+        );
+        assert(observed[0] === 30_000, "First backoff must be 30s.");
+        assert(observed[1] === 120_000, "Second backoff must be 2m.");
+        assert(observed[2] === 600_000, "Third backoff must be 10m.");
+      } finally {
+        (global as unknown as { setTimeout: typeof setTimeout }).setTimeout = originalSetTimeout;
+      }
+    },
+  );
+}
+
+async function testDeadLetterStatus() {
+  await withEnv(
+    {
+      ALERT_DISCORD_WEBHOOK_URL: "https://discord.example.test/api/webhooks/1/token",
+      ALERT_DELIVERY_BACKOFF_MS: "0",
+    },
+    async () => {
+      const alert = makeAlert();
+      installScriptedTransport(async () => ({ status: 503, headers: {}, bodyText: "unavailable" }));
+
+      const result = await deliverAlertToChannel("discord", samplePayload(), alert, {
+        idempotencyKey: "idem_dead_letter",
+        withRetry: true,
+      });
+      assert(result.status === "failed" && result.terminal, "Exhausted retries must be terminal failed.");
+
+      const row = persistDeliveryResult(alert, "discord", samplePayload(), result, "idem_dead_letter");
+      assert(
+        row.status === "dead_letter" || row.terminal === true,
+        "Exhausted retries must persist as dead_letter (or terminal failed).",
+      );
+      const listed = listAlertDeliveries(alert.id, WALLET).find((entry) => entry.id === row.id);
+      assert(listed !== undefined, "Dead-lettered delivery must be visible via listAlertDeliveries.");
+      assert(
+        listed?.status === "dead_letter" || listed?.terminal === true,
+        "Dead-lettered delivery must remain visible with terminal status.",
       );
     },
   );
@@ -459,6 +627,10 @@ async function main() {
 
   const tests = [
     ["email HMAC + success", testEmailHmacAndSuccess],
+    ["cryptara signature headers", testCryptaraSignatureHeaders],
+    ["ssrf rejection", testSsrfRejection],
+    ["backoff schedule + dead letter", testBackoffScheduleAndDeadLetter],
+    ["dead letter status", testDeadLetterStatus],
     ["telegram validation", testTelegramValidation],
     ["discord validation", testDiscordValidation],
     ["retryable/terminal failures", testRetryableAndTerminalFailures],

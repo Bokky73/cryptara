@@ -4,7 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { FormEvent } from "react";
 import { AlertTriangle, ArrowRight, BrainCircuit, Check, ChevronDown, CircleHelp, Loader2, Search, Wallet, X } from "lucide-react";
-import type { AgentResult, PortfolioSnapshot, TokenHolding, TokenScanResult } from "@/server/types";
+import type {
+  AgentResult,
+  PortfolioSnapshot,
+  PreparedTransactionPayload,
+  TokenHolding,
+  TokenScanResult,
+  TransactionPreview as Preview,
+} from "@/server/types";
 import { NoDataState } from "@/components/NoDataState";
 import { RiskScoreCard } from "@/components/RiskScoreCard";
 import { WalletPortfolioCard } from "@/components/WalletPortfolioCard";
@@ -206,6 +213,8 @@ export function DashboardClient() {
     network: string;
     walletAddress: string;
     sourceAccount?: string;
+    preview?: Preview | null;
+    payload?: PreparedTransactionPayload | null;
   } | null>(null);
   const [isRunningAgents, setIsRunningAgents] = useState(false);
   const [dashboardRunSteps, setDashboardRunSteps] = useState<DashboardRunStep[]>(getInitialDashboardSteps);
@@ -952,6 +961,8 @@ export function DashboardClient() {
                         network: chain ?? "ethereum",
                         walletAddress: address ?? "",
                         sourceAccount: family === "stellar" ? address ?? undefined : undefined,
+                        preview: prepareResult as Preview,
+                        payload: (prepareResult as { payload?: PreparedTransactionPayload | null }).payload ?? null,
                       });
                       setApprovalFlowOpen(true);
                     } catch (error) {
@@ -1024,6 +1035,7 @@ export function DashboardClient() {
                 chainFamily={approvalPrepareData.chainFamily}
                 network={approvalPrepareData.network}
                 sourceAccount={approvalPrepareData.sourceAccount}
+                preview={approvalPrepareData.preview}
                 onComplete={(txHash) => {
                   setApprovalFlowOpen(false);
                   setApprovalPrepareData(null);
@@ -1034,6 +1046,11 @@ export function DashboardClient() {
                   setApprovalFlowOpen(false);
                   setApprovalPrepareData(null);
                 }}
+                onRefresh={() => {
+                  setApprovalFlowOpen(false);
+                  setApprovalPrepareData(null);
+                }}
+                refreshLabel="Refresh Quote & Re-simulate"
               />
             </div>
           </div>

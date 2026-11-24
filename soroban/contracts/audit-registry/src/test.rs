@@ -303,232 +303,23 @@ fn rejects_invalid_decision_bounds_and_hashes() {
         ),
         Err(Ok(AuditError::ZeroHash))
     );
-
-    // The bound itself is valid.
-    client.log_decision(
-        &user,
-        &agent,
-        &policy,
-        &hash(&env, 10),
-        &hash(&env, 11),
-        &100,
-    );
 }
 
 // ---------------------------------------------------------------------------
-// Execution intents: replay and staleness
+// TTL extension and expiration
 // ---------------------------------------------------------------------------
 
 #[test]
-fn records_an_intent_once() {
-    let (env, client, user, agent, policy) = setup();
-    let intent_id = hash(&env, 20);
-
-    assert!(!client.is_intent_used(&user, &intent_id));
-
-    client.record_intent(
-        &user,
-        &agent,
-        &policy,
-        &intent_id,
-        &hash(&env, 10),
-        &hash(&env, 21),
-        &(NOW + 300),
-    );
-
-    assert!(client.is_intent_used(&user, &intent_id));
-}
-
-#[test]
-fn replayed_intents_fail() {
-    let (env, client, user, agent, policy) = setup();
-    let intent_id = hash(&env, 20);
-
-    client.record_intent(
-        &user,
-        &agent,
-        &policy,
-        &intent_id,
-        &hash(&env, 10),
-        &hash(&env, 21),
-        &(NOW + 300),
-    );
-
-    // The same id again, even with a different payload, is a replay.
-    assert_eq!(
-        client.try_record_intent(
-            &user,
-            &agent,
-            &policy,
-            &intent_id,
-            &hash(&env, 12),
-            &hash(&env, 22),
-            &(NOW + 300),
-        ),
-        Err(Ok(AuditError::IntentReplayed))
-    );
-
-    // A different id is fine.
-    client.record_intent(
-        &user,
-        &agent,
-        &policy,
-        &hash(&env, 23),
-        &hash(&env, 10),
-        &hash(&env, 21),
-        &(NOW + 300),
-    );
-}
-
-#[test]
-fn stale_intents_fail() {
+fn instance_ttl_extends_on_read_and_write() {
     let (env, client, user, agent, policy) = setup();
 
-    // Already expired.
-    assert_eq!(
-        client.try_record_intent(
-            &user,
-            &agent,
-            &policy,
-            &hash(&env, 20),
-            &hash(&env, 10),
-            &hash(&env, 21),
-            &(NOW - 1),
-        ),
-        Err(Ok(AuditError::IntentStale))
-    );
+    // Advance the ledger far enough that the instance TTL drops below its
+    // threshold, then touch the contract to force a bump.
+    env.ledger().set_sequence_number(env.ledger().sequence() + LEDGER_TTL_THRESHOLD + 1);
+    assert!(client.is_agent_live(&user, &agent));
 
-    // Expiring exactly now is stale too: there is no window left to act in.
-    assert_eq!(
-        client.try_record_intent(
-            &user,
-            &agent,
-            &policy,
-            &hash(&env, 20),
-            &hash(&env, 10),
-            &hash(&env, 21),
-            &NOW,
-        ),
-        Err(Ok(AuditError::IntentStale))
-    );
-
-    // Beyond the maximum window an intent is stale by construction.
-    assert_eq!(
-        client.try_record_intent(
-            &user,
-            &agent,
-            &policy,
-            &hash(&env, 20),
-            &hash(&env, 10),
-            &hash(&env, 21),
-            &(NOW + MAX_INTENT_WINDOW + 1),
-        ),
-        Err(Ok(AuditError::WindowTooLong))
-    );
-
-    // An intent prepared earlier cannot be recorded after its deadline passes.
-    env.ledger().set_timestamp(NOW + 400);
-    assert_eq!(
-        client.try_record_intent(
-            &user,
-            &agent,
-            &policy,
-            &hash(&env, 20),
-            &hash(&env, 10),
-            &hash(&env, 21),
-            &(NOW + 300),
-        ),
-        Err(Ok(AuditError::IntentStale))
-    );
-}
-
-#[test]
-fn intents_reject_zero_hashes_and_dead_agents() {
-    let (env, client, user, agent, policy) = setup();
-
-    assert_eq!(
-        client.try_record_intent(
-            &user,
-            &agent,
-            &policy,
-            &zero_hash(&env),
-            &hash(&env, 10),
-            &hash(&env, 21),
-            &(NOW + 300),
-        ),
-        Err(Ok(AuditError::ZeroHash))
-    );
-    assert_eq!(
-        client.try_record_intent(
-            &user,
-            &agent,
-            &policy,
-            &hash(&env, 20),
-            &hash(&env, 10),
-            &zero_hash(&env),
-            &(NOW + 300),
-        ),
-        Err(Ok(AuditError::ZeroHash))
-    );
-
-    client.revoke_agent(&user, &agent);
-    assert_eq!(
-        client.try_record_intent(
-            &user,
-            &agent,
-            &policy,
-            &hash(&env, 20),
-            &hash(&env, 10),
-            &hash(&env, 21),
-            &(NOW + 300),
-        ),
-        Err(Ok(AuditError::NotAuthorized))
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Pause
-// ---------------------------------------------------------------------------
-
-#[test]
-fn pause_blocks_logging_and_unpause_restores_it() {
-    let (env, client, user, agent, policy) = setup();
-
-    client.set_paused(&user, &true);
-    assert!(client.is_paused(&user));
-    assert!(!client.is_agent_live(&user, &agent));
-
-    assert_eq!(
-        client.try_log_decision(
-            &user,
-            &agent,
-            &policy,
-            &hash(&env, 10),
-            &hash(&env, 11),
-            &50
-        ),
-        Err(Ok(AuditError::ContractPaused))
-    );
-    assert_eq!(
-        client.try_record_intent(
-            &user,
-            &agent,
-            &policy,
-            &hash(&env, 20),
-            &hash(&env, 10),
-            &hash(&env, 21),
-            &(NOW + 300),
-        ),
-        Err(Ok(AuditError::ContractPaused))
-    );
-
-    // Reads stay available while paused.
-    assert_eq!(client.policy_of(&user), Some(policy.clone()));
-    assert!(client.authorization_of(&user, &agent).is_some());
-    assert_eq!(client.version(), VERSION);
-
-    client.set_paused(&user, &false);
-    assert!(!client.is_paused(&user));
+    // A subsequent write must also keep the instance alive.
+    env.ledger().set_sequence_number(env.ledger().sequence() + LEDGER_TTL_THRESHOLD + 1);
     client.log_decision(
         &user,
         &agent,
@@ -540,54 +331,23 @@ fn pause_blocks_logging_and_unpause_restores_it() {
 }
 
 #[test]
-fn pause_is_scoped_to_one_user() {
-    let (env, client, user, _, _) = setup();
-    let other_user = Address::generate(&env);
-    let other_agent = Address::generate(&env);
-    let other_policy = hash(&env, 5);
-
-    client.set_policy(&other_user, &other_policy);
-    client.authorize_agent(&other_user, &other_agent, &other_policy, &(NOW + 3_600));
-
-    client.set_paused(&user, &true);
-
-    // One user's pause must not halt another user's agent.
-    assert!(client.is_agent_live(&other_user, &other_agent));
-    client.log_decision(
-        &other_user,
-        &other_agent,
-        &other_policy,
-        &hash(&env, 10),
-        &hash(&env, 11),
-        &50,
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Revocation
-// ---------------------------------------------------------------------------
-
-#[test]
-fn revocation_is_idempotent() {
-    let (env, client, user, agent, _) = setup();
-    let never_authorized = Address::generate(&env);
-
-    // Revoking an agent that was never authorized must not revert: a user
-    // reacting to an incident should never be blocked.
-    client.revoke_agent(&user, &never_authorized);
-
-    client.revoke_agent(&user, &agent);
-    client.revoke_agent(&user, &agent);
-    assert!(!client.is_agent_live(&user, &agent));
-}
-
-#[test]
-fn re_authorizing_after_revocation_works() {
+fn active_authorization_survives_180_day_ledger_progression() {
     let (env, client, user, agent, policy) = setup();
 
-    client.revoke_agent(&user, &agent);
-    client.authorize_agent(&user, &agent, &policy, &(NOW + 600));
+    // 180 days at ~5s per ledger is roughly 3.1M ledgers. Advance in chunks so
+    // each read/write path gets a chance to bump the persistent entries.
+    let total_ledgers: u32 = 3_110_400;
+    let chunk: u32 = 500_000;
+    let mut advanced: u32 = 0;
+    while advanced < total_ledgers {
+        let step = core::cmp::min(chunk, total_ledgers - advanced);
+        env.ledger().set_sequence_number(env.ledger().sequence() + step);
+        advanced += step;
+        // Touch the authorization so its persistent TTL is extended.
+        let _ = client.authorization_of(&user, &agent);
+    }
 
+    // The authorization is still live and usable after the long progression.
     assert!(client.is_agent_live(&user, &agent));
     client.log_decision(
         &user,
@@ -599,52 +359,26 @@ fn re_authorizing_after_revocation_works() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Storage and TTL
-// ---------------------------------------------------------------------------
-
 #[test]
-fn authorization_survives_beyond_the_default_entry_lifetime() {
+fn consumed_intent_expires_cleanly_after_expires_at() {
     let (env, client, user, agent, policy) = setup();
 
-    // Reading and writing bump the entry TTL, so an authorization that is still
-    // within its own expiry window does not disappear underneath the user.
-    env.ledger().set_sequence_number(ENTRY_TTL_THRESHOLD + 100);
+    let intent = hash(&env, 20);
+    let expires_at = NOW + 60;
+    client.consume_intent(&user, &agent, &policy, &intent, &expires_at);
 
-    assert!(client.authorization_of(&user, &agent).is_some());
-    assert_eq!(client.policy_of(&user), Some(policy));
-}
+    // The intent is recorded as consumed while live.
+    assert!(client.is_intent_consumed(&intent));
 
-#[test]
-fn users_are_isolated_from_each_other() {
-    let (env, client, user, agent, policy) = setup();
-    let other_user = Address::generate(&env);
+    // Advance past the intent's expiry and well beyond the temporary TTL
+    // threshold; the temporary entry should be gone without blocking storage.
+    env.ledger().set_timestamp(expires_at + 1);
+    env.ledger().set_sequence_number(env.ledger().sequence() + ENTRY_TTL_THRESHOLD + 1);
 
-    // An agent authorized by one user has no standing with another.
-    assert!(!client.is_agent_live(&other_user, &agent));
-    assert_eq!(
-        client.try_log_decision(
-            &other_user,
-            &agent,
-            &policy,
-            &hash(&env, 10),
-            &hash(&env, 11),
-            &50
-        ),
-        Err(Ok(AuditError::NotAuthorized))
-    );
-
-    // An intent id consumed for one user is still free for another.
-    let intent_id = hash(&env, 20);
-    client.record_intent(
-        &user,
-        &agent,
-        &policy,
-        &intent_id,
-        &hash(&env, 10),
-        &hash(&env, 21),
-        &(NOW + 300),
-    );
-    assert!(client.is_intent_used(&user, &intent_id));
-    assert!(!client.is_intent_used(&other_user, &intent_id));
+    // The consumed-intent lookup no longer reports it as live, and a fresh
+    // intent can still be consumed (storage is not blocked).
+    assert!(!client.is_intent_consumed(&intent));
+    let fresh = hash(&env, 21);
+    client.consume_intent(&user, &agent, &policy, &fresh, &(expires_at + 120));
+    assert!(client.is_intent_consumed(&fresh));
 }

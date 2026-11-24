@@ -35,11 +35,13 @@ export function GET(request: NextRequest) {
 
   const deliveries = listAlertDeliveries(parsed.data.alertId, wallet).map((delivery) => ({
     id: delivery.id,
+    deliveryId: delivery.id,
     alertId: delivery.alertId,
     channel: delivery.channel,
+    // status may be "dead_letter" for terminal failures; terminal mirrors that state.
     status: delivery.status,
     attemptCount: delivery.attemptCount,
-    terminal: delivery.terminal ?? false,
+    terminal: delivery.terminal ?? delivery.status === "dead_letter",
     ...(delivery.errorDetail ? { errorDetail: delivery.errorDetail } : {}),
     ...(delivery.providerMessageId ? { providerMessageId: delivery.providerMessageId } : {}),
     ...(delivery.nextRetryAt ? { nextRetryAt: delivery.nextRetryAt } : {}),
@@ -79,14 +81,16 @@ export async function POST(request: NextRequest) {
   return withCacheHeaders(
     NextResponse.json({
       id: result.delivery.id,
+      deliveryId: result.delivery.id,
       alertId: result.delivery.alertId,
       channel: result.delivery.channel,
       status: result.delivery.status,
       attemptCount: result.delivery.attemptCount,
-      terminal: result.delivery.terminal ?? false,
+      terminal: result.delivery.terminal ?? result.delivery.status === "dead_letter",
       ...(result.delivery.errorDetail ? { errorDetail: result.delivery.errorDetail } : {}),
       ...(result.delivery.providerMessageId ? { providerMessageId: result.delivery.providerMessageId } : {}),
       ...(result.delivery.nextRetryAt ? { nextRetryAt: result.delivery.nextRetryAt } : {}),
+      ...(result.delivery.lastAttemptAt ? { lastAttemptAt: result.delivery.lastAttemptAt } : {}),
       ...(result.delivery.sentAt ? { sentAt: result.delivery.sentAt } : {}),
     }),
     "alerts",

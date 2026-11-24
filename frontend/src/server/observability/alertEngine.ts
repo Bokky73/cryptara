@@ -17,9 +17,8 @@ import {
 import { buildSanitizedAlertPayload } from "@/server/observability/alertSanitize";
 import {
   buildDeliveryIdempotencyKey,
-  deliverAlertToChannel,
+  enqueueAlertDelivery,
   findDeliveryByIdempotencyKey,
-  persistDeliveryResult,
 } from "@/server/observability/alertDeliveries";
 import { defaultNotificationPreferences } from "@/server/observability/alerts/preferences/model";
 import { routeAlert } from "@/server/observability/alerts/preferences/routing";
@@ -437,6 +436,12 @@ export function resolveRoutingPreferencesForWallet(
  *  - critical alerts always bypass quiet hours and digest batching
  *
  * Idempotent for `(alertId, channel, event)` via delivery idempotency keys.
+ *
+ * Non-blocking: deliveries are enqueued (persisted with `pending` status and
+ * the retry/backoff schedule) rather than awaited inline. The background
+ * delivery worker drains the queue, so transient webhook failures never block
+ * the alert evaluation loop. Terminal failures surface as `dead_letter`
+ * delivery rows queryable via `/api/alerts/deliveries`.
  */
 export async function fanOutDeliveries(
   alert: Alert,
@@ -465,8 +470,7 @@ export async function fanOutDeliveries(
       continue;
     }
 
-    const result = await deliverAlertToChannel(channel, sanitized, alert, { idempotencyKey });
-    out.push(persistDeliveryResult(alert, channel, sanitized, result, idempotencyKey));
+    out.push(enqueueAlertDelivery(alert, channel, sanitized, idempotencyKey));
   }
 
   return out;

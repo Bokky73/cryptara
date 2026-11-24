@@ -65,6 +65,19 @@ export function literal<T extends string | boolean>(expected: T): Validator<T> {
 }
 
 /**
+ * Creates a validator for a closed set of string values.
+ *
+ * Used only for fields whose server contract is an enum (alert status,
+ * severity, delivery channel). Open-ended status codes keep using `text`.
+ */
+export function oneOf<T extends string>(expected: readonly T[]): Validator<T> {
+  return (v, p = "value") => {
+    if (typeof v !== "string" || !expected.includes(v as T)) throw new CompatibilityError(p);
+    return v as T;
+  };
+}
+
+/**
  * Creates an object shape validator validating all specified fields while preserving unknown additive fields.
  */
 export function shape<S extends Record<string, Validator<unknown>>>(fields: S): Validator<{ [K in keyof S]: ReturnType<S[K]> } & Record<string, unknown>> {

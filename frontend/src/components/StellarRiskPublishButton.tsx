@@ -6,6 +6,11 @@ import { AlertTriangle, CheckCircle2, ExternalLink, Loader2, Orbit, Shield, Hash
 import { getStellarNetwork, normalizeStellarNetworkId } from "@/lib/stellar/config";
 import { useStellarWallet } from "@/providers/StellarWalletProvider";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import {
+  verifyRiskPublicationPreview,
+  type SigningVerificationIssue,
+} from "@/lib/signing/previewVerification";
+import { SigningVerificationWarning } from "@/components/SigningVerificationWarning";
 
 type PublishStage = "idle" | "preview" | "simulating" | "preview_ready" | "signing" | "submitting" | "verifying" | "success" | "failed";
 
@@ -42,6 +47,10 @@ function shortHex(hex: string, chars = 8): string {
   return hex.length > chars * 2 + 3 ? hex.slice(0, chars) + "..." + hex.slice(-chars) : hex;
 }
 
+function toHashHex(value: string | undefined): string {
+  return value?.toLowerCase().replace(/^sha256:/, "") ?? "";
+}
+
 export function StellarRiskPublishButton({
   network,
   assetKey,
@@ -49,6 +58,7 @@ export function StellarRiskPublishButton({
   score,
   verdict,
   report,
+  expectedHash,
 }: {
   network?: string;
   assetKey?: string;
@@ -56,6 +66,8 @@ export function StellarRiskPublishButton({
   score: number;
   verdict: string;
   report: unknown;
+  /** Canonical snapshot hash to compare against the registry publication. */
+  expectedHash?: string;
 }) {
   const stellar = useStellarWallet();
   const { actionsDisabled } = useOnlineStatus();
@@ -63,6 +75,7 @@ export function StellarRiskPublishButton({
   const config = getStellarNetwork(networkId ?? undefined);
   const [stage, setStage] = useState<PublishStage>("idle");
   const [error, setError] = useState<string>();
+  const [verificationIssues, setVerificationIssues] = useState<SigningVerificationIssue[]>([]);
   const [preview, setPreview] = useState<PreviewData>();
   const [verifyOutcome, setVerifyOutcome] = useState<VerifyOutcome>();
   const [txHash, setTxHash] = useState<string>();
@@ -76,6 +89,15 @@ export function StellarRiskPublishButton({
   }, []);
 
   if (!networkId || !assetKey || !config) return null;
+
+  function checkPreview(data: PreviewData): SigningVerificationIssue[] {
+    return verifyRiskPublicationPreview({
+      preview: data,
+      network: networkId,
+      expectedPublisher: stellar.address ?? undefined,
+      expectedContractId: config.registryContractId,
+    }).issues.filter((issue) => issue.blocking);
+  }
 
   async function startPreview() {
     if (actionsDisabled) return;
@@ -91,6 +113,7 @@ export function StellarRiskPublishButton({
 
     try {
       setError(undefined);
+      setVerificationIssues([]);
       setStage("simulating");
       const previewResponse = await fetch("/api/stellar/registry/preview", {
         method: "POST",
@@ -110,6 +133,7 @@ export function StellarRiskPublishButton({
       if (!previewResponse.ok || !data.xdr) {
         throw new Error(data.error ?? "Could not prepare registry transaction preview.");
       }
+      setVerificationIssues(checkPreview(data));
       setPreview(data);
       setStage("preview_ready");
     } catch (cause) {
@@ -123,14 +147,25 @@ export function StellarRiskPublishButton({
 
     try {
       setError(undefined);
-      setStage("signing");
 
-      // Check if the preview has expired
-      if (Date.now() > preview.expiresAt) {
+      // Decode and compare the XDR before the wallet is opened.
+      const issues = checkPreview(preview);
+      if (issues.length > 0) {
+        setVerificationIssues(issues);
+        setError("Signing blocked: the prepared XDR does not match the reviewed publication preview.");
+        setStage("failed");
+        return;
+      }
+
+      // Check if the preview has expired using the UI's refreshable clock.
+      if (now > preview.expiresAt) {
         throw new Error("Preview has expired (prepared > 120s ago). Click 'Start preview' again.");
       }
 
-      const signedXdr = await stellar.signTransaction(preview.xdr);
+      setVerificationIssues([]);
+      setStage("signing");
+
+      const signedXdr = await stellar.signTransaction(preview.xdr, networkId);
       setStage("submitting");
 
       const submitResponse = await fetch("/api/stellar/registry/submit", {
@@ -191,6 +226,10 @@ export function StellarRiskPublishButton({
   const isSimulating = stage === "simulating";
   const previewExpired = preview && now > preview.expiresAt;
   const isTestnet = networkId.includes("testnet");
+  const expectedHashHex = toHashHex(expectedHash);
+  const snapshotMatchesPayload = Boolean(expectedHashHex && preview && expectedHashHex === preview.reportHash.toLowerCase());
+  const snapshotMatchesOnChain = Boolean(expectedHashHex && verifyOutcome?.onchainReportHash
+    && expectedHashHex === toHashHex(verifyOutcome.onchainReportHash));
 
   // Determine current active step (1-4)
   const currentStep =
@@ -310,6 +349,15 @@ export function StellarRiskPublishButton({
               <span className="flex items-center gap-1 text-white/60"><Hash className="h-3 w-3" /> Report hash</span>
               <span className="font-mono text-xs text-white/80" title={preview.reportHash}>{shortHex(preview.reportHash, 8)}</span>
             </div>
+            {expectedHash ? (
+              <div className="flex items-center justify-between rounded-md bg-black/24 px-3 py-2">
+                <span className="flex items-center gap-1 text-white/60"><Hash className="h-3 w-3" /> Snapshot hash</span>
+                <span className={`text-xs font-semibold ${snapshotMatchesPayload ? "text-emerald-300" : "text-amber-300"}`}>
+                  {snapshotMatchesPayload ? "Matches payload" : "Payload differs"}
+                  <span className="ml-2 font-mono font-normal text-white/60" title={expectedHash}>{shortHex(expectedHashHex, 6)}</span>
+                </span>
+              </div>
+            ) : null}
             <div className="flex items-center justify-between rounded-md bg-black/24 px-3 py-2">
               <span className="flex items-center gap-1 text-white/60"><Fuel className="h-3 w-3" /> Fee</span>
               <span className="font-mono text-white">{preview.fee} stroops</span>
@@ -338,6 +386,14 @@ export function StellarRiskPublishButton({
             </div>
           </div>
 
+          {verificationIssues.length > 0 ? (
+            <SigningVerificationWarning
+              issues={verificationIssues}
+              onRefresh={() => void startPreview()}
+              refreshLabel="Re-prepare Publication Preview"
+            />
+          ) : null}
+
           {previewExpired ? (
             <div className="flex items-center gap-2 rounded-md bg-red-900/20 px-3 py-2 text-xs text-red-200">
               <AlertTriangle className="h-3 w-3 shrink-0" />
@@ -347,7 +403,7 @@ export function StellarRiskPublishButton({
             <button
               type="button"
               onClick={() => void signAndSubmit()}
-              disabled={actionsDisabled}
+              disabled={actionsDisabled || verificationIssues.length > 0}
               className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-full bg-[#7b61ff] px-5 text-sm font-semibold text-white transition hover:bg-[#7b61ff]/80"
             >
               Sign with wallet &amp; submit
@@ -391,6 +447,14 @@ export function StellarRiskPublishButton({
                 {verifyOutcome.hashMatch === true ? "Verified" : verifyOutcome.hashMatch === false ? "MISMATCH" : "Could not verify"}
               </span>
             </div>
+            {expectedHash ? (
+              <div className="flex items-center justify-between rounded-md bg-black/24 px-3 py-2">
+                <span className="text-white/60">Snapshot hash on-chain</span>
+                <span className={verifyOutcome.onchainReportHash ? (snapshotMatchesOnChain ? "text-emerald-300" : "text-red-300") : "text-white/60"}>
+                  {!verifyOutcome.onchainReportHash ? "Not returned" : snapshotMatchesOnChain ? "Verified" : "MISMATCH"}
+                </span>
+              </div>
+            ) : null}
             {verifyOutcome.ledger && (
               <div className="flex items-center justify-between rounded-md bg-black/24 px-3 py-2">
                 <span className="text-white/60">Ledger</span>
