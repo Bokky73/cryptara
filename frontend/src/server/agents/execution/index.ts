@@ -108,6 +108,9 @@ isStellar?: boolean;
       checks: ["Soroban swap simulation", "Classic path payment simulation", "Footprint verification", "Fee estimation"],
       revertReason: input.revertReason,
       simulatedTxHash: input.simulation?.simulatedTxHash ?? "",
+      simulatedXdrHash: input.simulation?.simulatedXdrHash,
+      binding: input.simulation?.binding,
+      quoteExpiry: input.simulation?.quoteExpiry,
       detail:
         input.simulationStatus === "failed"
           ? input.revertReason ?? "Stellar swap simulation failed."
@@ -126,6 +129,7 @@ isStellar?: boolean;
         ? input.revertReason ?? "Simulation failed."
         : "Tenderly or equivalent simulation is planned before confirmation. Pending simulation blocks unsafe confidence but still allows preview display."),
     simulatedTxHash: input.simulation?.simulatedTxHash ?? "",
+    binding: input.simulation?.binding,
     simulatedAt: input.simulation?.simulatedAt,
     blockNumber: input.simulation?.blockNumber,
     ledgerSeq: input.simulation?.ledgerSeq,

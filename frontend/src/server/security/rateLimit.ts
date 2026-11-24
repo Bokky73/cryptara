@@ -1,6 +1,4 @@
-import { NextRequest } from "next/server";
-
-import { jsonError } from "@/server/api/errors";
+import { NextRequest, NextResponse } from "next/server";
 
 type RateLimitOptions = {
   limit: number;
@@ -65,7 +63,7 @@ export class MemoryRateLimitStore implements RateLimitStore {
     }
   }
 
-  async consume(key: string, limit: number, windowMs: number): Promise<RateLimitResult> {
+  consumeSync(key: string, limit: number, windowMs: number): RateLimitResult {
     const now = Date.now();
     this.sweep(now);
 
@@ -93,6 +91,10 @@ export class MemoryRateLimitStore implements RateLimitStore {
     const retryAfterSeconds = allowed ? 0 : Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
 
     return { allowed, limit, remaining, resetAt: bucket.resetAt, retryAfterSeconds };
+  }
+
+  async consume(key: string, limit: number, windowMs: number): Promise<RateLimitResult> {
+    return this.consumeSync(key, limit, windowMs);
   }
 }
 
@@ -204,19 +206,13 @@ export class PostgresRateLimitStore implements RateLimitStore {
 
 const storeGlobal = globalThis as typeof globalThis & {
   __cryptaraRateLimitStore?: RateLimitStore;
+  __cryptaraSyncRateLimitStore?: MemoryRateLimitStore;
 };
-  if (bucket.count >= options.limit) {
-    const retryAfterSeconds = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
-    const response = jsonError({
-      code: "rate_limited",
-      message: `Too many ${options.namespace} requests. Try again after ${new Date(bucket.resetAt).toISOString()}.`,
-      status: 429,
-      retryable: true,
-      recoveryAction: "retry_after_delay",
-      details: { namespace: options.namespace, retryAfterSeconds },
-    });
 
-    response.headers.set("Retry-After", retryAfterSeconds.toString());
+function getSyncRateLimitStore(): MemoryRateLimitStore {
+  storeGlobal.__cryptaraSyncRateLimitStore ??= new MemoryRateLimitStore();
+  return storeGlobal.__cryptaraSyncRateLimitStore;
+}
 
 function createStore(): RateLimitStore {
   const kind = (process.env.RATE_LIMIT_STORE ?? "memory").toLowerCase();
@@ -314,20 +310,36 @@ function applyRateLimitHeaders(response: NextResponse, result: RateLimitResult) 
   return response;
 }
 
-export async function checkRateLimit(
+/**
+ * Synchronous guard used by route handlers: returns a 429 response when the
+ * caller has exhausted its bucket, otherwise `undefined`.
+ *
+ * The async distributed stores remain available through `getRateLimitStore()`
+ * and `checkRateLimitAsync()` for callers that can await a backend round trip.
+ */
+export function checkRateLimit(
+  request: Request | NextRequest,
+  options: RateLimitOptions,
+): NextResponse | undefined {
+  const key = getClientKey(request, options.namespace);
+  const result = getSyncRateLimitStore().consumeSync(key, options.limit, options.windowMs);
+  return result.allowed ? undefined : rateLimitResponse(result, options.namespace);
+}
+
+export function checkRateLimitProfile(
+  request: Request | NextRequest,
+  profile: keyof typeof rateLimitProfiles,
+): NextResponse | undefined {
+  return checkRateLimit(request, rateLimitProfiles[profile]);
+}
+
+/** Async variant backed by the configured (possibly distributed) store. */
+export async function checkRateLimitAsync(
   request: Request | NextRequest,
   options: RateLimitOptions,
 ): Promise<RateLimitResult> {
   const key = getClientKey(request, options.namespace);
-  const store = getRateLimitStore();
-  return store.consume(key, options.limit, options.windowMs);
-}
-
-export async function checkRateLimitProfile(
-  request: Request | NextRequest,
-  profile: keyof typeof rateLimitProfiles,
-): Promise<RateLimitResult> {
-  return checkRateLimit(request, rateLimitProfiles[profile]);
+  return getRateLimitStore().consume(key, options.limit, options.windowMs);
 }
 
 /**

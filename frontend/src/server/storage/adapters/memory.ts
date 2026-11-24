@@ -217,6 +217,13 @@ export class MemoryStorageAdapter implements IStorageAdapter {
 
   // ─── Public risk snapshots ──────────────────────────────────────
 
+  async listRiskSnapshots(identityKey?: string): Promise<RiskSnapshotRecord[]> {
+    return getRiskSnapshots()
+      .filter((record) => !identityKey || record.identityKey === identityKey)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .map((record) => structuredClone(record));
+  }
+
   async getRiskSnapshot(id: string): Promise<RiskSnapshotRecord | null> {
     const record = getRiskSnapshots().find((item) => item.id === id);
     return record ? structuredClone(record) : null;

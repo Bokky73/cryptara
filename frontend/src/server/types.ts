@@ -372,6 +372,11 @@ export type TransactionPreview = {
   projectedRiskScore: number;
   requiresApproval: boolean;
   network: string;
+  /** Recipient/contract shown to the user before a wallet signature is requested. */
+  targetContract?: string;
+  contractVerified?: boolean;
+  explorerUrl?: string;
+  stroops?: string;
   slippageBps?: number;
   priceImpactBps?: number;
   gasEstimateUsd?: number;

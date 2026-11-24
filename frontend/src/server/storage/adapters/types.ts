@@ -231,6 +231,8 @@ export interface IStorageAdapter {
   createX402PaymentReceipt(record: X402PaymentReceipt): Promise<X402PaymentReceipt>;
 
   // ─── Public risk snapshots ──────────────────────────────────────
+  /** List risk snapshots, optionally narrowed to one canonical asset identity. */
+  listRiskSnapshots(identityKey?: string): Promise<RiskSnapshotRecord[]>;
   getRiskSnapshot(id: string): Promise<RiskSnapshotRecord | null>;
   createRiskSnapshot(record: RiskSnapshotRecord): Promise<RiskSnapshotRecord>;
   revokeRiskSnapshot(id: string, revokedAt: string): Promise<RiskSnapshotRecord | null>;

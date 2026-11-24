@@ -20,11 +20,13 @@ export function createReadClient(options: ClientOptions) {
 }
 export type ReadClient = ReturnType<typeof createReadClient>;
 export type { ClientOptions, ReadOptions, StellarNetwork } from "./types.js";
-export { ReadClientError, CompatibilityError } from "./errors.js";
+export { ReadClientError, CompatibilityError, httpError, parseErrorEnvelope } from "./errors.js";
+export type { RecoveryAction, ErrorEnvelope } from "./errors.js";
 export type { Health } from "./health.js";
 export type { Portfolio } from "./portfolio.js";
 export type { TransactionPage } from "./history.js";
-export type { Watchlist } from "./watchlist.js";
-export type { Alerts } from "./alerts.js";
+export type { SourceSnapshot, AgentRunDetail } from "./history.js";
+export type { Watchlist, WatchlistEntry, WatchlistScanRun } from "./watchlist.js";
+export type { Alerts, AlertHistory, AlertRecord, AlertSeverity, AlertStatus, AlertTriggerType, AlertDeliveryChannel, AlertDeliveryStatus, DeliveryAuditRow } from "./alerts.js";
 export type { RegistryHistory, RegistryRecord, RegistryStatus } from "./registry.js";
 export type { Snapshot } from "./snapshots.js";
