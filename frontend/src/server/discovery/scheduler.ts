@@ -8,10 +8,15 @@ import type {
 import type { DiscoveryProvider, ProviderRegistration } from "@/server/discovery/provider";
 import { defaultPollingConfigs, getChainsForProvider } from "@/server/discovery/provider";
 import logger from "@/server/observability/logger/logger";
-import { getCursor } from "@/server/discovery/cursor";
-import { storeObservations, pruneObservations } from "@/server/discovery/store";
+import { getCursor, saveCursor } from "@/server/discovery/cursor";
+import {
+  storeObservations,
+  pruneObservations,
+  persistClassificationProvenance,
+} from "@/server/discovery/store";
 import { createDexScreenerProvider } from "@/server/discovery/providers/dexscreener";
 import { createStellarMarketProvider } from "@/server/discovery/providers/stellar";
+import { dedupeObservations } from "@/server/discovery/dedup";
 
 // ─── Provider factory map ────────────────────────────────────────────────────
 
@@ -87,8 +92,32 @@ export function registerProviders(config: DiscoveryServiceConfig = {}): Provider
   return registrations;
 }
 
-import { isPollDue, createPollCoalescer } from "./pollingGuard";
+import {
+  isPollDue,
+  createPollCoalescer,
+  tryConsumeBudget,
+  recordProviderOutcome,
+  getAdaptiveBackoffMs,
+} from "./pollingGuard";
 const coalescePoll = createPollCoalescer<PollResult>();
+
+// ─── Per-cycle candidate caps ────────────────────────────────────────────────
+
+const DEFAULT_MAX_CANDIDATES_PER_CYCLE = 200;
+
+function resolveMaxCandidatesPerCycle(): number {
+  const configured = state.config.maxCandidatesPerCycle;
+  if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
+    return Math.floor(configured);
+  }
+  return DEFAULT_MAX_CANDIDATES_PER_CYCLE;
+}
+
+function isRateLimitOrServerError(error: unknown): boolean {
+  if (!error) return false;
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b(429|5\d\d)\b/.test(message) || /rate.?limit|too many requests|server error/i.test(message);
+}
 
 // ─── Poll a single provider ──────────────────────────────────────────────────
 
@@ -113,12 +142,73 @@ async function pollProviderOnce(registration: ProviderRegistration): Promise<Pol
     };
   }
 
-  const result = await provider.poll(cursor, config);
+  // Enforce token-bucket rate budget before issuing a provider request.
+  if (!tryConsumeBudget(provider.kind, provider.chainId, config)) {
+    logger.warn("discovery.scheduler", "Provider request budget exhausted; skipping poll", {
+      providerKind: provider.kind,
+      chainId: provider.chainId,
+    });
+    return {
+      chainId: provider.chainId,
+      providerKind: provider.kind,
+      observations: [],
+      cursor,
+      ok: true,
+      elapsedMs: 0,
+    };
+  }
 
-  // Store observations if poll succeeded
-  if (result.ok && result.observations.length > 0) {
+  let result: PollResult;
+  try {
+    result = await provider.poll(cursor, config);
+  } catch (error) {
+    recordProviderOutcome(provider.kind, provider.chainId, false);
+    throw error;
+  }
+
+  if (!result.ok) {
+    // Adaptive backoff on 429/5xx (or any failure) via the polling guard.
+    const backoffMs = getAdaptiveBackoffMs(provider.kind, provider.chainId, config);
+    recordProviderOutcome(provider.kind, provider.chainId, false);
+    if (result.cursor) {
+      saveCursor({
+        ...result.cursor,
+        consecutiveFailures: (result.cursor.consecutiveFailures ?? 0) + 1,
+        nextAllowedPollMs: Date.now() + backoffMs,
+      });
+    }
+    return result;
+  }
+
+  recordProviderOutcome(provider.kind, provider.chainId, true);
+
+  // Persist the cursor durably so restarts resume from the same position.
+  if (result.cursor) {
+    saveCursor({
+      ...result.cursor,
+      consecutiveFailures: 0,
+      nextAllowedPollMs: Date.now() + config.freshness.pollIntervalMs,
+    });
+  }
+
+  // Store observations if poll succeeded, bounded by the per-cycle cap and
+  // deduplicated by canonical chain-aware identity before scoring/persisting.
+  if (result.observations.length > 0) {
+    const cap = resolveMaxCandidatesPerCycle();
+    const bounded = result.observations.slice(0, cap);
+    if (result.observations.length > cap) {
+      logger.warn("discovery.scheduler", "Per-cycle candidate cap applied", {
+        providerKind: provider.kind,
+        chainId: provider.chainId,
+        received: result.observations.length,
+        cap,
+      });
+    }
+
+    const deduped = dedupeObservations(bounded);
+
     const stored = storeObservations(
-      result.observations.map((obs) => ({
+      deduped.map((obs) => ({
         identity: obs.identity,
         observedBy: obs.observedBy,
         observedAt: obs.observedAt,
@@ -126,6 +216,17 @@ async function pollProviderOnce(registration: ProviderRegistration): Promise<Pol
         evidence: obs.evidence,
         riskScore: obs.riskScore,
         riskLevel: obs.riskLevel,
+      })),
+    );
+
+    // Persist classification provenance for each canonical candidate.
+    persistClassificationProvenance(
+      stored.map((obs) => ({
+        canonicalKey: obs.identity.canonicalKey,
+        chainId: obs.identity.chainId,
+        classification: obs.riskLevel,
+        riskScore: obs.riskScore,
+        observedAt: obs.observedAt,
       })),
     );
 
@@ -153,18 +254,24 @@ export async function pollAll(): Promise<PollResult[]> {
       const result = await pollProvider(registration);
       results.push(result);
     } catch (error) {
+      const backoffMs = isRateLimitOrServerError(error)
+        ? getAdaptiveBackoffMs(registration.provider.kind, registration.provider.chainId, registration.config)
+        : 30_000;
+      const existing = getCursor(registration.provider.kind, registration.provider.chainId);
+      const failureCursor = {
+        providerKind: registration.provider.kind,
+        chainId: registration.provider.chainId,
+        cursor: existing?.cursor ?? "",
+        updatedAt: new Date().toISOString(),
+        consecutiveFailures: (existing?.consecutiveFailures ?? 0) + 1,
+        nextAllowedPollMs: Date.now() + backoffMs,
+      };
+      saveCursor(failureCursor);
       results.push({
         chainId: registration.provider.chainId,
         providerKind: registration.provider.kind,
         observations: [],
-        cursor: {
-          providerKind: registration.provider.kind,
-          chainId: registration.provider.chainId,
-          cursor: "",
-          updatedAt: new Date().toISOString(),
-          consecutiveFailures: 0,
-          nextAllowedPollMs: Date.now() + 30_000,
-        },
+        cursor: failureCursor,
         ok: false,
         error: error instanceof Error ? error.message : "Poll failed unexpectedly",
         elapsedMs: 0,
@@ -222,4 +329,8 @@ export function isSchedulerRunning(): boolean {
 
 export function getSchedulerRegistrations(): ProviderRegistration[] {
   return [...state.registrations];
+}
+
+export function getSchedulerConfig(): DiscoveryServiceConfig {
+  return { ...state.config };
 }

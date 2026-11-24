@@ -19,12 +19,18 @@ import { runSocialAgent } from "@/server/agents/social";
 import { resolveTokenIdentity } from "@/server/identity/tokenIdentity";
 import { assertApprovalOnly } from "@/server/security/policy";
 import { fetchLiveDiscoveryCandidates } from "@/server/discovery/sources";
+import { dedupeDiscoveryCandidates } from "@/server/discovery/dedup";
+import { DEFAULT_DISCOVERY_LIMITS, type DiscoveryLimits } from "@/server/discovery/pollingGuard";
 
 export type DiscoveryCandidateProviders = {
   listCandidates?: (chain?: string) => Promise<DiscoveryCandidate[]>;
   onchain?: OnchainAgentProviders;
   news?: NewsAgentProviders;
   skipPortfolio?: boolean;
+};
+
+export type ListDiscoveryCandidatesOptions = {
+  limits?: Partial<DiscoveryLimits>;
 };
 
 function buildUnavailablePortfolioResult(discovery: DiscoveryAgentContext): AgentResult {
@@ -105,6 +111,16 @@ function hasUsableProviderCoverage(results: AgentResult[]) {
 
 function normalizeCandidates(candidates: DiscoveryCandidate[]): DiscoveryCandidate[] {
   return candidates.filter((candidate) => Boolean(candidate.chain && (candidate.contractAddress || candidate.assetKey || candidate.pairAddress)));
+}
+
+function resolveCandidateLimits(limits?: Partial<DiscoveryLimits>): DiscoveryLimits {
+  return { ...DEFAULT_DISCOVERY_LIMITS, ...(limits ?? {}) };
+}
+
+function enforceCandidateCap(candidates: DiscoveryCandidate[], limits: DiscoveryLimits): DiscoveryCandidate[] {
+  const cap = Math.max(0, Math.floor(limits.maxCandidatesPerCycle));
+  if (candidates.length <= cap) return candidates;
+  return candidates.slice(0, cap);
 }
 
 function clampScore(value: number) {
@@ -208,15 +224,22 @@ async function gatherSpecialistResults(
   return { onchainResult, newsResult, socialResult, portfolioResult };
 }
 
-export async function listDiscoveryCandidates(chain?: string, providers: DiscoveryCandidateProviders = {}): Promise<DiscoveryCandidate[]> {
+export async function listDiscoveryCandidates(
+  chain?: string,
+  providers: DiscoveryCandidateProviders = {},
+  options: ListDiscoveryCandidatesOptions = {},
+): Promise<DiscoveryCandidate[]> {
+  const limits = resolveCandidateLimits(options.limits);
   const providerFn = providers.listCandidates ?? (async (chainFilter?: string) => {
     const live = await fetchLiveDiscoveryCandidates(chainFilter);
 
     return live.candidates;
   });
   const fetched = await providerFn(chain);
+  const normalized = normalizeCandidates(fetched);
+  const deduped = dedupeDiscoveryCandidates(normalized);
 
-  return normalizeCandidates(fetched);
+  return enforceCandidateCap(deduped, limits);
 }
 
 export type ScanDiscoveryResultSummary = {
@@ -251,11 +274,22 @@ export async function scanDiscoveryCandidate(
 
   const identityInput = buildIdentityInput(candidate);
   const identity = getDiscoveryIdentity(identityInput);
-  const discovery = buildDiscoveryAgentContext(candidate, identity, {
+  const canonicalCandidate: DiscoveryCandidate = {
+    ...candidate,
+    identityKey: identity.identityKey,
+    classification: candidate.classification ?? "watch",
+    classificationProvenance: candidate.classificationProvenance ?? {
+      classification: candidate.classification ?? "watch",
+      source: "discovery_pipeline",
+      identityKey: identity.identityKey,
+      classifiedAt: new Date().toISOString(),
+    },
+  };
+  const discovery = buildDiscoveryAgentContext(canonicalCandidate, identity, {
     mode: options.scanMode ?? "candidate",
     sourceLabel: options.sourceLabel,
   });
-  const { onchainResult, newsResult, socialResult, portfolioResult } = await gatherSpecialistResults(candidate, identity, {
+  const { onchainResult, newsResult, socialResult, portfolioResult } = await gatherSpecialistResults(canonicalCandidate, identity, {
     walletAddress: options.walletAddress,
     providers: options.providers,
     discovery,
@@ -402,8 +436,20 @@ export async function scanDiscoveryCandidate(
     createdAt: new Date().toISOString(),
   };
 
+  const classifiedCandidate: DiscoveryCandidate = {
+    ...canonicalCandidate,
+    classification: finalClassification,
+    classificationProvenance: {
+      classification: finalClassification,
+      source: "discovery_pipeline",
+      identityKey: identity.identityKey,
+      reasons: refinementDecision.reasons,
+      classifiedAt: decisionAgent.createdAt,
+    },
+  };
+
   return {
-    candidate,
+    candidate: classifiedCandidate,
     identity,
     results: [...specialistResults, decisionAgent],
     decision: decisionAgent,
