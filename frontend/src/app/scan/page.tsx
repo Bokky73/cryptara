@@ -4,13 +4,14 @@ import { TokenScanClient } from "@/components/TokenScanClient";
 export default async function ScanPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ query?: string }>;
+  searchParams?: Promise<{ query?: string; chain?: string; run?: string }>;
 }) {
-  const query = (await searchParams)?.query;
+  const { query, chain, run } = (await searchParams) ?? {};
 
   return (
     <AppShell>
-      <TokenScanClient initialQuery={query} />
+      {/* Keyed so a palette scan started while already on /scan replaces the form. */}
+      <TokenScanClient key={JSON.stringify([query, chain, run])} initialQuery={query} initialChain={chain} autoRun={Boolean(query && run)} />
     </AppShell>
   );
 }

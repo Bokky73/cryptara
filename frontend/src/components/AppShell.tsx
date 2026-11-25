@@ -193,9 +193,6 @@ export function AppShell({ children, commandAssets }: { children: ReactNode; com
             <div className={headerControlClassName}>
               <WalletConnectButton />
             </div>
-            <CommandTrigger assets={commandAssets} />
-            <ThemeToggle />
-            <WalletConnectButton />
             <button
               ref={triggerRef}
               type="button"
