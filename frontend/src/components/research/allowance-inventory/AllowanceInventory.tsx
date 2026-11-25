@@ -1,12 +1,13 @@
 "use client";
 
+import { useInsightParam } from "@/components/research/shared/useInsightQueryParams";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ShieldCheck } from "lucide-react";
 import { useWalletSession } from "@/hooks/useWalletSession";
 import type { AllowanceInventoryResult, AllowancePair } from "@/server/research/allowance-inventory/schema";
 import { DiscoveryCoverage } from "./DiscoveryCoverage";
 import { InventoryStateNotice } from "./InventoryStateNotice";
-import { ScanRangeForm } from "./ScanRangeForm";
+import { ALLOWANCE_NETWORKS, ScanRangeForm } from "./ScanRangeForm";
 import { SpenderTable } from "./SpenderTable";
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -14,10 +15,10 @@ const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 export function AllowanceInventory() {
   const wallet = useWalletSession();
   const address = wallet.family === "evm" ? wallet.address : undefined;
-  const [network, setNetwork] = useState("ethereum");
+  const [network, setNetwork] = useInsightParam("network", "ethereum", ALLOWANCE_NETWORKS);
   const [fromBlock, setFromBlock] = useState("0");
   const [toBlock, setToBlock] = useState("1000");
-  const [token, setToken] = useState("");
+  const [token, setToken] = useInsightParam("asset", "");
   const [spender, setSpender] = useState("");
   const [pairs, setPairs] = useState<AllowancePair[]>([]);
   const [view, setView] = useState<{ scope: string; result: AllowanceInventoryResult | null; error: string | null; busy: boolean }>({ scope: "", result: null, error: null, busy: false });

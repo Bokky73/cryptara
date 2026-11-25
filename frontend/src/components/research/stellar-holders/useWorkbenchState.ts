@@ -1,5 +1,6 @@
 "use client";
 
+import { useInsightParam } from "@/components/research/shared/useInsightQueryParams";
 import { useCallback, useRef, useState } from "react";
 import type { HolderDistributionReport } from "@/server/research/stellar-holders/schema";
 
@@ -10,22 +11,26 @@ export type WorkbenchState =
   | { status: "error"; code: string; message: string };
 
 export function useWorkbenchState(initialAsset: string, initialNetwork: string, endpoint = "/api/insights/stellar-holders") {
-  const [asset, setAssetValue] = useState(initialAsset);
-  const [network, setNetworkValue] = useState(initialNetwork === "stellar-pubnet" ? "stellar-pubnet" : "stellar-testnet");
+  const [asset, setAssetValue] = useInsightParam("asset", initialAsset);
+  const [network, setNetworkValue] = useInsightParam<"stellar-testnet" | "stellar-pubnet">(
+    "network",
+    initialNetwork === "stellar-pubnet" ? "stellar-pubnet" : "stellar-testnet",
+    ["stellar-testnet", "stellar-pubnet"],
+  );
   const [state, setState] = useState<WorkbenchState>({ status: "idle" });
   const generation = useRef(0);
 
-  const setAsset = useCallback((value: string) => {
+  function setAsset(value: string) {
     generation.current += 1;
     setAssetValue(value);
     setState({ status: "idle" });
-  }, []);
+  }
 
-  const setNetwork = useCallback((value: string) => {
+  function setNetwork(value: string) {
     generation.current += 1;
     setNetworkValue(value === "stellar-pubnet" ? "stellar-pubnet" : "stellar-testnet");
     setState({ status: "idle" });
-  }, []);
+  }
 
   const analyse = useCallback(() => {
     if (asset.trim().length === 0) {

@@ -1,5 +1,6 @@
 "use client";
 
+import { useInsightParam } from "@/components/research/shared/useInsightQueryParams";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { DiagnosisReport } from "@/server/research/tx-failure-diagnostics/schema";
 import { CoverageNotice } from "./CoverageNotice";
@@ -13,7 +14,7 @@ type Network = "stellar-testnet" | "stellar-pubnet";
 
 export function FailureDiagnosisWorkbench({ initialNetwork = "stellar-testnet" }: { initialNetwork?: Network }) {
   const [hash, setHash] = useState("");
-  const [network, setNetwork] = useState<Network>(initialNetwork);
+  const [network, setNetwork] = useInsightParam<Network>("network", initialNetwork, ["stellar-testnet", "stellar-pubnet"]);
   const networkRef = useRef(network);
   const { view, setView } = useWorkbenchState(network);
 
