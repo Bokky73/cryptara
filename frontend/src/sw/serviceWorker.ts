@@ -1,5 +1,5 @@
 import { CACHE_VERSION } from "./cacheVersion";
-import { APP_SHELL_URLS, cacheFirst, isNeverCached, shellNavigation } from "./strategies";
+import { APP_SHELL_URLS, cacheFirst, isNetworkOnlyApi, isNeverCached, networkOnly, shellNavigation } from "./strategies";
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -21,6 +21,12 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const { request } = event;
+  const url = new URL(request.url);
+
+  if (isNetworkOnlyApi(url.pathname)) {
+    event.respondWith(networkOnly(request));
+    return;
+  }
 
   if (isNeverCached(request)) return;
 
