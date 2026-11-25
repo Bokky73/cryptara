@@ -1,34 +1,36 @@
-import { parseWatchlistCsv } from "@/server/discovery/watchlistCsv";
-import { NextResponse, NextRequest } from "next/server";
-import { resolveWalletSession } from "@/server/security/walletSession";
+import { NextResponse, type NextRequest } from "next/server";
+import { parseWatchlistCsvRows } from "@/server/discovery/watchlistCsv";
+import {
+  MAX_WATCHLIST_IMPORT_BYTES,
+  MAX_WATCHLIST_IMPORT_ROWS,
+  previewWatchlistImport,
+  watchlistAssetKey,
+  type WatchlistImportInput,
+} from "@/server/discovery/watchlistImport";
 import { getWatchlistIdentityKey } from "@/server/identity/tokenIdentity";
-import { addWatchlistEntriesBulk } from "@/server/storage";
-import { WatchlistExportRow, WatchlistImportDryRunResult, WatchlistImportDryRunRowResult } from "@/server/types";
+import { resolveWalletSession } from "@/server/security/walletSession";
+import {
+  addWatchlistEntriesBulk,
+  ensureStorageReady,
+  listWatchlistEntries,
+  updateWatchlistEntryDetails,
+} from "@/server/storage";
+import type { WatchlistEntryInput, WatchlistExportRow } from "@/server/types";
 
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
-const MAX_ROWS = 1000;
+type PendingEntry = WatchlistEntryInput & { identityKey: string };
 
-export async function POST(request: NextRequest) {
-  const url = new URL(request.url);
-  const wallet = url.searchParams.get("wallet");
-  const isDryRun = url.searchParams.get("dry_run") === "true";
-  
-  if (!wallet) {
-    return NextResponse.json({ error: "wallet is required" }, { status: 400 });
-  }
+const DETAIL_FIELDS = ["note", "pairAddress", "symbol", "tokenName"] as const;
 
-  const session = resolveWalletSession(request, { suppliedWallet: wallet });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+function pickDetails(row: Partial<WatchlistExportRow>) {
+  return Object.fromEntries(DETAIL_FIELDS.flatMap((field) => (row[field] ? [[field, row[field]]] : [])));
+}
 
-  let entries: WatchlistExportRow[] = [];
-
+async function readInputs(request: NextRequest): Promise<WatchlistImportInput[] | NextResponse> {
   const contentType = request.headers.get("content-type") || "";
-  
+
   try {
     const bytes = await request.arrayBuffer();
-    if (bytes.byteLength > MAX_FILE_SIZE) {
+    if (bytes.byteLength > MAX_WATCHLIST_IMPORT_BYTES) {
       return NextResponse.json({ error: "File too large" }, { status: 413 });
     }
     const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -37,111 +39,99 @@ export async function POST(request: NextRequest) {
       if (!data || !Array.isArray(data.entries)) {
         return NextResponse.json({ error: "Invalid JSON format. Expected { entries: [] }" }, { status: 400 });
       }
-      entries = data.entries;
-    } else if (contentType.includes("text/csv")) {
-      entries = parseWatchlistCsv(text, MAX_ROWS) as unknown as WatchlistExportRow[];
-    } else {
-      return NextResponse.json({ error: "Unsupported content type" }, { status: 415 });
+      if (data.entries.length > MAX_WATCHLIST_IMPORT_ROWS) {
+        return NextResponse.json({ error: "Too many rows" }, { status: 413 });
+      }
+      return data.entries.map((value: unknown) => ({ value }));
     }
-  } catch (e) {
+    if (contentType.includes("text/csv")) return parseWatchlistCsvRows(text, MAX_WATCHLIST_IMPORT_ROWS);
+    return NextResponse.json({ error: "Unsupported content type" }, { status: 415 });
+  } catch {
     return NextResponse.json({ error: "Failed to parse input" }, { status: 400 });
   }
+}
 
-  if (entries.length > MAX_ROWS) {
-    return NextResponse.json({ error: `Too many rows. Maximum is ${MAX_ROWS}` }, { status: 413 });
+export async function POST(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const suppliedWallet = searchParams.get("wallet");
+  const strategy = searchParams.get("strategy") ?? "skip";
+
+  if (!suppliedWallet) {
+    return NextResponse.json({ error: "wallet is required" }, { status: 400 });
+  }
+  if (strategy !== "skip" && strategy !== "update") {
+    return NextResponse.json({ error: "strategy must be skip or update" }, { status: 400 });
   }
 
-  const result: WatchlistImportDryRunResult = {
-    validCount: 0,
-    duplicateCount: 0,
-    collisionCount: 0,
-    invalidCount: 0,
-    totalRows: entries.length,
-    results: [],
-  };
+  const session = resolveWalletSession(request, { suppliedWallet });
+  if (session.response) return session.response;
+  const wallet = session.wallet!;
 
-  const seenIdentities = new Set<string>();
+  const inputs = await readInputs(request);
+  if (inputs instanceof NextResponse) return inputs;
 
-  const { listWatchlistEntries } = require("@/server/storage");
-  const existingEntries = listWatchlistEntries(wallet);
-  const existingIdentities = new Set(existingEntries.map((e: any) => e.identityKey));
+  await ensureStorageReady();
+  const existing = listWatchlistEntries(wallet);
+  const result = previewWatchlistImport(inputs, existing);
 
-  for (let i = 0; i < entries.length; i++) {
-    const row = entries[i];
-    const rowResult: WatchlistImportDryRunRowResult = {
-      index: i,
-      row,
-      status: "valid",
-      errors: [],
-    };
-
-    if (row.version !== "1.0.0") {
-      rowResult.status = "invalid";
-      rowResult.errors.push("Unknown or unsupported schema version");
+  for (const rowResult of result.results) {
+    if (rowResult.row.chain && rowResult.status !== "invalid") {
+      rowResult.canonicalIdentityKey = getWatchlistIdentityKey({ ...rowResult.row, chain: rowResult.row.chain });
     }
-
-    if (!row.chain) {
-      rowResult.status = "invalid";
-      rowResult.errors.push("Missing chain");
-    }
-
-    if (rowResult.status === "valid") {
-       const identityKey = getWatchlistIdentityKey(row);
-       rowResult.canonicalIdentityKey = identityKey;
-       
-       if (seenIdentities.has(identityKey)) {
-         rowResult.status = "duplicate";
-         rowResult.errors.push("Duplicate identity in import");
-       } else if (existingIdentities.has(identityKey)) {
-         rowResult.status = "duplicate";
-         rowResult.errors.push("Identity already exists in watchlist");
-       } else {
-         seenIdentities.add(identityKey);
-       }
-    }
-
-    if (rowResult.status === "valid") {
-      result.validCount++;
-    } else if (rowResult.status === "invalid") {
-      result.invalidCount++;
-    } else if (rowResult.status === "duplicate") {
-      result.duplicateCount++;
-    }
-    result.results.push(rowResult);
   }
 
-  if (isDryRun) {
+  if (searchParams.get("dry_run") === "true") {
     return NextResponse.json(result);
   }
 
+  // All or nothing: the client excludes invalid rows explicitly.
   if (result.invalidCount > 0) {
-     return NextResponse.json({ error: "Cannot apply import with invalid rows", result }, { status: 400 });
+    return NextResponse.json({ error: "Cannot apply import with invalid rows", result }, { status: 400 });
   }
 
+  const existingByKey = new Map(existing.map((entry) => [watchlistAssetKey(entry), entry]));
+  const pending = new Map<string, PendingEntry>();
 
-  // Apply the valid rows
-  const toAdd = [];
-  for (const r of result.results) {
-    if (r.status === "valid" || r.status === "duplicate") {
-       toAdd.push({
-         walletAddress: wallet,
-         chain: r.row.chain!,
-         network: r.row.network,
-         assetType: r.row.assetType as any,
-         contractAddress: r.row.contractAddress,
-         pairAddress: r.row.pairAddress,
-         symbol: r.row.symbol,
-         tokenName: r.row.tokenName,
-         assetKey: r.row.assetKey,
-         issuer: r.row.issuer,
-         source: r.row.source as any || "manual_watchlist",
-         note: r.row.note,
-         identityKey: r.canonicalIdentityKey!
-       });
+  for (const rowResult of result.results) {
+    const { row, assetKey, canonicalIdentityKey } = rowResult;
+    if (!assetKey || !canonicalIdentityKey || !row.chain) continue;
+
+    const current = existingByKey.get(assetKey);
+    const queued = pending.get(assetKey);
+    if (!current && !queued) {
+      pending.set(assetKey, {
+        walletAddress: wallet,
+        chain: row.chain,
+        network: row.network,
+        assetType: row.assetType as WatchlistEntryInput["assetType"],
+        contractAddress: row.contractAddress,
+        pairAddress: row.pairAddress,
+        symbol: row.symbol,
+        tokenName: row.tokenName,
+        assetKey: row.assetKey,
+        issuer: row.issuer,
+        source: row.source as WatchlistEntryInput["source"],
+        note: row.note,
+        identityKey: canonicalIdentityKey,
+      });
+      rowResult.outcome = "imported";
+    } else if (strategy === "skip") {
+      rowResult.outcome = "skipped";
+    } else {
+      if (current) updateWatchlistEntryDetails(current.id, pickDetails(row));
+      else if (queued) Object.assign(queued, pickDetails(row));
+      rowResult.outcome = "updated";
     }
   }
 
-  const { appliedCount } = addWatchlistEntriesBulk(toAdd);
-  return NextResponse.json({ success: true, appliedCount, result });
+  const { appliedCount } = addWatchlistEntriesBulk([...pending.values()]);
+  const outcomeCount = (outcome: string) => result.results.filter((entry) => entry.outcome === outcome).length;
 
+  return NextResponse.json({
+    success: true,
+    appliedCount,
+    updatedCount: outcomeCount("updated"),
+    skippedCount: outcomeCount("skipped"),
+    result,
+  });
 }

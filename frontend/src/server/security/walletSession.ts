@@ -250,7 +250,13 @@ export function readWalletSessionCookie(request: Request | NextRequest): string 
   for (const piece of header.split(";")) {
     const [rawKey, ...rest] = piece.split("=");
     if (rawKey && rawKey.trim() === WALLET_SESSION_COOKIE) {
-      return decodeWalletCookie(rest.join("="));
+      // NextResponse percent-encodes cookie values. The signature is checked
+      // after decoding, so this accepts nothing that was not signed.
+      try {
+        return decodeWalletCookie(decodeURIComponent(rest.join("=")));
+      } catch {
+        return undefined;
+      }
     }
   }
 

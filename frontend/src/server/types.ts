@@ -1559,7 +1559,16 @@ export type WatchlistImportDryRunRowResult = {
   status: "valid" | "duplicate" | "collision" | "invalid";
   errors: string[];
   canonicalIdentityKey?: string;
+  /** Spelling-independent asset identity used to detect duplicates. */
+  assetKey?: string;
+  /** What happened to the row; set once an import is applied. */
+  outcome?: "imported" | "updated" | "skipped";
 };
+
+export type WatchlistImportSource = WatchlistEntryInput["source"];
+
+/** How a row that repeats an existing asset is handled. */
+export type WatchlistImportStrategy = "skip" | "update";
 
 export type WatchlistImportDryRunResult = {
   validCount: number;

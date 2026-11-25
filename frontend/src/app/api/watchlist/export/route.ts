@@ -13,9 +13,7 @@ export async function GET(request: NextRequest) {
   }
 
   const session = resolveWalletSession(request, { suppliedWallet: wallet });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (session.response) return session.response;
 
   const entries = listWatchlist(wallet);
 

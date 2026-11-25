@@ -13,6 +13,9 @@ import {
 } from "@/lib/apiClient";
 import { ApiErrorNotice } from "@/components/ApiErrorNotice";
 
+export { WatchlistExportButton } from "@/components/watchlist/WatchlistExportButton";
+export { WatchlistImportForm } from "@/components/watchlist/WatchlistImportWizard";
+
 function localError(message: string): ApiClientError {
   return { kind: "client", code: "validation_error", message, retryable: false, recoveryAction: "stop" };
 }
@@ -291,112 +294,6 @@ export function WatchlistRemoveButton({ entryId, wallet }: { entryId: string; wa
         {removing ? "Removing…" : "Remove"}
       </button>
       {error ? <ApiErrorNotice error={error} title="Remove failed" /> : null}
-    </div>
-  );
-}
-
-export function WatchlistExportButton({ wallet }: { wallet: string }) {
-  return (
-    <a
-      href={`/api/watchlist/export?wallet=${encodeURIComponent(wallet)}&format=csv`}
-      className="inline-flex h-10 items-center justify-center rounded-lg bg-slate-800 px-4 text-sm font-medium text-white transition-colors hover:bg-slate-700"
-      download
-    >
-      Export CSV
-    </a>
-  );
-}
-
-type ImportCounts = {
-  validCount?: number;
-  duplicateCount?: number;
-  invalidCount?: number;
-  appliedCount?: number;
-};
-
-type ImportPreview = { data: string; isJson: boolean; result: ImportCounts };
-
-export function WatchlistImportForm({ wallet }: { wallet: string }) {
-  const [error, setError] = useState<ApiClientError | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [dryRunResult, setDryRunResult] = useState<ImportPreview | null>(null);
-
-  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    setError(null);
-    setSuccess(null);
-    setDryRunResult(null);
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setLoading(true);
-    try {
-      const isJson = file.name.endsWith(".json");
-      const text = await file.text();
-      const result = await apiRequest<ImportCounts>(
-        `/api/watchlist/import?wallet=${encodeURIComponent(wallet)}&dry_run=true`,
-        { method: "POST", headers: { "Content-Type": isJson ? "application/json" : "text/csv" }, body: text },
-      );
-      setDryRunResult({ data: text, result, isJson });
-    } catch (cause) {
-      setError(toApiClientError(cause));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleApply() {
-    if (!dryRunResult) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await apiRequest<ImportCounts>(
-        `/api/watchlist/import?wallet=${encodeURIComponent(wallet)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": dryRunResult.isJson ? "application/json" : "text/csv" },
-          body: dryRunResult.data,
-        },
-      );
-      setSuccess(`Imported ${data.appliedCount ?? 0} entries.`);
-      setTimeout(() => window.location.reload(), 1500);
-    } catch (cause) {
-      setError(toApiClientError(cause));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <div className="mt-6 rounded-xl border border-slate-800 bg-slate-900/50 p-6">
-      <h3 className="mb-4 font-semibold text-white">Bulk Import</h3>
-      <div className="space-y-4">
-        <input type="file" accept=".csv,.json" onChange={handleFile} disabled={loading} className="text-sm text-slate-300" />
-
-        {loading && <p className="text-sm text-blue-400">Loading...</p>}
-        {error ? <ApiErrorNotice error={error} title="Import failed" /> : null}
-        {success && <p className="text-sm text-emerald-400">{success}</p>}
-
-        {dryRunResult && !success && (
-          <div className="rounded bg-slate-950 p-3 text-sm text-slate-300">
-            <p>Valid: {dryRunResult.result.validCount}</p>
-            <p>Duplicates: {dryRunResult.result.duplicateCount}</p>
-            <p>Invalid: {dryRunResult.result.invalidCount}</p>
-
-            {(dryRunResult.result.invalidCount ?? 0) > 0 ? (
-              <p className="mt-2 text-amber-400">Cannot apply. Fix invalid rows first.</p>
-            ) : (
-              <button
-                onClick={handleApply}
-                disabled={loading}
-                className="mt-3 rounded bg-emerald-600 px-4 py-2 text-white hover:bg-emerald-500"
-              >
-                Apply Import
-              </button>
-            )}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

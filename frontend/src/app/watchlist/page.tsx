@@ -115,6 +115,7 @@ export default async function WatchlistPage({
   const params = await searchParams;
   const wallet = (params.wallet ?? DEFAULT_WALLET).trim().toLowerCase();
   const watchlistData = await loadWatchlistWithScanMeta(wallet);
+  const existingEntries = watchlistData.map(({ entry }) => entry);
   const totalEntries = watchlistData.length;
   const staleEntries = watchlistData.filter(({ entry }) => entry.latestStatus === "stale" || entry.latestStatus === "failed");
   const scannedEntries = watchlistData.filter(({ entry }) => entry.lastScannedAt);
@@ -167,8 +168,8 @@ export default async function WatchlistPage({
           Add an EVM token by contract address or a Stellar asset by CODE:ISSUER, contract ID, or native XLM.
         </p>
         <WatchlistAddForm wallet={wallet} />
-        <WatchlistImportForm wallet={wallet} />
-        <div className="mt-4"><WatchlistExportButton wallet={wallet} /></div>
+        <WatchlistImportForm wallet={wallet} existing={existingEntries} />
+        <div className="mt-4"><WatchlistExportButton wallet={wallet} entries={existingEntries} /></div>
       </section>
 
       {/* Watchlist entries */}
