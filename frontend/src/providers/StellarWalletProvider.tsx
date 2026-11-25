@@ -14,8 +14,9 @@ import {
   type WalletCapabilities,
 } from "@/server/stellar/wallets/capabilities";
 import { blocksSigning, resolveNetworkMismatch, type NetworkMismatch } from "@/server/stellar/wallets/mismatch";
-import { describeInvalidation, detectSessionInvalidation } from "@/server/stellar/wallets/session";
+import { describeInvalidation, detectSessionInvalidation, type SessionInvalidationReason } from "@/server/stellar/wallets/session";
 import {
+  getStellarMismatchMessage,
   parseRestoredStellarSession,
   stellarAdapterKind,
   STELLAR_DISPLAY_SESSION_KEY,
@@ -53,6 +54,7 @@ type StellarWalletState = {
 };
 
 const StellarWalletContext = createContext<StellarWalletState | null>(null);
+const WALLET_OBSERVE_INTERVAL_MS = 3_000;
 const stellarSessionChangedEvent = "cryptara:stellar-session-changed";
 
 function notifyStellarSessionChanged() {
@@ -113,17 +115,36 @@ export function StellarWalletProvider({
   // Read inside the adapter subscription, which is registered once and must not
   // close over a stale wallet.
   const walletIdRef = useRef<string | undefined>(undefined);
+  const addressRef = useRef<string | undefined>(undefined);
+  // Identifies the latest connect attempt; any disconnect supersedes it.
+  const connectAttemptRef = useRef(0);
+  const connectingRef = useRef(false);
+  const disconnectingRef = useRef(false);
   const storedSessionJson = useSyncExternalStore(subscribeToStoredSession, getStoredSessionSnapshot, getServerSessionSnapshot);
   const restored = useMemo(() => parseRestoredStellarSession(storedSessionJson), [storedSessionJson]);
 
   const clearSession = useCallback(() => {
-    setAddress(undefined);
+    connectAttemptRef.current += 1;
+    connectingRef.current = false;
+    addressRef.current = undefined;
     walletIdRef.current = undefined;
+    setIsConnecting(false);
+    setAddress(undefined);
     setNetwork(undefined);
     setWallet(undefined);
     window.localStorage.removeItem(STELLAR_DISPLAY_SESSION_KEY);
     notifyStellarSessionChanged();
   }, []);
+
+  /**
+   * The wallet's state no longer matches the session. It is discarded rather
+   * than silently repointed at the new account.
+   */
+  const invalidateSession = useCallback((reason: SessionInvalidationReason) => {
+    const walletId = walletIdRef.current ?? "";
+    clearSession();
+    setSessionNotice(disconnectingRef.current ? null : describeInvalidation(reason, walletId));
+  }, [clearSession]);
 
   useEffect(() => {
     const cached = parseRestoredStellarSession(window.localStorage.getItem(STELLAR_DISPLAY_SESSION_KEY));
@@ -133,32 +154,27 @@ export function StellarWalletProvider({
     });
 
     const stopState = adapter.onStateUpdated((event) => {
+      // The connect call itself applies the address together with its network.
+      if (connectingRef.current) return;
       const observed = event.payload.address ?? null;
+      const current = addressRef.current;
 
-      setAddress((current) => {
+      if (!current) {
         // The first address of a connection is not a change.
-        if (!current) return observed ?? current;
-        if (observed === current) return current;
-
-        // The user switched account or disconnected inside the wallet. The
-        // session claims an address that is no longer the connected signer, so
-        // it is discarded rather than silently repointed at the new one.
-        const reason = detectSessionInvalidation(
-          { walletId: walletIdRef.current ?? "", address: current, network: null },
-          { address: observed },
-        );
-
-        if (reason) {
-          setSessionNotice(describeInvalidation(reason, walletIdRef.current ?? ""));
-          setNetwork(undefined);
-          setWallet(undefined);
-          window.localStorage.removeItem(STELLAR_DISPLAY_SESSION_KEY);
-          notifyStellarSessionChanged();
-          return undefined;
+        if (observed) {
+          addressRef.current = observed;
+          setAddress(observed);
         }
+        return;
+      }
 
-        return observed ?? current;
-      });
+      // The event's network is the kit's own setting, not the wallet's, so only
+      // the address is compared here.
+      const reason = detectSessionInvalidation(
+        { walletId: walletIdRef.current ?? "", address: current, network: null },
+        { address: observed },
+      );
+      if (reason) invalidateSession(reason);
     });
     const stopWallet = adapter.onWalletSelected((event) => {
       const id = event.payload.id;
@@ -168,14 +184,50 @@ export function StellarWalletProvider({
         name: cached?.walletId === id ? cached.walletName : id === "freighter" ? "Freighter" : id === "wallet_connect" ? "WalletConnect" : id,
       });
     });
-    const stopDisconnect = adapter.onDisconnect(clearSession);
+    const stopDisconnect = adapter.onDisconnect(() => {
+      clearSession();
+      setSessionNotice(null);
+    });
 
     return () => {
       stopState();
       stopWallet();
       stopDisconnect();
     };
-  }, [adapter, clearSession, configuredNetwork]);
+  }, [adapter, clearSession, configuredNetwork, invalidateSession]);
+
+  // Extension wallets switch account and network without telling the kit.
+  useEffect(() => {
+    const observe = adapter.observe;
+    if (!address || !network || !wallet || !observe) return;
+    let active = true;
+
+    async function check() {
+      if (document.visibilityState === "hidden" || !address || !network || !wallet) return;
+      const observed = await observe!().catch(() => null);
+      if (!active || !observed || connectingRef.current) return;
+
+      const observedNetwork = networkFromPassphrase(observed.networkPassphrase);
+      const reason = detectSessionInvalidation(
+        { walletId: wallet.id, address, network },
+        { address: observed.address, network: observedNetwork },
+      );
+      if (reason) invalidateSession(reason);
+      // A network this app does not support can never match the session.
+      else if (!observedNetwork) invalidateSession("network_changed");
+    }
+
+    const onChange = () => void check();
+    const timer = window.setInterval(onChange, WALLET_OBSERVE_INTERVAL_MS);
+    window.addEventListener("focus", onChange);
+    document.addEventListener("visibilitychange", onChange);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onChange);
+      document.removeEventListener("visibilitychange", onChange);
+    };
+  }, [adapter, address, invalidateSession, network, wallet]);
 
   useEffect(() => {
     if (!address || !network || !wallet) return;
@@ -192,6 +244,9 @@ export function StellarWalletProvider({
   }, [address, network, wallet]);
 
   const connect = useCallback(async (walletId?: string) => {
+    const attempt = ++connectAttemptRef.current;
+    const isLatest = () => connectAttemptRef.current === attempt;
+    connectingRef.current = true;
     setIsConnecting(true);
     setError(undefined);
 
@@ -203,28 +258,40 @@ export function StellarWalletProvider({
       const walletNetwork = await adapter.getNetwork();
       const nextNetwork = networkFromPassphrase(walletNetwork.networkPassphrase);
       if (!nextNetwork) throw new Error(`Unsupported Stellar network: ${walletNetwork.network || walletNetwork.networkPassphrase}`);
+      // Disconnected, or connected elsewhere, while this attempt was pending.
+      if (!isLatest()) throw new Error("This wallet connection was superseded.");
+      addressRef.current = result.address;
+      walletIdRef.current = result.wallet.id;
       setAddress(result.address);
       setWallet(result.wallet);
-      walletIdRef.current = result.wallet.id;
       setNetwork(nextNetwork);
       setSessionNotice(null);
     } catch (cause) {
-      const message = errorMessage(cause, "Stellar wallet connection was cancelled.");
-      setAddress(undefined);
-      setNetwork(undefined);
-      setWallet(undefined);
-      setError(message);
+      if (isLatest()) {
+        addressRef.current = undefined;
+        walletIdRef.current = undefined;
+        setAddress(undefined);
+        setNetwork(undefined);
+        setWallet(undefined);
+        setError(errorMessage(cause, "Stellar wallet connection was cancelled."));
+      }
       throw cause;
     } finally {
-      setIsConnecting(false);
+      if (isLatest()) {
+        connectingRef.current = false;
+        setIsConnecting(false);
+      }
     }
   }, [adapter]);
 
   const disconnect = useCallback(async () => {
+    disconnectingRef.current = true;
     try {
       await adapter.disconnect();
     } finally {
+      disconnectingRef.current = false;
       clearSession();
+      setSessionNotice(null);
       setError(undefined);
     }
   }, [adapter, clearSession]);

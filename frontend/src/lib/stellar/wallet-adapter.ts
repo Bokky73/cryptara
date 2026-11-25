@@ -36,6 +36,11 @@ export interface StellarWalletAdapter {
   connect: (walletId?: string) => Promise<{ address: string; wallet: StellarWalletDescriptor }>;
   selectWallet: (walletId: string) => void;
   getNetwork: () => Promise<{ network: string; networkPassphrase: string }>;
+  /**
+   * Read the wallet's current account and network without prompting. Resolves
+   * to null when the selected wallet cannot answer silently.
+   */
+  observe?: () => Promise<{ address: string; networkPassphrase: string } | null>;
   signTransaction: (xdr: string, options: { address: string; networkPassphrase: string }) => Promise<{ signedTxXdr: string }>;
   openProfile: () => Promise<void>;
   disconnect: () => Promise<void>;
@@ -118,6 +123,14 @@ export function createStellarWalletAdapter(): StellarWalletAdapter {
     },
     getNetwork() {
       return StellarWalletsKit.getNetwork();
+    },
+    async observe() {
+      const selected = StellarWalletsKit.selectedModule;
+      // Other modules may open a popup or a hardware prompt to answer this.
+      if (selected.productId !== FREIGHTER_ID) return null;
+      const { address } = await selected.getAddress({ skipRequestAccess: true });
+      const { networkPassphrase } = await selected.getNetwork();
+      return { address, networkPassphrase };
     },
     signTransaction(xdr, options) {
       return StellarWalletsKit.signTransaction(xdr, options);
