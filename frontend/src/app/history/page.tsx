@@ -1,7 +1,6 @@
 import { requestLocale } from "@/i18n/server";
 import { messages } from "@/i18n/messages";
 import { createFormatters } from "@/i18n/format";
-import { LocaleSelect } from "@/i18n/LocaleSelect";
 import { AppShell } from "@/components/AppShell";
 import { AuditExportButton } from "@/components/AuditExportButton";
 import { listAgentRunRecords, listApprovalRecords, listRecommendationRecords, listTransactionRecords } from "@/server/storage";
@@ -29,7 +28,6 @@ export default async function HistoryPage() {
             <span>{format.number(recommendations.length)} {t("recommendations")}</span>
             <span>{format.number(approvals.length)} {t("approvals")}</span>
             <span>{format.number(transactions.length)} {t("transactions")}</span>
-            <LocaleSelect locale={locale} />
             <AuditExportButton />
           </div>
         </section>

@@ -1,6 +1,6 @@
 // Lightweight Web Vitals collection using native PerformanceObserver APIs,
 // avoiding a dependency on the `web-vitals` package. Covers the metrics
-// budgeted in docs/PERFORMANCE_BUDGETS.md: LCP, CLS, INP (with an FID
+// budgeted in docs/performance/budgets.json: LCP, CLS, INP (with an FID
 // fallback for browsers that do not yet report INP), and TTFB.
 
 export type WebVitalName = "LCP" | "CLS" | "INP" | "FID" | "TTFB";
@@ -13,6 +13,7 @@ export type WebVitalMetric = {
 };
 
 export type WebVitalReporter = (metric: WebVitalMetric) => void;
+export type WebVitalsUnsubscribe = () => void;
 
 function generateId() {
   return `v_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -23,7 +24,11 @@ function getNavigationType(): string | undefined {
   return (entry as PerformanceNavigationTiming | undefined)?.type;
 }
 
-function safeObserve(entryTypes: string[], callback: (entries: PerformanceObserverEntryList) => void, options?: PerformanceObserverInit) {
+function safeObserve(
+  entryTypes: string[],
+  callback: (entries: PerformanceObserverEntryList) => void,
+  options?: PerformanceObserverInit,
+): PerformanceObserver | undefined {
   if (typeof PerformanceObserver === "undefined") return undefined;
 
   try {
@@ -35,29 +40,40 @@ function safeObserve(entryTypes: string[], callback: (entries: PerformanceObserv
   }
 }
 
-function reportTtfb(onReport: WebVitalReporter) {
+function onHidden(handler: () => void) {
+  if (typeof document === "undefined" || typeof window === "undefined") return () => undefined;
+
+  const onVisibilityChange = () => {
+    if (document.visibilityState === "hidden") handler();
+  };
+
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  window.addEventListener("pagehide", handler);
+  return () => {
+    document.removeEventListener("visibilitychange", onVisibilityChange);
+    window.removeEventListener("pagehide", handler);
+  };
+}
+
+function reportTtfb(onReport: WebVitalReporter): WebVitalsUnsubscribe {
   const [entry] = typeof performance !== "undefined" ? performance.getEntriesByType("navigation") : [];
   const navigationEntry = entry as PerformanceNavigationTiming | undefined;
 
-  if (!navigationEntry) return;
+  if (!navigationEntry) return () => undefined;
 
   onReport({
     name: "TTFB",
-    value: Math.max(0, navigationEntry.responseStart - navigationEntry.requestStart),
+    value: Math.max(0, navigationEntry.responseStart - navigationEntry.startTime),
     id: generateId(),
     navigationType: navigationEntry.type,
   });
+
+  return () => undefined;
 }
 
-function reportLcp(onReport: WebVitalReporter) {
+function reportLcp(onReport: WebVitalReporter): WebVitalsUnsubscribe {
   let latestValue = 0;
   let reported = false;
-
-  const flush = () => {
-    if (reported || latestValue <= 0) return;
-    reported = true;
-    onReport({ name: "LCP", value: latestValue, id: generateId(), navigationType: getNavigationType() });
-  };
 
   const observer = safeObserve(["largest-contentful-paint"], (list) => {
     const entries = list.getEntries() as PerformanceEntry[];
@@ -65,18 +81,23 @@ function reportLcp(onReport: WebVitalReporter) {
     if (last) latestValue = last.startTime;
   });
 
-  if (!observer) return;
+  if (!observer) return () => undefined;
 
-  const stop = () => {
+  const flush = () => {
+    if (reported || latestValue <= 0) return;
+    reported = true;
     observer.disconnect();
-    flush();
+    onReport({ name: "LCP", value: latestValue, id: generateId(), navigationType: getNavigationType() });
   };
 
-  document.addEventListener("visibilitychange", stop, { once: true });
-  window.addEventListener("pagehide", stop, { once: true });
+  const stopHidden = onHidden(flush);
+  return () => {
+    observer.disconnect();
+    stopHidden();
+  };
 }
 
-function reportCls(onReport: WebVitalReporter) {
+function reportCls(onReport: WebVitalReporter): WebVitalsUnsubscribe {
   let sessionValue = 0;
   let sessionEntries: PerformanceEntry[] = [];
   let reportedValue = 0;
@@ -100,7 +121,7 @@ function reportCls(onReport: WebVitalReporter) {
     }
   });
 
-  if (!observer) return;
+  if (!observer) return () => undefined;
 
   const flush = () => {
     if (sessionValue > reportedValue) {
@@ -109,11 +130,14 @@ function reportCls(onReport: WebVitalReporter) {
     }
   };
 
-  document.addEventListener("visibilitychange", flush, { once: false });
-  window.addEventListener("pagehide", flush, { once: true });
+  const stopHidden = onHidden(flush);
+  return () => {
+    observer.disconnect();
+    stopHidden();
+  };
 }
 
-function reportInpOrFid(onReport: WebVitalReporter) {
+function reportInpOrFid(onReport: WebVitalReporter): WebVitalsUnsubscribe {
   let worstInteraction = 0;
   let reported = false;
 
@@ -121,8 +145,7 @@ function reportInpOrFid(onReport: WebVitalReporter) {
     ["event"],
     (list) => {
       for (const entry of list.getEntries() as PerformanceEventTiming[]) {
-        const duration = entry.duration;
-        if (duration > worstInteraction) worstInteraction = duration;
+        if (entry.duration > worstInteraction) worstInteraction = entry.duration;
       }
     },
     { durationThreshold: 16 } as PerformanceObserverInit,
@@ -132,31 +155,41 @@ function reportInpOrFid(onReport: WebVitalReporter) {
     const flush = () => {
       if (reported || worstInteraction <= 0) return;
       reported = true;
+      observer.disconnect();
       onReport({ name: "INP", value: worstInteraction, id: generateId(), navigationType: getNavigationType() });
     };
 
-    document.addEventListener("visibilitychange", flush, { once: true });
-    window.addEventListener("pagehide", flush, { once: true });
-    return;
+    const stopHidden = onHidden(flush);
+    return () => {
+      observer.disconnect();
+      stopHidden();
+    };
   }
 
   const fidObserver = safeObserve(["first-input"], (list) => {
     const [entry] = list.getEntries() as PerformanceEventTiming[];
     if (entry && !reported) {
       reported = true;
-      onReport({ name: "FID", value: entry.processingStart - entry.startTime, id: generateId(), navigationType: getNavigationType() });
+      fidObserver?.disconnect();
+      onReport({
+        name: "FID",
+        value: entry.processingStart - entry.startTime,
+        id: generateId(),
+        navigationType: getNavigationType(),
+      });
     }
   });
 
-  void fidObserver;
+  return () => fidObserver?.disconnect();
 }
 
-/** Subscribes to the Web Vitals budgeted in docs/PERFORMANCE_BUDGETS.md. Safe to call once per page. */
-export function observeWebVitals(onReport: WebVitalReporter) {
-  if (typeof window === "undefined") return;
+/** Subscribes to the Web Vitals budgeted in docs/performance/budgets.json. Returns a cleanup function. */
+export function observeWebVitals(onReport: WebVitalReporter): WebVitalsUnsubscribe {
+  if (typeof window === "undefined") return () => undefined;
 
-  reportTtfb(onReport);
-  reportLcp(onReport);
-  reportCls(onReport);
-  reportInpOrFid(onReport);
+  const cleanups = [reportTtfb(onReport), reportLcp(onReport), reportCls(onReport), reportInpOrFid(onReport)];
+
+  return () => {
+    for (const cleanup of cleanups) cleanup();
+  };
 }

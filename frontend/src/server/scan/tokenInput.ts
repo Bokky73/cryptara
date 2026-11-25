@@ -2,6 +2,7 @@ import { isAddress } from "viem";
 import { StrKey } from "@stellar/stellar-sdk";
 import { normalizeScanNetworkId } from "@/lib/scanNetworks";
 import { getChainFamily } from "@/lib/chainIdentity";
+import { parseTokenQuery } from "@/lib/tokenQuery";
 import { getDefaultStellarNetwork, normalizeStellarNetworkId } from "@/lib/stellar/config";
 import { parseStellarAssetInput } from "@/server/stellar/assetIdentity";
 
@@ -86,27 +87,8 @@ function getPairAgeDays(pairCreatedAt?: number) {
   return Math.max(0, Math.floor((Date.now() - pairCreatedAt) / 86_400_000));
 }
 
-function parseDexScreenerUrl(query: string) {
-  try {
-    const url = new URL(query);
-
-    if (!url.hostname.includes("dexscreener.com")) {
-      return null;
-    }
-
-    const [, chain, address] = url.pathname.split("/");
-
-    if (!chain || !address) {
-      return null;
-    }
-
-    return {
-      chain: chain.toLowerCase(),
-      address,
-    };
-  } catch {
-    return null;
-  }
+function isDexScreenerAttempt(value: string) {
+  return /^(?:https?:\/\/)?(?:www\.)?dexscreener\.com(?:\/|$)/i.test(value);
 }
 
 async function resolveDexScreenerPair(chain: string, pairAddress: string): Promise<NormalizedTokenInput | null> {
@@ -221,13 +203,23 @@ async function resolveContractAddress(contractAddress: string, requestedChain?: 
 
 export async function normalizeTokenInput(query: string, chain?: string): Promise<NormalizedTokenInput | null> {
   const trimmed = query.trim();
-  const evmAddress = isAddress(trimmed);
-  const dexScreenerUrl = parseDexScreenerUrl(trimmed);
+  const parsed = parseTokenQuery(trimmed, { chain });
+  const dexInput = parsed.ok && parsed.kind === "dexscreener-url" ? parsed : null;
+  const evmInput = parsed.ok && parsed.kind === "evm-address" ? parsed : null;
+  const evmAddress = Boolean(evmInput);
+  const contractAddress = evmInput ? (evmInput.warning ? evmInput.address : trimmed) : trimmed;
   const isStellarUrl = trimmed.includes("stellar") || trimmed.includes("lumenscan");
-  const stellarNetwork = !evmAddress && !dexScreenerUrl
-    ? normalizeStellarNetworkId(chain)
-      ?? (StrKey.isValidContract(trimmed) || StrKey.isValidEd25519PublicKey(trimmed) || trimmed.includes(":") || ["xlm", "native"].includes(trimmed.toLowerCase()) || isStellarUrl
-        ? getDefaultStellarNetwork().id
+
+  if (isDexScreenerAttempt(trimmed) && !dexInput) return null;
+
+  const dexStellarNetwork = dexInput?.suggestedChain ? normalizeStellarNetworkId(dexInput.suggestedChain) : null;
+  const stellarNetwork = !evmAddress
+    ? dexStellarNetwork
+      ?? (!dexInput
+        ? normalizeStellarNetworkId(chain)
+          ?? (StrKey.isValidContract(trimmed) || StrKey.isValidEd25519PublicKey(trimmed) || trimmed.includes(":") || ["xlm", "native"].includes(trimmed.toLowerCase()) || isStellarUrl
+            ? getDefaultStellarNetwork().id
+            : null)
         : null)
     : null;
 
@@ -248,28 +240,31 @@ export async function normalizeTokenInput(query: string, chain?: string): Promis
     };
   }
 
-  if (dexScreenerUrl) {
-    if (isAddress(dexScreenerUrl.address)) {
-      const pairResolved = await resolveDexScreenerPair(dexScreenerUrl.chain, dexScreenerUrl.address).catch(() => null);
+  if (dexInput) {
+    const dexChain = dexInput.suggestedChain ?? "base";
+    const dexAddress = dexInput.address;
+
+    if (isAddress(dexAddress)) {
+      const pairResolved = await resolveDexScreenerPair(dexChain, dexAddress).catch(() => null);
 
       return (
         pairResolved ?? {
-          chain: dexScreenerUrl.chain,
-          contractAddress: dexScreenerUrl.address,
+          chain: dexChain,
+          contractAddress: dexAddress,
           source: "dexscreener_token_url",
         }
       );
     }
 
-    return await resolveDexScreenerPair(dexScreenerUrl.chain, dexScreenerUrl.address).catch(() => null);
+    return await resolveDexScreenerPair(dexChain, dexAddress).catch(() => null);
   }
 
   if (evmAddress) {
     const requestedEvmChain = chain && getChainFamily(chain) === "evm" ? chain : undefined;
-    const resolved = await resolveContractAddress(trimmed, requestedEvmChain).catch(() => null);
+    const resolved = await resolveContractAddress(contractAddress, requestedEvmChain).catch(() => null);
     const fallbackChain = requestedEvmChain ? normalizeScanNetworkId(requestedEvmChain) : chain ? null : "base";
 
-    return resolved ?? (fallbackChain ? { chain: fallbackChain, contractAddress: trimmed, source: "contract_address" } : null);
+    return resolved ?? (fallbackChain ? { chain: fallbackChain, contractAddress, source: "contract_address" } : null);
   }
 
   return null;
