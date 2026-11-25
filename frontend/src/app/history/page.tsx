@@ -6,6 +6,7 @@ import { AppShell } from "@/components/AppShell";
 import { AuditExportButton } from "@/components/AuditExportButton";
 import { listAgentRunRecords, listApprovalRecords, listRecommendationRecords, listTransactionRecords } from "@/server/storage";
 import { DataTable } from "@/components/layout/DataTable";
+import { RecentTransactions } from "@/components/RecentTransactions";
 
 export const dynamic = "force-dynamic";
 
@@ -128,21 +129,8 @@ export default async function HistoryPage() {
 
           <div>
             <div className="text-sm uppercase tracking-[0.16em] text-[#d9a441]">{t("transactions")}</div>
-            <div className="mt-4 space-y-3">
-              {transactions.length > 0 ? (
-                transactions.slice(0, 5).map((transaction) => (
-                  <div key={transaction.hash} className="rounded-2xl bg-white/6 p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-sm font-semibold capitalize">{transaction.type.replaceAll("_", " ")}</div>
-                      <div className="text-xs text-white/38">{transaction.status}</div>
-                    </div>
-                    <div className="mt-1 break-all text-xs leading-5 text-white/44">{transaction.hash}</div>
-                    <div className="mt-3 text-xs text-white/38">{transaction.network}</div>
-                  </div>
-                ))
-              ) : (
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/42">{t("emptyTransactions")}</div>
-              )}
+            <div className="mt-4">
+              <RecentTransactions transactions={transactions} />
             </div>
           </div>
           </div>

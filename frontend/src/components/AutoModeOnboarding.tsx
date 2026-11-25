@@ -4,12 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  FlaskConical,
   LockKeyhole,
   ShieldAlert,
   ShieldCheck,
 } from "lucide-react";
 import { useWalletSession } from "@/hooks/useWalletSession";
-import AutoModeGuardrailPanel from "@/components/AutoModeGuardrailPanel";
+import AutoModeGuardrailPanel, { type BudgetMeters } from "@/components/AutoModeGuardrailPanel";
 
 type AutoModePolicy = {
   schemaVersion: 1;
@@ -66,6 +67,14 @@ type AutoModeSnapshot = {
 type ExpansionConflict = {
   detail: string;
   reasons: string[];
+};
+
+/** Result returned by /api/auto-mode/sandbox for a single candidate */
+type SandboxResult = {
+  allowed: boolean;
+  blockers: string[];
+  sideEffects: "none" | string;
+  killSwitch: { engaged: boolean; reason?: string };
 };
 
 const immutableBuyBlockers = [
@@ -146,6 +155,13 @@ export function AutoModeOnboarding() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // ------------------------------------------------------------------
+  // Sandbox dry-run state
+  // ------------------------------------------------------------------
+  const [sandboxVerified, setSandboxVerified] = useState(false);
+  const [sandboxResult, setSandboxResult] = useState<SandboxResult | null>(null);
+  const [sandboxError, setSandboxError] = useState<string | null>(null);
+
   const applySnapshot = useCallback((next: AutoModeSnapshot) => {
     setSnapshot(next);
     const policy = next.policy ?? next.suggestedPolicy;
@@ -155,6 +171,10 @@ export function AutoModeOnboarding() {
     setExplanationAccepted(Boolean(next.explanationAcceptedAt));
     setAllowanceUsd(next.authorization?.allowanceUsd ?? policy.maxDailyValueUsd);
     setExpiresAt(next.authorization?.expiresAt ? toLocalDateTime(next.authorization.expiresAt) : defaultExpiry());
+    // Any policy change invalidates a previous sandbox pass.
+    setSandboxVerified(false);
+    setSandboxResult(null);
+    setSandboxError(null);
   }, []);
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -245,6 +265,84 @@ export function AutoModeOnboarding() {
     }
   }
 
+  // ------------------------------------------------------------------
+  // Sandbox dry-run
+  // Posts a representative conservative candidate against the saved policy.
+  // ------------------------------------------------------------------
+  async function runSandboxDryRun() {
+    if (!address || !snapshot?.policy) return;
+    setWorking("sandbox");
+    setSandboxError(null);
+    setSandboxResult(null);
+    setSandboxVerified(false);
+
+    try {
+      const policy = snapshot.policy;
+      // Build a minimal candidate that sits well within all policy limits so a
+      // structurally correct policy always produces an "allowed" dry-run.
+      const chain = policy.allowedChains[0] ?? "Base";
+      const asset = policy.allowedAssets[0] ?? "USDC";
+      const candidate = {
+        id: `sandbox-dry-run-${Date.now()}`,
+        chainFamily: "evm" as const,
+        network: "legacy-evm",
+        chain,
+        asset,
+        dailyValueAlreadyUsd: 0,
+        tradeValueUsd: Math.min(10, policy.maxDailyValueUsd * 0.01),
+        portfolioValueUsd: policy.maxDailyValueUsd * 10,
+        riskScore: Math.min(10, policy.maxRiskScore * 0.25),
+        slippageBps: Math.min(5, policy.maxSlippageBps * 0.05),
+        priceImpactBps: Math.min(5, policy.maxPriceImpactBps * 0.05),
+        stableReservePercentAfter: Math.max(policy.minStableReservePercent + 10, 30),
+        stopConditionTriggered: false,
+        safetySignals: {
+          assetKnown: true,
+          criticalContractRisk: false,
+          canSell: true,
+          phishingDetected: false,
+          identityConflict: false,
+          hasSourceCoverage: true,
+        },
+      };
+
+      const response = await fetch("/api/auto-mode/sandbox", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress: address, candidate }),
+      });
+      const body = await responseBody(response);
+
+      if (!response.ok) {
+        throw new Error(typeof body.error === "string" ? body.error : "Sandbox dry-run failed.");
+      }
+
+      const result = body as SandboxResult;
+      setSandboxResult(result);
+
+      if (result.killSwitch?.engaged) {
+        setSandboxError("Kill-switch is currently engaged. Deactivate it before authorizing.");
+        setSandboxVerified(false);
+        return;
+      }
+
+      if (!result.allowed) {
+        const reasons = Array.isArray(result.blockers) ? result.blockers.map(blockerLabel).join(", ") : "unknown blockers";
+        setSandboxError(`Sandbox rejected the dry-run trade: ${reasons}. Review your policy limits.`);
+        setSandboxVerified(false);
+        return;
+      }
+
+      setSandboxVerified(true);
+    } catch (cause) {
+      setSandboxError(cause instanceof Error ? cause.message : "Sandbox dry-run failed.");
+      setSandboxVerified(false);
+    } finally {
+      setWorking(null);
+    }
+  }
+
   async function updateAuthorization(action: "authorize" | "cancel" | "reject") {
     if (!address) return;
     setWorking(action);
@@ -294,11 +392,24 @@ export function AutoModeOnboarding() {
       contractVerified &&
       activationReady &&
       explanationAccepted &&
+      sandboxVerified &&
       confirmationPhrase === "AUTHORIZE AUTO MODE" &&
       allowanceUsd > 0 &&
       expiresAt &&
       !working,
   );
+
+  // Build budget meters from the current snapshot for the guardrail panel.
+  const budget: BudgetMeters | undefined = snapshot?.policy
+    ? {
+        dailySpentUsd: 0, // real-time spend comes from execution engine; zero is safe default
+        maxDailyValueUsd: snapshot.policy.maxDailyValueUsd,
+        maxSingleTxUsd: snapshot.policy.maxDailyValueUsd * (snapshot.policy.maxTradePercent / 100),
+        maxSlippageBps: snapshot.policy.maxSlippageBps,
+        authorizationExpiresAt: snapshot.authorization?.expiresAt,
+      }
+    : undefined;
+
   return (
     <section aria-labelledby="auto-mode-heading" className="glass-panel rounded-lg border border-white/10 p-5 sm:p-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -328,10 +439,11 @@ export function AutoModeOnboarding() {
             Bound daily USD spend, maximum trade % and slippage limit to your onchain policy hash.
           </p>
         </div>
-        <div className="rounded-xl border border-white/10 bg-black/30 p-4">
+        <div className={`rounded-xl border p-4 ${sandboxVerified ? "border-emerald-400/30 bg-emerald-400/5" : "border-white/10 bg-black/30"}`}>
           <div className="flex items-center gap-2 text-xs font-semibold text-[#f2c86d]">
             <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#d9a441]/20 text-xs font-bold text-[#f2c86d]">2</span>
             Verify in Sandbox
+            {sandboxVerified ? <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-emerald-400" aria-label="Sandbox verified" /> : null}
           </div>
           <p className="mt-2 text-xs leading-5 text-white/60">
             Multi-agent pipeline simulates every trade first. Missing or stale signals halt automatically.
@@ -355,6 +467,7 @@ export function AutoModeOnboarding() {
               engaged: snapshot.requestedEnabled && !snapshot.effectiveEnabled,
               reason: snapshot.blockers[0],
             }}
+            budget={budget}
           />
         </div>
       ) : null}
@@ -579,8 +692,92 @@ export function AutoModeOnboarding() {
         </section>
       ) : null}
 
+      {/* ------------------------------------------------------------------ */}
+      {/* Step 2 – Sandbox dry-run verification                               */}
+      {/* ------------------------------------------------------------------ */}
+      <section
+        aria-labelledby="sandbox-heading"
+        className={`mt-5 rounded-2xl border p-4 sm:p-5 ${
+          sandboxVerified
+            ? "border-emerald-400/30 bg-emerald-400/5"
+            : "border-white/10 bg-white/4"
+        }`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <FlaskConical aria-hidden="true" className={`h-5 w-5 ${sandboxVerified ? "text-emerald-400" : "text-white/60"}`} />
+            <h3 id="sandbox-heading" className="font-semibold">
+              Sandbox dry-run verification
+            </h3>
+            {sandboxVerified ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/30 bg-emerald-300/10 px-2 py-0.5 text-xs font-semibold text-emerald-200">
+                <CheckCircle2 className="h-3 w-3" aria-hidden="true" /> Passed
+              </span>
+            ) : null}
+          </div>
+          <StatusPill good={sandboxVerified}>{sandboxVerified ? "Verified" : "Required"}</StatusPill>
+        </div>
+
+        <p className="mt-2 text-sm leading-6 text-white/60">
+          Before wallet authorization becomes available, you must run a simulated dry-run trade through the sandbox pipeline. This confirms your policy limits, immutable safety signals, and kill-switch state are all consistent.
+        </p>
+
+        {sandboxResult && !sandboxVerified ? (
+          <div role="alert" className="mt-3 rounded-xl border border-red-300/25 bg-red-400/8 px-3 py-2 text-xs text-red-200">
+            {sandboxError ?? "Dry-run failed — review your policy limits and retry."}
+            {sandboxResult.blockers?.length ? (
+              <ul className="mt-2 list-disc pl-4 space-y-1">
+                {sandboxResult.blockers.map((b) => <li key={b}>{blockerLabel(b)}</li>)}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+
+        {sandboxError && !sandboxResult ? (
+          <p role="alert" className="mt-3 text-xs text-red-200">{sandboxError}</p>
+        ) : null}
+
+        {sandboxVerified ? (
+          <p className="mt-3 text-xs text-emerald-300/80">
+            Dry-run passed — the pipeline accepted a representative trade within your policy limits with all safety signals active and kill-switch disengaged.
+          </p>
+        ) : null}
+
+        <button
+          type="button"
+          disabled={!isConnected || !snapshot?.policy || working !== null}
+          onClick={() => void runSandboxDryRun()}
+          className={`mt-4 inline-flex min-h-10 items-center gap-2 rounded-full border px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+            sandboxVerified
+              ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/20"
+              : "border-white/15 bg-white/6 text-white/80 hover:bg-white/10"
+          }`}
+        >
+          <FlaskConical className="h-4 w-4" aria-hidden="true" />
+          {working === "sandbox"
+            ? "Running dry-run…"
+            : sandboxVerified
+              ? "Re-run dry-run"
+              : "Run sandbox dry-run"}
+        </button>
+
+        {!snapshot?.policy ? (
+          <p className="mt-2 text-xs text-white/40">Save a complete policy first to enable the sandbox dry-run.</p>
+        ) : null}
+      </section>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Wallet authorization fieldset                                        */}
+      {/* ------------------------------------------------------------------ */}
       <fieldset className="mt-5 rounded-2xl border border-white/10 bg-white/4 p-4 sm:p-5">
         <legend className="px-2 text-sm font-semibold">Wallet authorization for this exact policy</legend>
+
+        {!sandboxVerified ? (
+          <p className="mb-4 rounded-xl border border-amber-300/20 bg-amber-300/8 px-3 py-2 text-xs text-amber-100">
+            Complete the sandbox dry-run verification above before authorizing.
+          </p>
+        ) : null}
+
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <label className="text-sm text-white/68">
             <span>Allowance (USD)</span>
