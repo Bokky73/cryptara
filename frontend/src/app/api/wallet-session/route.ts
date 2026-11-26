@@ -80,6 +80,8 @@ export async function POST(request: NextRequest) {
     signature: parsed.data.signature,
     signedTxXdr: parsed.data.signedTxXdr,
     network: parsed.data.network,
+    // Issue #36: forward the request origin so origin binding is enforced.
+    origin: request.headers.get("origin") ?? "",
   });
 
   if (!result.ok) {

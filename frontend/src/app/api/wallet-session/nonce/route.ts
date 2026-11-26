@@ -39,7 +39,11 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const challenge = mintWalletChallenge(parsed.data);
+    // Issue #36: capture the request Origin so it is embedded in the
+    // challenge and enforced during claim verification, preventing
+    // cross-site replay of a captured EVM signature.
+    const origin = request.headers.get("origin") ?? "";
+    const challenge = mintWalletChallenge({ ...parsed.data, origin });
     const response = NextResponse.json({
       nonce: challenge.nonce,
       family: challenge.family,

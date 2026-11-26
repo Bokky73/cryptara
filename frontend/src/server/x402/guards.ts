@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import type { X402RuntimeConfig } from "@/server/x402/config";
 import type { X402ChainFamily } from "@/server/types";
 import { getX402PaymentReceiptByHeaderHash, getX402PaymentReceiptByTxHash } from "@/server/storage";
+import { canonicalizeJson } from "@/lib/snapshots/canonicalJson";
 
 /**
  * Name of the internal header carrying the server-signed settlement context.
@@ -136,10 +137,28 @@ function parseAmount(value: string): number | undefined {
   return parsed;
 }
 
-export function stableJsonHash(value: unknown) {
-  const serialized = JSON.stringify(value, Object.keys((value as Record<string, unknown>) ?? {}).sort());
+import { canonicalizeJson } from "@/lib/snapshots/canonicalJson";
 
-  return createHash("sha256").update(serialized ?? "").digest("hex");
+/**
+ * SHA-256 over a *recursively* canonicalized JSON serialization of the
+ * value. Key ordering is normalized at every nesting level while array
+ * order is preserved, so two semantically identical payloads always hash
+ * identically and any difference in any nested value changes the digest.
+ *
+ * Previously this used `JSON.stringify(value, <sorted top-level keys>)`;
+ * passing an array as the replacer whitelist strips every nested object
+ * property whose key is absent at the top level, letting payloads with
+ * different nested contents collide on the same digest. The shared
+ * canonical serializer (`lib/snapshots/canonicalJson`) fixes that by
+ * sorting keys at every depth (issue #28).
+ */
+export function stableJsonHash(value: unknown) {
+  if (value === undefined) {
+    return createHash("sha256").update("", "utf8").digest("hex");
+  }
+
+  const serialized = canonicalizeJson(value);
+  return createHash("sha256").update(serialized, "utf8").digest("hex");
 }
 
 export function hashPaymentHeader(header: string) {
