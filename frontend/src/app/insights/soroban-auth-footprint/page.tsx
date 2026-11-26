@@ -1,12 +1,12 @@
-import { AppShell } from "@/components/AppShell";
+import { InsightPageShell } from "@/components/research/shared/InsightPageShell";
 import { SorobanAuthFootprintInspector } from "@/components/research/soroban-auth-footprint/SorobanAuthFootprintInspector";
 
 export const metadata = { title: "Soroban auth footprint | Cryptara" };
 
 export default function Page() {
   return (
-    <AppShell>
+    <InsightPageShell id="soroban-auth-footprint">
       <SorobanAuthFootprintInspector />
-    </AppShell>
+    </InsightPageShell>
   );
 }

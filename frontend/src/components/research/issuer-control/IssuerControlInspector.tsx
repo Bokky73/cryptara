@@ -1,5 +1,6 @@
 "use client";
 
+import { useInsightParam } from "@/components/research/shared/useInsightQueryParams";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Shield } from "lucide-react";
 import { useWalletSession } from "@/hooks/useWalletSession";
@@ -18,9 +19,9 @@ export function IssuerControlInspector() {
   const walletNetwork =
     wallet.family === "stellar" ? wallet.stellar.network ?? override?.network : override?.network;
 
-  const [network, setNetwork] = useState<"stellar-testnet" | "stellar-pubnet">(walletNetwork ?? "stellar-testnet");
+  const [network, setNetwork] = useInsightParam<"stellar-testnet" | "stellar-pubnet">("network", walletNetwork ?? "stellar-testnet", ["stellar-testnet", "stellar-pubnet"]);
   const [accountAddress, setAccountAddress] = useState(address ?? "");
-  const [assetQuery, setAssetQuery] = useState("");
+  const [assetQuery, setAssetQuery] = useInsightParam("asset", "");
   const [pageSize, setPageSize] = useState(20);
   const [maxPages, setMaxPages] = useState(3);
   const [view, setView] = useState<{

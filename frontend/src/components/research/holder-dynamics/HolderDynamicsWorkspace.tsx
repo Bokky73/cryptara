@@ -1,4 +1,5 @@
 "use client";
+import { useInsightParam } from "@/components/research/shared/useInsightQueryParams";
 import { FormEvent, useRef, useState } from "react";
 import { LiveRegion } from "@/components/a11y/LiveRegion";
 import { useWalletSession } from "@/hooks/useWalletSession";
@@ -9,8 +10,8 @@ export function HolderDynamicsWorkspace() {
   const wallet = useWalletSession();
   const override = isE2eTestMode() ? readE2eWalletOverride() : null;
   const owner = wallet.family === "evm" ? wallet.address : override?.family === "evm" ? override.address : undefined;
-  const [network, setNetwork] = useState("ethereum");
-  const [tokenAddress, setTokenAddress] = useState("0x00000000000000000000000000000000000000ff");
+  const [network, setNetwork] = useInsightParam<string>("network", "ethereum", ["ethereum", "goat"]);
+  const [tokenAddress, setTokenAddress] = useInsightParam("asset", "0x00000000000000000000000000000000000000ff");
   const [fromBlock, setFromBlock] = useState("100");
   const [toBlock, setToBlock] = useState("110");
   const [view, setView] = useState<{ result?: HolderDynamicsResult; error?: string; busy: boolean }>({ busy: false });

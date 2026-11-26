@@ -46,9 +46,13 @@ stellar,pubnet,USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN,USD
 
 ## 3. Duplicate Handling & Collision Neutralization
 
-- Identifiers are canonicalized: `chain + ":" + network + ":" + assetIdentifier.toLowerCase()`.
-- Duplicate rows during import are deduplicated with last-write-wins semantics.
-- **Formula Injection Mitigation**: Any string cell beginning with `=`, `+`, `-`, or `@` is automatically sanitized with a leading single quote (`'`).
+- Assets are compared by chain, network, and address, however the row spells them.
+- A row that repeats a saved asset, or an earlier row in the file, is a duplicate.
+- `strategy=skip` (default) leaves the first copy unchanged. `strategy=update`
+  overwrites its symbol, token name, pair address, and note with non-empty values.
+- **Formula Injection Mitigation**: Cells beginning with `=`, `+`, `-`, `@`, their
+  full-width forms, a tab, or a line break are exported with a leading single quote
+  (`'`). Importing removes it. The Export CSV dialog previews every affected cell.
 
 ## 4. Dry-Run Import
 
@@ -56,3 +60,8 @@ Test imports before persisting by adding query parameter `?dry_run=true` to the 
 ```bash
 POST /api/watchlist/import?dry_run=true
 ```
+
+A dry run and the browser preview use the same validation
+(`frontend/src/server/discovery/watchlistImport.ts`). Applying an import with any
+invalid row fails without saving anything; the import wizard excludes those rows
+first. Import and export both require the wallet's own session.

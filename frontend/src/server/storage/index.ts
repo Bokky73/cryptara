@@ -1632,6 +1632,21 @@ export function addWatchlistEntriesBulk(inputs: CreateWatchlistInput[]): { appli
   return { appliedCount: added.length };
 }
 
+/** Overwrite descriptive fields on an entry; identity and scan state are kept. */
+export function updateWatchlistEntryDetails(
+  id: string,
+  details: Pick<Partial<WatchlistEntry>, "note" | "pairAddress" | "symbol" | "tokenName">,
+): WatchlistEntry | undefined {
+  const entry = getWatchlistEntry(id);
+  if (!entry) return undefined;
+  for (const [key, value] of Object.entries(details)) {
+    if (value) Object.assign(entry, { [key]: value });
+  }
+  mirrorWatchlistEntryWrite(entry);
+  invalidateWalletCache(entry.walletAddress);
+  return entry;
+}
+
 export function computeBuyRiskTrend(walletAddress?: string, limit?: number) { return []; }
 export function computePerAgentTrends(walletAddress?: string) { return []; }
 export function getDecisionDetail(id: string) { return null; }

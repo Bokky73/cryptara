@@ -1,5 +1,6 @@
 "use client";
 
+import { useInsightParam } from "@/components/research/shared/useInsightQueryParams";
 import { useRef, useState, type FormEvent } from "react";
 import { useWalletSession } from "@/hooks/useWalletSession";
 import type { VaultAccountingResult } from "@/server/research/vault-accounting";
@@ -19,8 +20,8 @@ export function useWorkbenchState() {
   const address = wallet.family === "evm" ? wallet.address : undefined;
   const connected = Boolean(address && wallet.family === "evm" && wallet.isConnected);
 
-  const [network, setNetwork] = useState<string>(SUPPORTED_NETWORKS[0]);
-  const [vaultAddress, setVaultAddress] = useState("");
+  const [network, setNetwork] = useInsightParam<string>("network", SUPPORTED_NETWORKS[0], SUPPORTED_NETWORKS);
+  const [vaultAddress, setVaultAddress] = useInsightParam("asset", "");
   const [blockNumber, setBlockNumber] = useState("");
   const [sampleAmounts, setSampleAmounts] = useState<string[]>([]);
   const [sampleDraft, setSampleDraft] = useState("");
