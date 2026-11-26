@@ -3,11 +3,14 @@
 Use the Search button in AppShell or Ctrl/Command+K outside text fields. The
 native modal dialog makes the page behind it inert; arrow keys select, Enter
 navigates and Escape closes and returns focus. IME composition and editable-field
-shortcuts are left alone. The palette code loads on first use. No command starts a
-scan, requests a wallet signature or calls an API; destinations are baseline page
-routes without scan query parameters.
+shortcuts are left alone. The palette code loads on first use. No command requests
+a wallet signature. Pasting a checksummed or single-case EVM address, `CODE:G...`,
+a Stellar `C...` contract or a DexScreener link puts "Run AI Risk Scan" first; it
+opens `/scan` and starts the free scan there. Paid scans always need a click.
+An EVM address without a chain uses the connected wallet's chain, else Base.
 
-The route registry lists only pages present at `d41a5ebeea2e`. Search uses bounded
+The registry lists baseline pages plus every `/insights/*` page with category tags
+(a test compares it with the filesystem). Matching tolerates partial words and one typo per word. Search uses bounded
 Unicode-normalized text with stable exact/prefix/token ranking. Asset identities
 are never search-normalized. `AppShell` optionally accepts `commandAssets`, an
 explicit in-session array of `{ scope: { wallet, family, network }, assetKey,
@@ -17,11 +20,13 @@ the baseline dashboard or the supplied wallet's watchlist; they do not initiate 
 scan. Current pages do not supply this optional data yet, so ordinary navigation
 shows an honest no-session-assets notice instead of fetching data in the background.
 
-Query, selection and recent commands stay in component memory. The recent list
+Query and selection stay in component memory. The recent list
 is bounded and survives closing/reopening on the same mounted page. Wallet,
 network and disconnect changes remount the entire controller, clearing private
 results immediately, including a previously loaded dialog. Page navigation also
-clears page-local history. There is no telemetry, persistent storage, server search
+clears page-local history. The last 5 visited insights and 5 scanned assets are kept in local storage, device-wide
+and not per wallet, and are removed when wallet data is erased. Search text is not
+stored. There is no telemetry, server search
 or wallet-session authentication call in this feature.
 
 Verification from `frontend`:

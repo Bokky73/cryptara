@@ -1,9 +1,11 @@
 "use client";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useWalletSessionContext } from "@/providers/WalletSessionProvider";
 import { isPaletteShortcut } from "@/lib/commandPalette/shortcuts";
+import { insightSlugFromPath } from "@/lib/commandPalette/insights";
+import { recordInsightVisit } from "@/lib/commandPalette/persistedRecents";
 import { scopeKey } from "@/lib/commandPalette/scope";
 import type { PaletteScope, SessionAsset } from "@/lib/commandPalette/schema";
 const LazyPalette = dynamic(() => import("./CommandPalette").then(module => module.CommandPalette), { ssr: false,
@@ -13,6 +15,8 @@ function ScopedTrigger({ scope, assets }: { scope: PaletteScope | null; assets: 
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const router = useRouter();
+  const pathname = usePathname();
+  useEffect(() => { const slug = insightSlugFromPath(pathname); if (slug) recordInsightVisit(slug); }, [pathname]);
   useEffect(() => {
     const listener = (event: globalThis.KeyboardEvent) => { if (isPaletteShortcut(event)) { event.preventDefault(); setLoaded(true); setOpen(value => !value); } };
     window.addEventListener("keydown", listener); return () => window.removeEventListener("keydown", listener);
