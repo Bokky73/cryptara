@@ -1,12 +1,12 @@
-import { AppShell } from "@/components/AppShell";
+import { InsightPageShell } from "@/components/research/shared/InsightPageShell";
 import { AllowanceInventory } from "@/components/research/allowance-inventory/AllowanceInventory";
 
 export const metadata = { title: "Allowance inventory | Cryptara" };
 
 export default function AllowanceInventoryPage() {
   return (
-    <AppShell>
+    <InsightPageShell id="allowance-inventory">
       <AllowanceInventory />
-    </AppShell>
+    </InsightPageShell>
   );
 }

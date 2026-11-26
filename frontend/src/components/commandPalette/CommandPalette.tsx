@@ -19,7 +19,7 @@ export function CommandPalette({ open, scope, assets, close, navigate }: { open:
     return () => { element?.close(); if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
   }, [open]);
   useEffect(() => { dialog.current?.querySelector(`#command-result-${controller.selected}`)?.scrollIntoView?.({ block: "nearest", behavior: "instant" }); }, [controller.selected]);
-  function choose(command: Command) { controller.remember(command.id); close(); navigate(command.href); }
+  function choose(command: Command) { close(); navigate(controller.activate(command)); }
   function keydown(event: KeyboardEvent<HTMLDialogElement>) {
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (event.key === "Escape") { event.preventDefault(); close(); }
@@ -49,9 +49,9 @@ export function CommandPalette({ open, scope, assets, close, navigate }: { open:
     onCancel={event => { event.preventDefault(); close(); }}
     className="fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-xl overflow-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg)] p-5 text-[var(--color-fg)] shadow-xl backdrop:bg-black/70 motion-reduce:scroll-auto">
     <h2 id="command-title" className="mb-4 text-xl font-semibold">Quick navigation</h2>
-    <SearchInput value={controller.query} onChange={controller.setQuery} activeId={controller.results.length ? `command-result-${controller.selected}` : undefined} />
+    <SearchInput value={controller.query} onChange={controller.setQuery} scanLabel={controller.scanTarget?.kind} activeId={controller.results.length ? `command-result-${controller.selected}` : undefined} />
     <ResultList results={controller.results} selected={controller.selected} choose={choose} select={controller.setSelected} />
-    {!controller.results.length && <p className="my-4">No matching pages or session assets.</p>}
+    {!controller.results.length && <p className="my-4">No matching pages, insights or session assets.</p>}
     {!assets.length && <p className="text-sm">No session assets supplied. Page navigation is available.</p>}
     <LiveRegion message={resultAnnouncement(controller.results)} /><ShortcutHelp />
     <button type="button" onClick={close} className="mt-4 min-h-[44px] min-w-[44px] rounded-lg border px-4 py-2 focus-visible:outline-2 focus-visible:outline-[var(--color-focus)]">Close search</button>

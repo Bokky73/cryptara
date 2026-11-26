@@ -19,7 +19,7 @@ type Props = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
-const networks = ["ethereum", "base", "arbitrum", "optimism", "polygon", "bsc", "avalanche", "goat"];
+export const ALLOWANCE_NETWORKS = ["ethereum", "base", "arbitrum", "optimism", "polygon", "bsc", "avalanche", "goat"];
 const inputClass = "h-11 w-full rounded-xl border border-white/15 bg-black/25 px-3 text-sm text-white outline-none focus:border-[#d9a441]";
 
 export function ScanRangeForm(props: Props) {
@@ -32,7 +32,7 @@ export function ScanRangeForm(props: Props) {
       <div className="grid gap-3 sm:grid-cols-3">
         <label className="space-y-1 text-xs text-white/60">Network
           <select value={props.network} onChange={(event) => props.onNetwork(event.target.value)} className={inputClass}>
-            {networks.map((network) => <option key={network} value={network}>{network}</option>)}
+            {ALLOWANCE_NETWORKS.map((network) => <option key={network} value={network}>{network}</option>)}
           </select>
         </label>
         <label className="space-y-1 text-xs text-white/60">From block

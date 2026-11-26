@@ -1,5 +1,6 @@
 "use client";
 
+import { useInsightParam } from "@/components/research/shared/useInsightQueryParams";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { TreePine } from "lucide-react";
 import { useWalletSession } from "@/hooks/useWalletSession";
@@ -14,7 +15,7 @@ export function SorobanAuthFootprintInspector() {
   const walletNetwork =
     wallet.family === "stellar" ? wallet.stellar.network ?? override?.network : override?.network;
 
-  const [network, setNetwork] = useState<"stellar-testnet" | "stellar-pubnet">(walletNetwork ?? "stellar-testnet");
+  const [network, setNetwork] = useInsightParam<"stellar-testnet" | "stellar-pubnet">("network", walletNetwork ?? "stellar-testnet", ["stellar-testnet", "stellar-pubnet"]);
   const [envelopeXdr, setEnvelopeXdr] = useState("");
   const [simulationJson, setSimulationJson] = useState("");
   const [view, setView] = useState<{

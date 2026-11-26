@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, CircleAlert, Loader2, Lock, RotateCcw, ShieldAlert, ShieldCheck, Trash2, AlertTriangle } from "lucide-react";
 import type { RecoveryChain, RecoveryIncidentMode, RecoveryList, RecoveryNetworkFreshness, RecoveryRequest, RecoveryType } from "@/server/types";
 import { RECOVERY_RULES_VERSION } from "@/server/types";
+import { clearPaletteRecents } from "@/lib/commandPalette/persistedRecents";
+import { clearStressPresets } from "@/lib/stressPresets";
 import { AuditExportButton } from "@/components/AuditExportButton";
 import { useI18n, type I18nValue } from "@/i18n/I18nProvider";
 import type { MessageKey } from "@/i18n/messages";
@@ -386,6 +388,8 @@ export function RecoveryClient({ initialWallet }: { initialWallet?: string }) {
         setPartial({ error: data.error ?? t("walletDataErasureFailed") });
         return;
       }
+      clearStressPresets();
+      clearPaletteRecents();
       setErasureReceipt(data);
       setShowEraseDialog(false);
       void refresh(state.wallet);

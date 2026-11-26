@@ -1,5 +1,6 @@
 "use client";
 
+import { useInsightParam } from "@/components/research/shared/useInsightQueryParams";
 import { useState } from "react";
 import { LiveRegion } from "@/components/a11y/LiveRegion";
 import { CoverageNotice } from "./CoverageNotice";
@@ -30,7 +31,7 @@ export function ConsistencyWorkbench(props: {
 }) {
   const endpoint = props.endpoint ?? "/api/insights/rpc-consistency";
   const { state, compare } = useWorkbenchState(endpoint);
-  const [network, setNetwork] = useState<NetworkId>(props.initialNetwork === "mainnet" ? "mainnet" : "testnet");
+  const [network, setNetwork] = useInsightParam<NetworkId>("network", props.initialNetwork === "mainnet" ? "mainnet" : "testnet", ["testnet", "mainnet"]);
   const [target, setTarget] = useState(props.initialTarget ?? "");
   const [contractKeys, setContractKeys] = useState("");
   const report = state.status === "ready" ? state.report : null;

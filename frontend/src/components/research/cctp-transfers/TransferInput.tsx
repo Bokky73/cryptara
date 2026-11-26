@@ -1,5 +1,6 @@
 "use client";
 
+import { useInsightParam } from "@/components/research/shared/useInsightQueryParams";
 import { FormEvent, useState } from "react";
 import type { NetworkMode } from "@/server/research/cctp-transfers/schema";
 
@@ -20,7 +21,7 @@ export function TransferInput(props: {
 }) {
   const [sourceChain, setSourceChain] = useState(props.defaultSourceChain ?? SOURCE_CHAINS[0]);
   const [transactionHash, setTransactionHash] = useState("");
-  const [network, setNetwork] = useState<NetworkMode>(props.defaultNetwork ?? "testnet");
+  const [network, setNetwork] = useInsightParam<NetworkMode>("network", props.defaultNetwork ?? "testnet", ["testnet", "mainnet"]);
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();

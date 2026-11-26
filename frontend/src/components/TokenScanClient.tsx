@@ -18,6 +18,8 @@ import { LiveRegion } from "@/components/a11y/LiveRegion";
 import { RiskSnapshotActions } from "@/components/RiskSnapshotActions";
 import { captureOfflineScan } from "@/lib/offlineStore";
 import { parseTokenQuery, type TokenInputIssueCode, type TokenInputKind } from "@/lib/tokenQuery";
+import { recordScannedAsset } from "@/lib/commandPalette/persistedRecents";
+import { detectScanTarget } from "@/lib/commandPalette/scanTarget";
 import { buildX402Fingerprint, hashX402PaymentHeader, type X402ReceiptEntry } from "@/lib/x402ReceiptStore";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { useX402PaymentReceipts } from "@/hooks/useSigning";
@@ -41,6 +43,7 @@ const chains = [
   { value: "polygon", label: "Polygon" },
   { value: "optimism", label: "Optimism" },
   { value: "stellar-testnet", label: "Stellar" },
+  { value: "stellar-pubnet", label: "Stellar Pubnet" },
   { value: "solana", label: "Solana later", disabled: true },
 ];
 
@@ -223,6 +226,7 @@ const SAMPLE_TOKENS = [
 
 export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: string }) {
   const { t, format } = useI18n();
+export function TokenScanClient({ initialQuery = "MEME", initialChain, autoRun = false }: { initialQuery?: string; initialChain?: string; autoRun?: boolean }) {
   const queryErrorId = useId();
   const inputHelpId = useId();
   const paymentModalTitleId = useId();
@@ -237,6 +241,7 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
     const initialInput = parseTokenQuery(query);
     return initialInput.ok && initialInput.suggestedChain ? initialInput.suggestedChain : "base";
   });
+  const [chain, setChain] = useState(() => chains.some((item) => item.value === initialChain && !item.disabled) ? initialChain! : "base");
   const [walletAddress, setWalletAddress] = useState("");
   const [scan, setScan] = useState<TokenScanResult | null>(null);
   const [isScanning, setIsScanning] = useState(false);
@@ -336,6 +341,20 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [showPaymentModal]);
 
+  // Palette "Run AI Risk Scan" handoff. Only the free scan auto-runs; paid scans always need a click.
+  // The run marker is dropped so a refresh does not scan again.
+  useEffect(() => {
+    if (!autoRun) return;
+    const timer = window.setTimeout(() => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("run");
+      window.history.replaceState(null, "", url);
+      void runScan();
+    }, 0);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot on mount
+  }, []);
+
   async function runScan() {
     if (actionsDisabled || inputIssue) return;
     setIsScanning(true);
@@ -358,6 +377,8 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
       const data = (await response.json()) as TokenScanResult;
       setScan(data);
       captureOfflineScan(data, "free token scan");
+      const target = detectScanTarget(query, null);
+      if (target) recordScannedAsset({ query: target.query, chain });
     } catch (error) {
       setScan(null);
       setScanError(error instanceof Error ? error.message : t("scanFreeTrialFailed"));
