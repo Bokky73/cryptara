@@ -22,6 +22,8 @@
     "test:provider-resilience": "tsx --tsconfig tsconfig.json scripts/provider-resilience-check.ts",
     "test:contrast": "tsx --tsconfig tsconfig.json scripts/contrast-check.ts",
     "test:a11y": "npm run test:contrast && tsx --tsconfig tsconfig.json scripts/a11y-check.ts",
+    "test:i18n": "vitest run src/i18n/messages.test.ts src/i18n/format.test.ts && tsx --tsconfig tsconfig.json scripts/i18n-source-check.ts",
+    "test:token-input": "vitest run src/lib/tokenQuery.test.ts src/server/scan/tokenInput.test.ts",
     "verify": "npm run test:auto-mode && npm run test:agents && npm run test:stellar-portfolio && npm run test:alerts && npm run test:a11y && npm run test:pubnet-gate && npm run test:wallet-capabilities && npm run test:responsive && npm run lint && npm run build && npm run test:portfolio-stress",
     "error-contract-check": "tsx scripts/error-contract-check.ts",
     "test:feature-flags": "tsx --tsconfig tsconfig.json scripts/feature-flag-check.ts",

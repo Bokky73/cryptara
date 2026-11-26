@@ -67,3 +67,52 @@ export function captureOfflinePortfolio(portfolio: PortfolioSnapshot, source = "
     }),
   });
 }
+
+function mentionsWallet(value: unknown, wallet: string) {
+  return (JSON.stringify(value) ?? "").toLowerCase().includes(wallet);
+}
+
+/**
+ * Drop every offline capture that carries the given wallet address. Captures of
+ * public token data that never mention the wallet are kept.
+ */
+export function clearWalletOfflineEntries(walletAddress: string) {
+  if (typeof window === "undefined") return;
+  const wallet = walletAddress.trim().toLowerCase();
+  if (!wallet) return;
+
+  try {
+    const raw = window.localStorage.getItem(STORE_KEY);
+    if (!raw || !raw.toLowerCase().includes(wallet)) return;
+
+    const state = loadState();
+    const next: OfflineReadOnlyState = {
+      scans: state.scans.filter((entry) => !mentionsWallet(entry, wallet)),
+      portfolios: state.portfolios.filter((entry) => !mentionsWallet(entry, wallet)),
+    };
+
+    // Removing first means a failed rewrite still leaves no wallet data behind.
+    window.localStorage.removeItem(STORE_KEY);
+    if (next.scans.length + next.portfolios.length > 0) saveState(next);
+  } catch {
+    // Storage can be unavailable; there is nothing left to clear in that case.
+  }
+}
+
+/** Remove service-worker page copies whose URL contains the wallet address. */
+export async function clearWalletPageCache(walletAddress: string) {
+  if (typeof window === "undefined" || !("caches" in window)) return;
+  const wallet = walletAddress.trim().toLowerCase();
+  if (!wallet) return;
+
+  try {
+    for (const name of await window.caches.keys()) {
+      const cache = await window.caches.open(name);
+      for (const request of await cache.keys()) {
+        if (request.url.toLowerCase().includes(wallet)) await cache.delete(request);
+      }
+    }
+  } catch {
+    // Cache Storage is unavailable in private or insecure contexts.
+  }
+}

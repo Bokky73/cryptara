@@ -1,5 +1,9 @@
+"use client";
+
 import type { RiskBreakdownItem } from "@/server/types";
 import Link from "next/link";
+import { useI18n } from "@/i18n/I18nProvider";
+import type { MessageKey } from "@/i18n/messages";
 
 type RiskTier = "critical" | "warning" | "strength";
 
@@ -9,23 +13,23 @@ function tierFor(score: number): RiskTier {
   return "strength";
 }
 
-const tierMeta: Record<RiskTier, { label: string; icon: string; bar: string; text: string; dot: string }> = {
+const tierMeta: Record<RiskTier, { labelKey: MessageKey; icon: string; bar: string; text: string; dot: string }> = {
   critical: {
-    label: "Critical flag",
+    labelKey: "criticalFlags",
     icon: "\u26A0",
     bar: "bg-red-300",
     text: "text-red-200",
     dot: "bg-red-300",
   },
   warning: {
-    label: "Warning",
+    labelKey: "warnings",
     icon: "\u25B2",
     bar: "bg-[#d9a441]",
     text: "text-[#e6c47a]",
     dot: "bg-[#d9a441]",
   },
   strength: {
-    label: "Strength",
+    labelKey: "strengths",
     icon: "\u2713",
     bar: "bg-emerald-300",
     text: "text-emerald-200",
@@ -40,6 +44,7 @@ function isMissing(item: RiskBreakdownItem) {
 }
 
 export function RiskBreakdownCard({ items }: { items: RiskBreakdownItem[] }) {
+  const { t } = useI18n();
   const grouped = tierOrder.map((tier) => ({
     tier,
     items: items.filter((item) => tierFor(item.score) === tier),
@@ -49,11 +54,11 @@ export function RiskBreakdownCard({ items }: { items: RiskBreakdownItem[] }) {
     <section className="glass-panel rounded-[28px] p-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-xl font-semibold">Why this is risky</h2>
-          <p className="mt-1 text-sm text-white/54">Top drivers in plain language, grouped by severity.</p>
+          <h2 className="text-xl font-semibold">{t("riskyTitle")}</h2>
+          <p className="mt-1 text-sm text-white/54">{t("riskyDetail")}</p>
         </div>
         <Link href="/insights/proxy-inspector" className="inline-flex shrink-0 rounded-full border border-white/15 px-4 py-2 text-sm">
-          Inspect proxy implementation
+          {t("inspectProxy")}
         </Link>
       </div>
       <div className="mt-6 space-y-6">
@@ -64,7 +69,7 @@ export function RiskBreakdownCard({ items }: { items: RiskBreakdownItem[] }) {
             <div key={tier}>
               <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-white/54">
                 <span aria-hidden="true" className={meta.text}>{meta.icon}</span>
-                <span>{meta.label}s</span>
+                <span>{t(meta.labelKey)}</span>
               </div>
               <ul className="space-y-3">
                 {tierItems.slice(0, 5).map((item) => {
@@ -77,7 +82,7 @@ export function RiskBreakdownCard({ items }: { items: RiskBreakdownItem[] }) {
                           {item.label}
                         </span>
                         {missing ? (
-                          <span className="rounded-full border border-white/15 px-2 py-0.5 text-xs text-white/54">Data missing</span>
+                          <span className="rounded-full border border-white/15 px-2 py-0.5 text-xs text-white/54">{t("dataMissing")}</span>
                         ) : (
                           <span className="text-white/54">{item.score}/100</span>
                         )}

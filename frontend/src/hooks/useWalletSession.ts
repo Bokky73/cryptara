@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useSignMessage } from "wagmi";
+import { discardStaleSession, enqueueChallenge, getSessionEpoch } from "@/lib/wallet/sessionRevocation";
 import { useWalletSessionContext } from "@/providers/WalletSessionProvider";
 
 type Family = "evm" | "stellar";
@@ -17,6 +18,18 @@ type ChallengePayload = {
   challengeXdr?: string;
 };
 
+/** Re-challenge shortly before the server's 12 hour session expires. */
+const SESSION_REFRESH_MS = 11 * 60 * 60 * 1000;
+
+// The session cookie is shared by the whole tab, so this state is too: several
+// mounted consumers must not each prompt for a signature.
+let syncedSession: { key: string; at: number } | null = null;
+let inflightKey: string | null = null;
+
+function isSynced(key: string) {
+  return syncedSession?.key === key && Date.now() - syncedSession.at < SESSION_REFRESH_MS;
+}
+
 export function useWalletSession() {
   const session = useWalletSessionContext();
   const signMessageAsync = useSignMessage().signMessageAsync;
@@ -29,49 +42,33 @@ export function useWalletSession() {
         : "Test SDF Network ; September 2015"
       : session.chainId?.toString() ?? "";
 
-  const queueStream = useRef<Promise<unknown>>(Promise.resolve());
-  const inflightFor = useRef<string | null>(null);
-  const lastSynced = useRef<string | null>(null);
+  const signStellarTransaction = session.stellar.signTransaction;
 
   useEffect(() => {
-    if (!address || !family) {
-      lastSynced.current = null;
-      inflightFor.current = null;
-      return;
-    }
-    if (lastSynced.current === address) return;
-    if (inflightFor.current === address) return;
-    inflightFor.current = address;
-    const queued = queueStream.current;
-    const claimedAtStart = address;
+    if (!address || !family) return;
 
-    const next = queued
-      .then(async () => {
-        if (lastSynced.current && lastSynced.current !== claimedAtStart) {
-          await fetch("/api/wallet-session", { method: "DELETE", credentials: "include" }).catch(
-            () => undefined,
-          );
-        }
-        await runChallenge(
-          claimedAtStart,
-          family,
-          network,
-          signMessageAsync,
-          session.stellar.signTransaction,
-        );
-        lastSynced.current = claimedAtStart;
-      })
+    const epoch = getSessionEpoch();
+    const identity = family === "evm" ? address.toLowerCase() : address;
+    const key = [epoch, family, identity, family === "stellar" ? network : ""].join("|");
+    if (isSynced(key) || inflightKey === key) return;
+    inflightKey = key;
+
+    const isCurrent = () => getSessionEpoch() === epoch;
+
+    enqueueChallenge(async () => {
+      if (!isCurrent() || isSynced(key)) return;
+      const claimed = await runChallenge(address, family, network, signMessageAsync, signStellarTransaction, isCurrent);
+      if (claimed) syncedSession = { key, at: Date.now() };
+    })
       .catch((err: unknown) => {
         if (process.env.NODE_ENV !== "production") {
           console.warn("wallet session challenge failed", err);
         }
       })
       .finally(() => {
-        if (inflightFor.current === claimedAtStart) inflightFor.current = null;
+        if (inflightKey === key) inflightKey = null;
       });
-
-    queueStream.current = next.catch(() => undefined);
-  }, [address, family, network, session.stellar.signTransaction, signMessageAsync]);
+  }, [address, family, network, signMessageAsync, signStellarTransaction]);
 
   return {
     ...session,
@@ -87,7 +84,8 @@ async function runChallenge(
   network: string,
   signMessageAsync: (input: { message: string }) => Promise<string>,
   stellarSignTransaction: (xdr: string) => Promise<string>,
-) {
+  isCurrent: () => boolean,
+): Promise<boolean> {
   const nonceResponse = await fetch("/api/wallet-session/nonce", {
     method: "POST",
     credentials: "include",
@@ -99,6 +97,9 @@ async function runChallenge(
   }
   const challenge = (await nonceResponse.json()) as ChallengePayload;
 
+  // The wallet may have been switched or disconnected while awaiting.
+  if (!isCurrent()) return false;
+
   let signature: string | undefined;
   let signedTxXdr: string | undefined;
 
@@ -109,6 +110,8 @@ async function runChallenge(
     if (!challenge.challengeXdr) throw new Error("stellar_challenge_missing");
     signedTxXdr = await stellarSignTransaction(challenge.challengeXdr);
   }
+
+  if (!isCurrent()) return false;
 
   const claimResponse = await fetch("/api/wallet-session", {
     method: "POST",
@@ -127,4 +130,9 @@ async function runChallenge(
     const detail = await claimResponse.text().catch(() => "");
     throw new Error(`claim_rejected:${claimResponse.status}:${detail}`);
   }
+  if (!isCurrent()) {
+    await discardStaleSession();
+    return false;
+  }
+  return true;
 }

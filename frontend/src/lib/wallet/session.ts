@@ -18,6 +18,30 @@ export const STELLAR_DISPLAY_SESSION_KEY = "cryptara:stellar-display-session:v1"
 export function isWalletFamily(value: unknown): value is WalletFamily {
   return value === "evm" || value === "stellar";
 }
+
+export type ChainFamilyAvailability = {
+  evmConnected: boolean;
+  stellarConnected: boolean;
+  stellarRestored: boolean;
+};
+
+/**
+ * Which chain family the app acts on. Precedence, highest first:
+ * explicit selection, live Stellar, live EVM, display-only restored Stellar.
+ *
+ * An explicit selection wins even while that family is disconnected, so a
+ * pending connection never moves signing to the other wallet.
+ */
+export function selectActiveChainFamily(
+  selected: unknown,
+  { evmConnected, stellarConnected, stellarRestored }: ChainFamilyAvailability,
+): WalletFamily | null {
+  if (isWalletFamily(selected)) return selected;
+  if (stellarConnected) return "stellar";
+  if (evmConnected) return "evm";
+  if (stellarRestored) return "stellar";
+  return null;
+}
 export function parseRestoredStellarSession(value: string | null): RestoredStellarSession | null {
   if (!value) return null;
 

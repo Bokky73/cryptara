@@ -5,6 +5,7 @@ import { useAccount, useWalletClient, useSwitchChain, useChainId } from "wagmi";
 import { useStellarWallet } from "@/providers/StellarWalletProvider";
 import { useWalletSession } from "@/hooks/useWalletSession";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { useI18n, type I18nValue } from "@/i18n/I18nProvider";
 import type {
   ApprovalValidationResult,
   PreparedTransactionPayload,
@@ -52,13 +53,13 @@ type ApprovalFlowClientProps = {
 const RISK_THRESHOLD = 60;
 const CONFIDENCE_THRESHOLD = 50;
 
-function formatUsd(value: number | undefined): string {
+function formatUsd(value: number | undefined, format: I18nValue["format"]): string {
   if (value === undefined || Number.isNaN(value)) return "—";
-  return `$${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  return format.currency(value);
 }
 
-function formatCountdown(ms: number): string {
-  if (ms <= 0) return "Expired";
+function formatCountdown(ms: number, t: I18nValue["t"]): string {
+  if (ms <= 0) return t("quoteExpired");
   const totalSeconds = Math.floor(ms / 1000);
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
@@ -88,12 +89,13 @@ async function verifyBeforeWallet(input: {
   payload?: PreparedTransactionPayload | null;
   walletAddress: string;
   sourceAccount?: string;
+  t: I18nValue["t"];
 }): Promise<SigningVerificationIssue[]> {
   if (!input.preview) {
     return [{
       code: "malformed_payload",
       field: "preview",
-      message: "No reviewed preview is available. Refresh and prepare the transaction again.",
+      message: input.t("approvalNoPreview"),
       blocking: true,
       refreshRequired: true,
     }];
@@ -103,7 +105,7 @@ async function verifyBeforeWallet(input: {
     return [{
       code: "malformed_payload",
       field: "payload",
-      message: "No prepared payload was returned. Refresh and prepare the transaction again.",
+      message: input.t("approvalNoPayload"),
       blocking: true,
       refreshRequired: true,
     }];
@@ -129,6 +131,7 @@ export function ApprovalFlowClient({
   onRefresh,
   refreshLabel,
 }: ApprovalFlowClientProps) {
+  const { t, format } = useI18n();
   const session = useWalletSession();
   const evm = useAccount();
   const evmChainId = useChainId();
@@ -141,6 +144,8 @@ export function ApprovalFlowClient({
   const [payload, setPayload] = useState<PreparedTransactionPayload | null>(null);
   const [riskAcknowledged, setRiskAcknowledged] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectError, setRejectError] = useState<string | null>(null);
   const expectedSourceAccount = sourceAccount ?? (chainFamily === "stellar" ? stellar.address ?? undefined : undefined);
   const verificationWalletAddress =
     chainFamily === "stellar"
@@ -187,10 +192,10 @@ export function ApprovalFlowClient({
         } else if (!result.walletOk) {
           setState({
             phase: "wallet_error",
-            error: `Wrong wallet connected. Expected ${walletAddress}, got ${connectedWallet}`,
+            error: t("approvalWrongWallet", { expected: walletAddress, connected: connectedWallet ?? t("statusUnknown") }),
           });
         } else {
-          setState({ phase: "error", error: result.blockedReason ?? "Approval denied." });
+          setState({ phase: "error", error: result.blockedReason ?? t("approvalDenied") });
         }
         return;
       }
@@ -202,6 +207,7 @@ export function ApprovalFlowClient({
         payload: result.payload,
         walletAddress: verificationWalletAddress,
         sourceAccount: expectedSourceAccount,
+        t,
       });
       if (issues.length > 0) {
         setState({ phase: "security_warning", issues });
@@ -212,10 +218,10 @@ export function ApprovalFlowClient({
     } catch (error) {
       setState({
         phase: "error",
-        error: error instanceof Error ? error.message : "Failed to validate approval.",
+        error: error instanceof Error ? error.message : t("approvalValidationFailed"),
       });
     }
-  }, [idempotencyKey, walletAddress, chainFamily, network, sourceAccount, preview, session.address, stellar.network, verificationWalletAddress, expectedSourceAccount, evm.chain, evm.chainId]);
+  }, [idempotencyKey, walletAddress, chainFamily, network, sourceAccount, preview, session.address, stellar.network, verificationWalletAddress, expectedSourceAccount, evm.chain, evm.chainId, t]);
 
   useEffect(() => {
     if (state.phase !== "idle") return;
@@ -255,6 +261,41 @@ export function ApprovalFlowClient({
 
   const quoteExpired = expiresAt !== undefined && expiresAt <= now;
 
+  const handleReject = useCallback(async () => {
+    if (rejecting) return;
+    setRejectError(null);
+    setRejecting(true);
+
+    try {
+      const response = await fetch("/api/execute/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "reject",
+          idempotencyKey,
+          walletAddress,
+          reason: "User rejected in approval preview.",
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: "Failed to record rejection." }));
+        const message = typeof errorData.error === "string"
+          ? errorData.error
+          : errorData.error?.message ?? errorData.detail ?? "Failed to record rejection.";
+        setRejectError(message);
+        return;
+      }
+
+      setState({ phase: "rejected", reason: "User rejected in approval preview." });
+      onDismiss?.();
+    } catch (error) {
+      setRejectError(error instanceof Error ? error.message : "Failed to record rejection.");
+    } finally {
+      setRejecting(false);
+    }
+  }, [idempotencyKey, onDismiss, rejecting, walletAddress]);
+
   const handleSignAndSubmit = useCallback(async () => {
     if (actionsDisabled || state.phase !== "ready_for_signing" || !payload) return;
     if (isHighRisk && !riskAcknowledged) return;
@@ -267,6 +308,7 @@ export function ApprovalFlowClient({
       payload,
       walletAddress,
       sourceAccount,
+      t,
     });
     if (issues.length > 0) {
       setState({ phase: "security_warning", issues });
@@ -290,14 +332,14 @@ export function ApprovalFlowClient({
           } catch {
             setState({
               phase: "wallet_error",
-              error: `Please switch your wallet to chain ID ${targetChainId} to sign this transaction.`,
+              error: t("approvalSwitchChain", { chainId: targetChainId }),
             });
             return;
           }
         }
 
         if (!walletClient) {
-          setState({ phase: "wallet_error", error: "EVM wallet is not connected. Connect via RainbowKit first." });
+          setState({ phase: "wallet_error", error: t("approvalEvmNotConnected") });
           return;
         }
 
@@ -321,7 +363,7 @@ export function ApprovalFlowClient({
         const stellarPayload = payload as StellarPreparedTransactionPayload;
 
         if (!stellar.isConnected || !stellar.address) {
-          setState({ phase: "wallet_error", error: "Stellar wallet is not connected. Connect via Stellar Wallets Kit first." });
+          setState({ phase: "wallet_error", error: t("approvalStellarNotConnected") });
           return;
         }
 
@@ -329,7 +371,7 @@ export function ApprovalFlowClient({
         if (stellarPayload.sourceAccount && stellar.address !== stellarPayload.sourceAccount) {
           setState({
             phase: "wallet_error",
-            error: `Wrong Stellar account connected. Expected ${stellarPayload.sourceAccount}, got ${stellar.address}.`,
+            error: t("approvalWrongStellarAccount", { expected: stellarPayload.sourceAccount ?? t("statusUnknown"), connected: stellar.address ?? t("statusUnknown") }),
           });
           return;
         }
@@ -363,8 +405,8 @@ export function ApprovalFlowClient({
       });
 
       if (!submitResponse.ok) {
-        const errorData = await submitResponse.json().catch(() => ({ detail: "Submission failed." }));
-        setState({ phase: "wallet_error", error: errorData.detail ?? errorData.error ?? "Submission failed." });
+        const errorData = await submitResponse.json().catch(() => ({ detail: t("approvalSubmissionFailed") }));
+        setState({ phase: "wallet_error", error: errorData.detail ?? errorData.error ?? t("approvalSubmissionFailed") });
         return;
       }
 
@@ -373,7 +415,7 @@ export function ApprovalFlowClient({
       setState({ phase: "submitted", txHash });
       onComplete?.(txHash);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Signing failed.";
+      const message = error instanceof Error ? error.message : t("approvalSigningFailed");
 
       // Detect user rejection
       if (/reject|denied|cancel/i.test(message)) {
@@ -382,7 +424,7 @@ export function ApprovalFlowClient({
         setState({ phase: "wallet_error", error: message });
       }
     }
-  }, [actionsDisabled, state.phase, payload, preview, isHighRisk, riskAcknowledged, quoteExpired, chainFamily, evmChainId, switchChainAsync, walletClient, stellar, network, walletAddress, sourceAccount, idempotencyKey, displayParams, onComplete]);
+  }, [actionsDisabled, state.phase, payload, preview, isHighRisk, riskAcknowledged, quoteExpired, chainFamily, evmChainId, switchChainAsync, walletClient, stellar, network, walletAddress, sourceAccount, idempotencyKey, displayParams, onComplete, t]);
 
   const signDisabled =
     actionsDisabled ||
@@ -397,15 +439,15 @@ export function ApprovalFlowClient({
   const youSend = String(displayParams.youSend ?? displayParams.amount ?? "—");
   const minReceive = String(displayParams.minReceive ?? displayParams.minimumReceive ?? "—");
   const maxSlippage = displayParams.maxSlippagePct ?? displayParams.slippagePct;
-  const gasLabel = chainFamily === "stellar" ? "Stellar Stroops" : "Estimated Gas";
+  const gasLabel = chainFamily === "stellar" ? t("stellarStroops") : t("estimatedGas");
   const gasValue = String(displayParams.gas ?? displayParams.stroops ?? "—");
 
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
       <header className="flex flex-col gap-1">
-        <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Execution Review</h2>
+        <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">{t("executionReview")}</h2>
         <p className="text-sm text-neutral-500 dark:text-neutral-400">
-          Review the exact balance changes before signing. Nothing is signed until you approve.
+          {t("approvalReviewIntro")}
         </p>
       </header>
 
@@ -419,9 +461,9 @@ export function ApprovalFlowClient({
 
       {isHighRisk && (
         <div role="alert" className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
-          <p className="font-semibold">High-risk transaction</p>
+          <p className="font-semibold">{t("highRiskTransaction")}</p>
           <p className="mt-1">
-            Buy risk {buyRisk}% · Confidence {confidence}%. Review carefully before proceeding.
+            {t("approvalHighRiskDetail", { risk: buyRisk, confidence })}
           </p>
           <label className="mt-3 flex items-start gap-2">
             <input
@@ -430,33 +472,33 @@ export function ApprovalFlowClient({
               onChange={(e) => setRiskAcknowledged(e.target.checked)}
               className="mt-0.5 h-4 w-4"
             />
-            <span>I understand the risks and want to continue.</span>
+            <span>{t("approvalRiskAck")}</span>
           </label>
         </div>
       )}
 
       <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
-          <dt className="text-xs uppercase tracking-wide text-neutral-500">You Send</dt>
+          <dt className="text-xs uppercase tracking-wide text-neutral-500">{t("youSend")}</dt>
           <dd className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{youSend}</dd>
         </div>
         <div>
-          <dt className="text-xs uppercase tracking-wide text-neutral-500">Minimum You Receive</dt>
+          <dt className="text-xs uppercase tracking-wide text-neutral-500">{t("minimumYouReceive")}</dt>
           <dd className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
             {minReceive}
             {maxSlippage !== undefined && (
-              <span className="ml-1 text-xs text-neutral-500">(max slippage {String(maxSlippage)}%)</span>
+              <span className="ml-1 text-xs text-neutral-500">{t("maxSlippage", { value: String(maxSlippage) })}</span>
             )}
           </dd>
         </div>
         <div>
-          <dt className="text-xs uppercase tracking-wide text-neutral-500">USD Equivalent</dt>
+          <dt className="text-xs uppercase tracking-wide text-neutral-500">{t("usdEquivalent")}</dt>
           <dd className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
-            {formatUsd(Number(displayParams.valueUsd ?? NaN))}
+            {formatUsd(Number(displayParams.valueUsd ?? NaN), format)}
           </dd>
         </div>
         <div>
-          <dt className="text-xs uppercase tracking-wide text-neutral-500">Network &amp; Target Contract</dt>
+          <dt className="text-xs uppercase tracking-wide text-neutral-500">{t("networkTargetContract")}</dt>
           <dd className="flex flex-wrap items-center gap-2 text-sm font-medium text-neutral-900 dark:text-neutral-100">
             <span>{network}</span>
             <span
@@ -466,7 +508,7 @@ export function ApprovalFlowClient({
                   : "rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-900 dark:text-amber-200"
               }
             >
-              {verified ? "Verified" : "Unverified"}
+              {verified ? t("verified") : t("unverified")}
             </span>
             {targetContract && (
               <span className="font-mono text-xs break-all text-neutral-600 dark:text-neutral-300">{targetContract}</span>
@@ -478,7 +520,7 @@ export function ApprovalFlowClient({
                 rel="noopener noreferrer"
                 className="text-xs text-blue-600 underline dark:text-blue-400"
               >
-                View on explorer
+                {t("viewOnExplorer")}
               </a>
             )}
           </dd>
@@ -488,23 +530,23 @@ export function ApprovalFlowClient({
           <dd className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{gasValue}</dd>
         </div>
         <div>
-          <dt className="text-xs uppercase tracking-wide text-neutral-500">Quote Expiry</dt>
+          <dt className="text-xs uppercase tracking-wide text-neutral-500">{t("quoteExpiry")}</dt>
           <dd className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
-            {expiresAt !== undefined ? formatCountdown(expiresAt - now) : "—"}
+            {expiresAt !== undefined ? formatCountdown(expiresAt - now, t) : "—"}
           </dd>
         </div>
       </dl>
 
       {quoteExpired && (
         <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-          <p className="font-semibold">Quote expired</p>
-          <p className="mt-1">This quote is no longer valid. Refresh to re-simulate before signing.</p>
+          <p className="font-semibold">{t("quoteExpired")}</p>
+          <p className="mt-1">{t("quoteExpiredDetail")}</p>
           <button
             type="button"
             onClick={onRefresh ?? (() => window.location.reload())}
             className="mt-3 rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700"
           >
-            Refresh Quote &amp; Re-simulate
+            {t("refreshQuoteResimulate")}
           </button>
         </div>
       )}
@@ -516,18 +558,27 @@ export function ApprovalFlowClient({
           disabled={signDisabled}
           className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Review in Wallet
+          {t("reviewInWallet")}
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleReject()}
+          disabled={rejecting || state.phase === "signing" || state.phase === "submitting"}
+          className="rounded-md border border-red-300 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
+        >
+          {rejecting ? "Rejecting..." : "Reject"}
         </button>
         <p className="text-xs text-neutral-500 dark:text-neutral-400">
-          Approval-Only: Cryptara never signs for you.
+          {t("approvalOnlyNotice")}
         </p>
+        {rejectError ? <p role="alert" className="text-xs text-red-600 dark:text-red-300">{rejectError}</p> : null}
         {onDismiss && (
           <button
             type="button"
             onClick={onDismiss}
             className="text-xs text-neutral-500 underline hover:text-neutral-700 dark:text-neutral-400"
           >
-            Cancel
+            {t("cancel")}
           </button>
         )}
       </div>

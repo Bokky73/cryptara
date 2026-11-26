@@ -1559,7 +1559,16 @@ export type WatchlistImportDryRunRowResult = {
   status: "valid" | "duplicate" | "collision" | "invalid";
   errors: string[];
   canonicalIdentityKey?: string;
+  /** Spelling-independent asset identity used to detect duplicates. */
+  assetKey?: string;
+  /** What happened to the row; set once an import is applied. */
+  outcome?: "imported" | "updated" | "skipped";
 };
+
+export type WatchlistImportSource = WatchlistEntryInput["source"];
+
+/** How a row that repeats an existing asset is handled. */
+export type WatchlistImportStrategy = "skip" | "update";
 
 export type WatchlistImportDryRunResult = {
   validCount: number;
@@ -1580,7 +1589,37 @@ export type PortfolioStressDelta = {
   riskScoreDelta: number;
 };
 
+export type StressPriceStatus = "priced" | "missing";
+/** "estimated": only a modelled liquidity score exists, no measured depth. */
+export type StressLiquidityStatus = "known" | "estimated" | "missing";
+
+export type StressAssetImpact = {
+  key: string;
+  symbol: string;
+  chain: string | null;
+  tokenClass: string;
+  riskScore: number;
+  priceStatus: StressPriceStatus;
+  liquidityStatus: StressLiquidityStatus;
+  /** Null values mean "unknown"; they are never a substitute for zero. */
+  baseValueUsd: number | null;
+  stressedValueUsd: number | null;
+  deltaUsd: number | null;
+  deltaPercent: number | null;
+  baseAllocationPercent: number | null;
+  stressedAllocationPercent: number | null;
+};
+
+export type StressMissingInput = {
+  key: string;
+  symbol: string;
+  input: "price" | "liquidity";
+  detail: string;
+};
+
 export type PortfolioStressResult = {
+  assetImpacts: StressAssetImpact[];
+  missingInputs: StressMissingInput[];
   scenarioId: string;
   scenarioVersion: number;
   baseSnapshot: PortfolioSnapshot;

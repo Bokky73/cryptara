@@ -26,9 +26,14 @@ The system is composed of the following pieces:
     *   Calculates the new total value and computes the deltas between the original and stressed portfolios.
 
 4.  **UI Component (`PortfolioStressPanel.tsx`)**:
-    *   Provides an accessible interface for selecting a scenario and running the test.
-    *   Displays the before/after values and the absolute/percentage delta with visual indicators (colors, icons).
-    *   Lists the specific assumptions that were applied during the test.
+    *   Recalculates locally with the same `applyStressScenario` function as scenario controls change; no request is made.
+    *   Offers the built-in scenarios plus bounded sliders for market drawdown (-10% to -80%, stablecoins exempt), a uniform liquidity haircut (0–90% of exit value) and a depeg of one holding or all stablecoins (relative to the current price).
+    *   Shows a before/after bar chart, and an allocation table flagged against the wallet's `user_rules` (`maxMemeExposurePercent`, `minStableReservePercent`, `maxRiskScore`). If rules cannot be loaded, thresholds are reported as not evaluated.
+    *   Saves up to 10 presets in local storage (removed by wallet data erasure) and exports a Markdown summary.
+
+## Missing inputs
+
+Holdings without a usable price are excluded from both totals and reported with a `null` impact, never zero. Stellar assets with unknown liquidity are listed in `missingInputs`. EVM holdings only carry a modelled liquidity score, so they are marked `estimated`. Token risk scores are not re-modelled under stress.
 
 ## Accessibility
 
@@ -41,6 +46,5 @@ The `PortfolioStressPanel` is designed with accessibility in mind:
 
 ## Future Enhancements
 
-*   Custom scenario builder for users.
 *   Integration with historical price data for backtesting.
 *   Agent-driven recommendations based on stress test vulnerabilities (e.g., "Your portfolio is highly sensitive to a stablecoin depeg, consider diversifying stablecoins").

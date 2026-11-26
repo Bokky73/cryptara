@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useInsightParam } from "@/components/research/shared/useInsightQueryParams";
+import { useInsightPageStatus } from "@/components/research/shared/insightPageStatus";
+import { useRef, useState, type FormEvent } from "react";
 
 export function WashVolumeWorkspace() {
-  const [pair, setPair] = useState("");
+  const [pair, setPair] = useInsightParam("asset", "");
   const [report, setReport] = useState<{
     coverage: string;
     grossVolume: number;
@@ -12,21 +14,41 @@ export function WashVolumeWorkspace() {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [capturedAt, setCapturedAt] = useState<string>();
+  const generation = useRef(0);
+  useInsightPageStatus({
+    capturedAt,
+    empty: report && report.grossVolume === 0
+      ? { title: "No volume observed", detail: "No trades were available for this pair, so no filter could be evaluated." }
+      : undefined,
+  });
+
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
-    const response = await fetch("/api/insights/wash-volume", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ pair, trades: [] }),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
+    const request = ++generation.current;
+    try {
+      const response = await fetch("/api/insights/wash-volume", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pair, trades: [] }),
+      });
+      const payload = await response.json();
+      if (request !== generation.current) return;
+      if (!response.ok) {
+        setReport(null);
+        setCapturedAt(undefined);
+        setError(payload.message ?? "The pair could not be analyzed.");
+        return;
+      }
+      setError(null);
+      setReport(payload.report);
+      setCapturedAt(new Date().toISOString());
+    } catch {
+      if (request !== generation.current) return;
       setReport(null);
-      setError(payload.message ?? "The pair could not be analyzed.");
-      return;
+      setCapturedAt(undefined);
+      setError("The pair could not be analyzed. Try again.");
     }
-    setError(null);
-    setReport(payload.report);
   }
 
   return (
