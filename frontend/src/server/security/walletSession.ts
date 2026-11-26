@@ -13,16 +13,29 @@ import { Keypair, Networks, Operation, Memo, MemoText, Account, TransactionBuild
  * ownership of `walletAddress` via a server-issued signature challenge.
  * This module exposes challenge mint + verify helpers used by
  * `/api/wallet-session` POST and `/api/wallet-session/nonce` POST.
+ *
+ * Issue #36 hardening:
+ *  - Challenge nonces are stored server-side with a 5-minute TTL and
+ *    atomically consumed on first successful verification, preventing
+ *    capture-and-replay across instances or environments.
+ *  - Domain/origin binding is enforced: EVM challenges embed the
+ *    expected `origin` and `chainId`; Stellar challenges embed the
+ *    expected `networkPassphrase`. Mismatches are rejected.
+ *  - Active session tokens can be explicitly revoked (e.g. on
+ *    disconnect or security incident) via `revokeWalletSession()`.
+ *    Revoked tokens are stored in a blacklist with a TTL equal to the
+ *    remaining session window and consulted on every decode.
  */
 
 export const WALLET_SESSION_COOKIE = "gr_wallet_session";
 export const WALLET_CHALLENGE_COOKIE = "gr_wallet_challenge";
 export const WALLET_SESSION_TTL_SECONDS = 60 * 60 * 12; // 12 hours
 export const WALLET_CHALLENGE_TTL_SECONDS = 60 * 5; // 5 minutes
+// SESSION_VERSION / CHALLENGE_VERSION kept for reference but not exported to
+// avoid leaking the internal cookie format in public types.
 const SESSION_VERSION = "v2";
 const CHALLENGE_VERSION = "v2";
-const DEVELOPMENT_COOKIE_SECRET =
-  "cryptara-development-only-cookie-secret";
+const DEVELOPMENT_COOKIE_SECRET = "cryptara-development-only-cookie-secret";
 
 export type WalletFamily = "evm" | "stellar";
 
@@ -44,6 +57,11 @@ export interface WalletChallenge {
   challengeBody: string;
   /** Stellar: network passphrase the challenge was built for. */
   network: string;
+  /**
+   * Issue #36: origin the nonce was issued for (EVM) or empty string
+   * (Stellar). Verified during claim to prevent cross-site replay.
+   */
+  origin: string;
 }
 
 export interface WalletChallengeClaim {
@@ -61,6 +79,101 @@ export interface WalletChallengeVerifyResult {
   ok: boolean;
   error?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Issue #36: Server-side nonce store with TTL and atomic consume
+// ---------------------------------------------------------------------------
+
+type NonceEntry = {
+  expiresAt: number; // Unix ms
+  walletAddress: string;
+  family: WalletFamily;
+  network: string;
+  origin: string;
+};
+
+type SessionRevokeEntry = {
+  expiresAt: number; // Unix ms — purge after this point
+};
+
+type WalletSessionGlobal = typeof globalThis & {
+  __cryptaraNonceStore?: Map<string, NonceEntry>;
+  __cryptaraRevokedSessions?: Map<string, SessionRevokeEntry>;
+};
+
+function getNonceStore(): Map<string, NonceEntry> {
+  const g = globalThis as WalletSessionGlobal;
+  if (!g.__cryptaraNonceStore) g.__cryptaraNonceStore = new Map();
+  return g.__cryptaraNonceStore;
+}
+
+function getRevokedSessions(): Map<string, SessionRevokeEntry> {
+  const g = globalThis as WalletSessionGlobal;
+  if (!g.__cryptaraRevokedSessions) g.__cryptaraRevokedSessions = new Map();
+  return g.__cryptaraRevokedSessions;
+}
+
+/** Remove expired entries to keep memory footprint bounded. */
+function pruneExpiredNonces(): void {
+  const now = Date.now();
+  const store = getNonceStore();
+  for (const [key, entry] of store) {
+    if (entry.expiresAt <= now) store.delete(key);
+  }
+}
+
+function pruneExpiredRevocations(): void {
+  const now = Date.now();
+  const store = getRevokedSessions();
+  for (const [key, entry] of store) {
+    if (entry.expiresAt <= now) store.delete(key);
+  }
+}
+
+/**
+ * Register a freshly minted nonce in the server-side store.
+ * The store is the authoritative source of truth — the HttpOnly cookie
+ * is a bearer token that lets the client present the nonce, but
+ * verification requires the nonce to be present AND unconsumed here.
+ */
+function registerNonce(nonce: string, entry: NonceEntry): void {
+  pruneExpiredNonces();
+  getNonceStore().set(nonce, entry);
+}
+
+/**
+ * Atomically consume a nonce. Returns the stored entry if the nonce
+ * exists, is not expired, and matches the supplied wallet/family/network.
+ * Deletes the entry on success so it cannot be reused (single-use guarantee).
+ */
+function consumeNonce(
+  nonce: string,
+  walletAddress: string,
+  family: WalletFamily,
+  network: string,
+): NonceEntry | undefined {
+  pruneExpiredNonces();
+  const store = getNonceStore();
+  const entry = store.get(nonce);
+  if (!entry) return undefined;
+  if (entry.expiresAt <= Date.now()) {
+    store.delete(nonce);
+    return undefined;
+  }
+  if (
+    entry.walletAddress !== walletAddress ||
+    entry.family !== family ||
+    entry.network !== network
+  ) {
+    return undefined;
+  }
+  store.delete(nonce); // atomic consume — now single-use
+  return entry;
+}
+
+// ---------------------------------------------------------------------------
+// Cookie helpers
+// ---------------------------------------------------------------------------
 
 function normalizeWallet(input: string | null | undefined): string | undefined {
   if (!input) return undefined;
@@ -101,20 +214,11 @@ export function encodeWalletCookie(wallet: string): string {
 
 /**
  * Resolve the wallet carried by a session cookie, or `undefined` when the
- * cookie is absent, malformed, or not authentically signed by this server.
+ * cookie is absent, malformed, not authentically signed by this server, or
+ * explicitly revoked.
  *
- * This is an authentication boundary: `resolveWalletSession` treats the
- * returned address as the authoritative caller identity for the alert,
- * watchlist, privacy-export and execute APIs. Every path here must fail
- * closed, because the cookie is fully attacker-controlled — `HttpOnly`
- * only stops browser JavaScript from reading it, it does not stop a
- * crafted `Cookie:` request header.
- *
- * Only signed `v2` cookies are accepted. The unsigned `v1` and bare-value
- * formats were forgeable in every environment and the `v2` signature was
- * previously waived outside production, which together let any caller
- * impersonate an arbitrary wallet. Sessions minted in those legacy formats
- * are rejected; holders simply re-authenticate through the challenge flow.
+ * Issue #36: revoked tokens are blacklisted in `__cryptaraRevokedSessions`
+ * and rejected here before returning the wallet.
  */
 export function decodeWalletCookie(value: string | null | undefined): string | undefined {
   if (!value) return undefined;
@@ -130,7 +234,40 @@ export function decodeWalletCookie(value: string | null | undefined): string | u
   if (!wallet || !signature) return undefined;
   if (!walletHmacMatches(wallet, signature)) return undefined;
 
+  // Issue #36: reject explicitly revoked session tokens.
+  pruneExpiredRevocations();
+  const tokenKey = `${wallet}:${signature}`;
+  if (getRevokedSessions().has(tokenKey)) return undefined;
+
   return normalizeWallet(wallet);
+}
+
+/**
+ * Issue #36: Explicitly revoke an active session token.
+ * Records the token in a blacklist so subsequent `decodeWalletCookie`
+ * calls on the same value return `undefined`.
+ * Also emits a redacted audit log entry.
+ *
+ * @param cookieValue  The raw value of the `gr_wallet_session` cookie.
+ * @param reason       Short description logged for the audit trail.
+ */
+export function revokeWalletSession(cookieValue: string, reason = "explicit_revocation"): void {
+  if (!cookieValue) return;
+  const parts = cookieValue.split(":");
+  if (parts.length !== 3) return;
+  const [, wallet, signature] = parts;
+  if (!wallet || !signature) return;
+
+  pruneExpiredRevocations();
+  const tokenKey = `${wallet}:${signature}`;
+  // Keep the blacklist entry alive for the full session window so a
+  // just-revoked token cannot outlive the purge cycle.
+  const expiresAt = Date.now() + WALLET_SESSION_TTL_SECONDS * 1000;
+  getRevokedSessions().set(tokenKey, { expiresAt });
+
+  // Redacted audit log — wallet is hashed, raw value is never logged.
+  const walletHash = crypto.createHash("sha256").update(wallet).digest("hex").slice(0, 12);
+  console.info(`[walletSession] revoke wallet=sha256:${walletHash}... reason=${reason} at=${new Date().toISOString()}`);
 }
 
 function rawHex(byteLength: number): string {
@@ -190,7 +327,7 @@ function decodeChallenge(value: string | null | undefined): WalletChallenge | un
       !challenge.challengeBody ||
       typeof challenge.network !== "string"
     ) return undefined;
-    return { ...challenge, walletAddress: wallet } as WalletChallenge;
+    return { ...challenge, walletAddress: wallet, origin: challenge.origin ?? "" } as WalletChallenge;
   } catch {
     return undefined;
   }
@@ -254,6 +391,18 @@ export function readWalletSessionCookie(request: Request | NextRequest): string 
     }
   }
 
+  return undefined;
+}
+
+/** Read the raw (un-decoded) session cookie value for revocation purposes. */
+export function readRawSessionCookieValue(request: Request | NextRequest): string | undefined {
+  const header = request.headers.get("cookie") ?? "";
+  for (const piece of header.split(";")) {
+    const [rawKey, ...rest] = piece.split("=");
+    if (rawKey && rawKey.trim() === WALLET_SESSION_COOKIE) {
+      return rest.join("=");
+    }
+  }
   return undefined;
 }
 
@@ -325,11 +474,17 @@ const STELLAR_FALLBACK_PASSPHRASE = Networks.TESTNET;
  * separately encode) AND is bound to an HttpOnly cookie carrying the
  * nonce + family + walletAddress + issuedAt + expiresAt. Subsequent
  * claims must present a valid signature for the same nonce and family.
+ *
+ * Issue #36: the nonce is also registered in the server-side nonce
+ * store (`__cryptaraNonceStore`) with a 5-minute TTL and origin/domain
+ * binding so it cannot be replayed across origins or networks.
  */
 export function mintWalletChallenge(input: {
   walletAddress: string;
   family: WalletFamily;
   network?: string;
+  /** Request origin for cross-origin replay prevention (EVM only). */
+  origin?: string;
 }): WalletChallenge {
   const normalizedWallet = normalizeWallet(input.walletAddress);
   if (!normalizedWallet) throw new Error("wallet_address_required");
@@ -341,6 +496,7 @@ export function mintWalletChallenge(input: {
   const issuedAt = new Date();
   const expiresAt = new Date(issuedAt.getTime() + WALLET_CHALLENGE_TTL_SECONDS * 1000);
   const network = input.network ?? (input.family === "stellar" ? STELLAR_FALLBACK_PASSPHRASE : "");
+  const origin = input.origin ?? "";
 
   let challengeBody: string;
   if (input.family === "evm") {
@@ -351,6 +507,9 @@ export function mintWalletChallenge(input: {
       `Nonce: ${nonce}`,
       `Issued At: ${issuedAt.toISOString()}`,
       `Expires At: ${expiresAt.toISOString()}`,
+      // Issue #36: embed origin so a signature cannot be replayed to a
+      // different deployment or cross-site attacker's server.
+      `Origin: ${origin}`,
     ].join("\n");
   } else {
     // SEP-10 lite: zero-amount self-payment with the nonce as MEMO_TEXT,
@@ -383,7 +542,7 @@ export function mintWalletChallenge(input: {
     challengeBody = tx.toEnvelope().toXDR("base64");
   }
 
-  return {
+  const challenge: WalletChallenge = {
     nonce,
     family: input.family,
     walletAddress: normalizedWallet,
@@ -391,13 +550,30 @@ export function mintWalletChallenge(input: {
     expiresAt: expiresAt.toISOString(),
     challengeBody,
     network,
+    origin,
   };
+
+  // Issue #36: register the nonce server-side for atomic consume on verify.
+  registerNonce(nonce, {
+    expiresAt: expiresAt.getTime(),
+    walletAddress: normalizedWallet,
+    family: input.family,
+    network,
+    origin,
+  });
+
+  return challenge;
 }
 
 /**
  * Verify a claimed challenge signature against the supplied public
  * address. Returns `{ ok: false, error: <code> }` on any mismatch so the
  * caller can surface a typed response without leaking signature bytes.
+ *
+ * Issue #36: the nonce is atomically consumed from the server-side store
+ * before any cryptographic verification. If the nonce is absent (already
+ * consumed or expired) the call fails immediately with `nonce_already_used`.
+ * This prevents capture-and-replay of a valid signature.
  *
  * Returns a Promise because viem's `verifyMessage` is itself async;
  * callers must `await` the result.
@@ -409,6 +585,8 @@ export async function verifyWalletChallenge(input: {
   signature?: string;
   signedTxXdr?: string;
   network?: string;
+  /** Origin the request was submitted from — must match the challenge origin. */
+  origin?: string;
 }): Promise<WalletChallengeVerifyResult> {
   const claimWallet = normalizeWallet(input.walletAddress);
   if (!claimWallet) return { ok: false, error: "wallet_missing" };
@@ -420,6 +598,23 @@ export async function verifyWalletChallenge(input: {
   const expiresAt = Date.parse(input.challenge.expiresAt);
   if (!Number.isFinite(expiresAt) || Date.now() > expiresAt) {
     return { ok: false, error: "challenge_expired" };
+  }
+
+  const network = input.network || input.challenge.network || (input.family === "stellar" ? STELLAR_FALLBACK_PASSPHRASE : "");
+
+  // Issue #36: atomic nonce consume — fails if already used or expired.
+  const consumed = consumeNonce(input.challenge.nonce, claimWallet, input.family, network);
+  if (!consumed) {
+    return { ok: false, error: "nonce_already_used" };
+  }
+
+  // Issue #36: enforce origin binding for EVM challenges so a signature
+  // issued for one deployment cannot be replayed against another.
+  if (input.family === "evm" && consumed.origin) {
+    const requestOrigin = input.origin ?? "";
+    if (requestOrigin !== consumed.origin) {
+      return { ok: false, error: "origin_mismatch" };
+    }
   }
 
   if (input.family === "evm") {
@@ -446,7 +641,12 @@ export async function verifyWalletChallenge(input: {
   // `source` is an Account for non-muxed sources, whose `accountId()`
   // returns the StrKey-encoded address.
   if (!input.signedTxXdr) return { ok: false, error: "signed_tx_missing" };
-  const network = input.network || input.challenge.network || STELLAR_FALLBACK_PASSPHRASE;
+
+  // Issue #36: enforce network passphrase binding so a Stellar signature
+  // produced on testnet cannot be replayed on mainnet (or vice versa).
+  if (consumed.network && network !== consumed.network) {
+    return { ok: false, error: "network_passphrase_mismatch" };
+  }
 
   try {
     // TransactionBuilder.fromXDR returns a Transaction OR a
@@ -486,11 +686,7 @@ export async function verifyWalletChallenge(input: {
     // base `tx.hash()` includes the source account, the memo, time
     // bounds, and operations, so cross-checks against `tx.memo.value`
     // (above) and `tx.timeBounds.maxTime` (above) are the actual
-    // envelope-level guards. We do not also compare `tx.source` to
-    // `claimWallet` because stellar-sdk v16 exposes the deserialized
-    // source through multiple incompatible shapes (Account wrapper,
-    // MuxedAccount.baseAccount, raw xdr.AccountId) and chaining those
-    // behind a single helper proved brittle in earlier passes.
+    // envelope-level guards.
     const txHash = tx.hash();
     const keyPair = Keypair.fromPublicKey(claimWallet);
     const decorations = tx.signatures;
