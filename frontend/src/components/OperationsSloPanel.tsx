@@ -1,4 +1,3 @@
-// frontend/src/components/OperationsSloPanel.tsx
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -12,9 +11,10 @@ import {
   Flame,
   Radio,
   Server,
-  ShieldAlert,
   Zap,
 } from "lucide-react";
+import { useI18n } from "@/i18n/I18nProvider";
+import type { MessageKey } from "@/i18n/messages";
 
 interface SloItem {
   id: string;
@@ -44,6 +44,12 @@ interface ProviderHealthItem {
   runbookUrl: string;
 }
 
+interface HealthResponse {
+  slos?: SloItem[];
+  incidentTimeline?: IncidentItem[];
+  providerMatrix?: ProviderHealthItem[];
+}
+
 const DEFAULT_SLOS: SloItem[] = [
   { id: "slo-scan-completion", name: "Scan Completion", target: 99.0, sli: 99.4, burnRateShort: 0.6, burnRateLong: 0.8 },
   { id: "slo-quote-availability", name: "Quote Availability", target: 99.5, sli: 99.7, burnRateShort: 0.4, burnRateLong: 0.5 },
@@ -61,8 +67,21 @@ const DEFAULT_PROVIDERS: ProviderHealthItem[] = [
   { name: "Storage / Postgres", circuitState: "Closed", p95LatencyMs: 45, uptimePercent: 100.0, runbookUrl: "/docs/RUNBOOKS.md#rb-005-supabase--storage-failure" },
 ];
 
+const circuitStateKeys: Record<ProviderHealthItem["circuitState"], MessageKey> = {
+  Closed: "circuitClosed",
+  "Half-Open": "circuitHalfOpen",
+  Open: "circuitOpen",
+};
+
+const incidentStatusKeys: Record<NonNullable<IncidentItem["status"]>, MessageKey> = {
+  open: "statusOpen",
+  investigating: "statusInvestigating",
+  recovered: "statusRecovered",
+};
+
 export function OperationsSloPanel() {
-  const [data, setData] = useState<any>(null);
+  const { t, format } = useI18n();
+  const [data, setData] = useState<HealthResponse | null>(null);
 
   useEffect(() => {
     fetch("/api/health")
@@ -76,16 +95,15 @@ export function OperationsSloPanel() {
   const providers: ProviderHealthItem[] = data?.providerMatrix ?? DEFAULT_PROVIDERS;
 
   return (
-    <div className="mt-8 space-y-8" aria-label="Operations SLO Dashboard">
-      {/* 1. SLO Error Budget Burn Gauges */}
+    <div className="mt-8 space-y-8" aria-label={t("opsAria")}>
       <section className="rounded-2xl border border-white/10 bg-white/6 p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <Activity className="h-5 w-5 text-[#d9a441]" />
-            <h2 className="text-base font-semibold text-white">Core SLO Error Budgets & Burn Rates</h2>
+            <h2 className="text-base font-semibold text-white">{t("opsTitle")}</h2>
           </div>
           <span className="rounded-full border border-white/10 bg-black/30 px-3 py-1 text-xs text-white/60">
-            Multi-Window 30d Rolling Horizon
+            {t("opsHorizon")}
           </span>
         </div>
 
@@ -106,35 +124,34 @@ export function OperationsSloPanel() {
                   <h3 className="text-sm font-medium text-white">{slo.name}</h3>
                   {slo.insufficientData ? (
                     <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-300">
-                      <Clock className="h-3 w-3" /> Samples Pending
+                      <Clock className="h-3 w-3" /> {t("samplesPending")}
                     </span>
                   ) : isCritical ? (
                     <span className="inline-flex items-center gap-1 rounded bg-red-500/15 px-2 py-0.5 text-[11px] font-bold text-red-300">
-                      <Flame className="h-3 w-3" /> Critical Burn
+                      <Flame className="h-3 w-3" /> {t("criticalBurn")}
                     </span>
                   ) : isWarning ? (
                     <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-300">
-                      <AlertTriangle className="h-3 w-3" /> Elevated Burn
+                      <AlertTriangle className="h-3 w-3" /> {t("elevatedBurn")}
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-300">
-                      <CheckCircle2 className="h-3 w-3" /> Normal
+                      <CheckCircle2 className="h-3 w-3" /> {t("normal")}
                     </span>
                   )}
                 </div>
 
                 {slo.insufficientData ? (
-                  <p className="mt-4 text-xs text-white/50">Collecting min 100 requests for statistical significance.</p>
+                  <p className="mt-4 text-xs text-white/50">{t("collectingSamples")}</p>
                 ) : (
                   <>
                     <div className="mt-3 flex items-baseline justify-between text-xs">
-                      <span className="text-white/60">SLI / Target</span>
+                      <span className="text-white/60">{t("sliTarget")}</span>
                       <span className="font-semibold text-white">
-                        {slo.sli?.toFixed(2)}% <span className="font-normal text-white/40">/ {slo.target}%</span>
+                        {format.number(currentSli)}% <span className="font-normal text-white/40">/ {format.number(target)}%</span>
                       </span>
                     </div>
 
-                    {/* Progress Bar Gauge */}
                     <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/10" role="progressbar" aria-valuenow={remainingBudgetPercent} aria-valuemin={0} aria-valuemax={100}>
                       <div
                         className={`h-full transition-all duration-500 ${
@@ -148,22 +165,21 @@ export function OperationsSloPanel() {
                       />
                     </div>
                     <div className="mt-1 flex items-center justify-between text-[10px] text-white/40">
-                      <span>Error Budget: {remainingBudgetPercent.toFixed(0)}% rem.</span>
-                      <span>Target: {slo.target}%</span>
+                      <span>{t("errorBudgetRemaining", { value: format.number(Math.round(remainingBudgetPercent)) })}</span>
+                      <span>{t("targetLabel", { value: format.number(target) })}</span>
                     </div>
 
-                    {/* Short & Long Burn spark metrics */}
                     <div className="mt-3 grid grid-cols-2 gap-2 border-t border-white/5 pt-2 text-[11px]">
                       <div>
-                        <span className="text-white/40">1h Burn: </span>
+                        <span className="text-white/40">{t("burn1h")}</span>
                         <span className={slo.burnRateShort && slo.burnRateShort >= 2 ? "font-bold text-amber-300" : "text-white/80"}>
-                          {slo.burnRateShort?.toFixed(2)}x
+                          {format.number(slo.burnRateShort ?? 0)}x
                         </span>
                       </div>
                       <div>
-                        <span className="text-white/40">6h Burn: </span>
+                        <span className="text-white/40">{t("burn6h")}</span>
                         <span className={slo.burnRateLong && slo.burnRateLong >= 2 ? "font-bold text-amber-300" : "text-white/80"}>
-                          {slo.burnRateLong?.toFixed(2)}x
+                          {format.number(slo.burnRateLong ?? 0)}x
                         </span>
                       </div>
                     </div>
@@ -175,13 +191,12 @@ export function OperationsSloPanel() {
         </div>
       </section>
 
-      {/* 2. Provider Health & Circuit-Breaker Matrix */}
       <section className="rounded-2xl border border-white/10 bg-white/6 p-6">
         <div className="flex items-center gap-2.5">
           <Server className="h-5 w-5 text-[#d9a441]" />
           <div>
-            <h2 className="text-base font-semibold text-white">Upstream Provider Resilience Matrix</h2>
-            <p className="mt-0.5 text-xs text-white/50">Circuit breaker state, p95 latency thresholds, and failure procedures</p>
+            <h2 className="text-base font-semibold text-white">{t("providerTitle")}</h2>
+            <p className="mt-0.5 text-xs text-white/50">{t("providerDetail")}</p>
           </div>
         </div>
 
@@ -189,11 +204,11 @@ export function OperationsSloPanel() {
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-white/10 text-white/40">
-                <th className="pb-3 font-medium">Provider Service</th>
-                <th className="pb-3 font-medium">Circuit State</th>
-                <th className="pb-3 font-medium">p95 Latency</th>
-                <th className="pb-3 font-medium">30d Uptime</th>
-                <th className="pb-3 font-medium">Triage Runbook</th>
+                <th className="pb-3 font-medium">{t("providerService")}</th>
+                <th className="pb-3 font-medium">{t("circuitState")}</th>
+                <th className="pb-3 font-medium">{t("p95Latency")}</th>
+                <th className="pb-3 font-medium">{t("uptime30d")}</th>
+                <th className="pb-3 font-medium">{t("triageRunbook")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -221,21 +236,21 @@ export function OperationsSloPanel() {
                         ) : (
                           <CheckCircle2 className="h-3 w-3 text-emerald-400" />
                         )}
-                        {p.circuitState}
+                        {t(circuitStateKeys[p.circuitState])}
                       </span>
                     </td>
                     <td className="py-3 text-white/70">
                       <span className={p.p95LatencyMs > 400 ? "text-amber-300 font-semibold" : "text-white"}>
-                        {p.p95LatencyMs}ms
+                        {format.number(p.p95LatencyMs)}ms
                       </span>
                     </td>
-                    <td className="py-3 text-white/70">{p.uptimePercent.toFixed(1)}%</td>
+                    <td className="py-3 text-white/70">{format.number(p.uptimePercent)}%</td>
                     <td className="py-3">
                       <Link
                         href={p.runbookUrl}
                         className="inline-flex items-center gap-1 text-[#f2c86d] underline-offset-2 hover:underline"
                       >
-                        Runbook <ExternalLink className="h-3 w-3" />
+                        {t("runbook")} <ExternalLink className="h-3 w-3" />
                       </Link>
                     </td>
                   </tr>
@@ -246,20 +261,19 @@ export function OperationsSloPanel() {
         </div>
       </section>
 
-      {/* 3. Deduplicated Incident Timeline with Runbook Deep-Links */}
       <section className="rounded-2xl border border-white/10 bg-white/6 p-6">
         <div className="flex items-center gap-2.5">
           <AlertTriangle className="h-5 w-5 text-[#d9a441]" />
           <div>
-            <h2 className="text-base font-semibold text-white">Incident Timeline & Active Triage</h2>
-            <p className="mt-0.5 text-xs text-white/50">Chronological incident lifecycles with actionable procedure deep-links</p>
+            <h2 className="text-base font-semibold text-white">{t("incidentTitle")}</h2>
+            <p className="mt-0.5 text-xs text-white/50">{t("incidentDetail")}</p>
           </div>
         </div>
 
         <div className="mt-5 space-y-3">
           {incidentTimeline.length === 0 ? (
             <div className="rounded-xl border border-dashed border-white/10 bg-black/20 p-6 text-center text-sm text-white/50">
-              No open or active incidents. All telemetry operating within safe thresholds.
+              {t("noIncidents")}
             </div>
           ) : (
             incidentTimeline.map((ev) => (
@@ -271,15 +285,15 @@ export function OperationsSloPanel() {
                     </span>
                     <span className="text-sm font-medium text-white">{ev.description}</span>
                   </div>
-                  <span className="text-xs text-white/40">{new Date(ev.timestamp).toLocaleString()}</span>
+                  <span className="text-xs text-white/40">{format.dateTime(ev.timestamp)}</span>
                 </div>
                 <div className="mt-3 flex items-center justify-between border-t border-white/5 pt-2 text-xs">
-                  <span className="text-white/50">Status: <strong className="text-white capitalize">{ev.status ?? "open"}</strong></span>
+                  <span className="text-white/50">{t("status")}: <strong className="text-white">{t(incidentStatusKeys[ev.status ?? "open"])}</strong></span>
                   <Link
                     href={ev.runbookUrl ?? "/docs/RUNBOOKS.md"}
                     className="inline-flex items-center gap-1 text-[#f2c86d] hover:underline"
                   >
-                    Operator Runbook Procedure →
+                    {t("runbookProcedure")}
                   </Link>
                 </div>
               </div>

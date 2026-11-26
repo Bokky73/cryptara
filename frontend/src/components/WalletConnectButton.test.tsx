@@ -1,13 +1,20 @@
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
+
+vi.mock("next/dynamic", async () => {
+  const { WalletSessionDialog } = await import("./wallet/WalletSessionDialog");
+  return { default: () => WalletSessionDialog };
+});
 
 const mocks = vi.hoisted(() => ({
   connect: vi.fn(async () => undefined),
   selectFamily: vi.fn(),
   openConnectModal: vi.fn(),
 }));
+
+vi.mock("@/components/NetworkMismatchNotice", () => ({ NetworkMismatchNotice: () => null }));
+vi.mock("@/components/WalletBadge", () => ({ WalletBadge: () => null }));
 
 vi.mock("@rainbow-me/rainbowkit", () => ({
   ConnectButton: {
@@ -54,22 +61,20 @@ describe("WalletConnectButton", () => {
   });
 
   it("is keyboard accessible and closes the selector with Escape", async () => {
-    const user = userEvent.setup();
     render(<WalletConnectButton />);
-    await user.click(screen.getByRole("button", { name: "Connect Wallet" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect Wallet" }));
 
-    expect(screen.getByRole("dialog", { name: "Wallet session" })).toBeTruthy();
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close wallet selector" }));
+    await screen.findByRole("dialog", { name: "Wallet session" });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close wallet selector" })));
 
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog", { name: "Wallet session" })).toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Wallet session" })).toBeNull());
   });
 
   it("routes the mobile-compatible flow to WalletConnect", async () => {
-    const user = userEvent.setup();
     render(<WalletConnectButton />);
-    await user.click(screen.getByRole("button", { name: "Connect Wallet" }));
-    await user.click(screen.getByRole("button", { name: /Mobile Stellar wallet/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect Wallet" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Mobile Stellar wallet/ }));
 
     expect(mocks.selectFamily).toHaveBeenCalledWith("stellar");
     expect(mocks.connect).toHaveBeenCalledWith("wallet_connect");

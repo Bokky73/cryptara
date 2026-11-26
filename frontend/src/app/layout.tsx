@@ -3,6 +3,8 @@ import Script from "next/script";
 import "@rainbow-me/rainbowkit/styles.css";
 import "./globals.css";
 import { Web3Provider } from "@/providers/Web3Provider";
+import { I18nProvider } from "@/i18n/I18nProvider";
+import { requestLocale } from "@/i18n/server";
 import { WebVitalsReporter } from "@/components/WebVitalsReporter";
 import { OfflineInteractionGuard } from "@/components/OfflineInteractionGuard";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
@@ -26,25 +28,29 @@ export const metadata: Metadata = {
 
 const themeBootstrapScript = `(function(){try{var k=${JSON.stringify(THEME_STORAGE_KEY)};var t=localStorage.getItem(k);var allowed=["light","dark","system","high-contrast"];var theme=allowed.indexOf(t)>=0?t:"dark";document.documentElement.setAttribute("data-theme",theme);}catch(e){document.documentElement.setAttribute("data-theme","dark");}})();`;
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const { locale, timeZone } = await requestLocale();
+
   return (
-    <html lang="en" className="h-full antialiased" suppressHydrationWarning>
+    <html lang={locale} className="h-full antialiased" suppressHydrationWarning>
       <head>
         <Script id="theme-bootstrap" strategy="beforeInteractive">
           {themeBootstrapScript}
         </Script>
       </head>
       <body className="min-h-full bg-background text-foreground">
-        <WebVitalsReporter />
-        <ServiceWorkerRegister />
-        <OfflineInteractionGuard />
-        <ThemeProvider>
-          <Web3Provider>{children}</Web3Provider>
-        </ThemeProvider>
+        <I18nProvider locale={locale} timeZone={timeZone}>
+          <WebVitalsReporter />
+          <ServiceWorkerRegister />
+          <OfflineInteractionGuard />
+          <ThemeProvider>
+            <Web3Provider>{children}</Web3Provider>
+          </ThemeProvider>
+        </I18nProvider>
       </body>
     </html>
   );
