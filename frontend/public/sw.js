@@ -11,9 +11,21 @@ const APP_SHELL_URLS = [
   "/icons/icon-512.png",
 ];
 
+const NETWORK_ONLY_API_PREFIXES = [
+  "/api/execute",
+  "/api/auto-mode",
+  "/api/wallet",
+  "/api/session",
+  "/api/x402",
+];
+
+function isNetworkOnlyApi(pathname) {
+  return pathname.startsWith("/api/") || NETWORK_ONLY_API_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
 function isNeverCached(request) {
   const url = new URL(request.url);
-  return url.pathname.startsWith("/api/") || request.method !== "GET";
+  return isNetworkOnlyApi(url.pathname) || url.pathname.startsWith("/api/") || request.method !== "GET";
 }
 
 self.addEventListener("install", (event) => {
@@ -34,6 +46,11 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const { request } = event;
+  const url = new URL(request.url);
+  if (isNetworkOnlyApi(url.pathname)) {
+    event.respondWith(fetch(request, { cache: "no-store" }));
+    return;
+  }
   if (isNeverCached(request)) return;
 
   if (request.mode === "navigate") {

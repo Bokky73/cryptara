@@ -17,6 +17,11 @@ import {
   unavailable,
 } from "./fixtures";
 
+// The page renders AppShell, whose wallet providers are out of scope here.
+vi.mock("@/components/AppShell", () => ({
+  AppShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
+}));
+
 const fixtures = [concentrated, poolHeavy, partial, unavailable];
 
 function installFetch() {

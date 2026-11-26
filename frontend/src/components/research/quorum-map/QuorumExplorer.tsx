@@ -1,5 +1,6 @@
 "use client";
 
+import { useInsightParam } from "@/components/research/shared/useInsightQueryParams";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { QuorumReport } from "@/server/research/quorum-map/schema";
 import { CoverageNotice } from "./CoverageNotice";
@@ -12,7 +13,7 @@ import { useWorkbenchState } from "./useWorkbenchState";
 type Network = "stellar-testnet" | "stellar-pubnet";
 
 export function QuorumExplorer({ initialNetwork = "stellar-testnet" }: { initialNetwork?: Network }) {
-  const [network, setNetwork] = useState<Network>(initialNetwork);
+  const [network, setNetwork] = useInsightParam<Network>("network", initialNetwork, ["stellar-testnet", "stellar-pubnet"]);
   const [selected, setSelected] = useState<string | null>(null);
   const networkRef = useRef(network);
   const { view, setView } = useWorkbenchState(network);

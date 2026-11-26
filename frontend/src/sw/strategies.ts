@@ -12,9 +12,25 @@ export const APP_SHELL_URLS = [
   "/icons/icon-512.png",
 ];
 
+export const NETWORK_ONLY_API_PREFIXES = [
+  "/api/execute",
+  "/api/auto-mode",
+  "/api/wallet",
+  "/api/session",
+  "/api/x402",
+];
+
+export function isNetworkOnlyApi(pathname: string) {
+  return pathname.startsWith("/api/") || NETWORK_ONLY_API_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
 export function isNeverCached(request: Request) {
   const url = new URL(request.url);
-  return url.pathname.startsWith("/api/") || request.method !== "GET";
+  return isNetworkOnlyApi(url.pathname) || url.pathname.startsWith("/api/") || request.method !== "GET";
+}
+
+export async function networkOnly(request: Request) {
+  return fetch(request, { cache: "no-store" });
 }
 
 export async function cacheFirst(request: Request) {

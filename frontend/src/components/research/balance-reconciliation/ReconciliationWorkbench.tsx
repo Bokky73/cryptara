@@ -1,5 +1,6 @@
 "use client";
 
+import { useInsightParam } from "@/components/research/shared/useInsightQueryParams";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { BalanceReport } from "@/server/research/balance-reconciliation/schema";
 import { BalanceTimeline } from "./BalanceTimeline";
@@ -13,7 +14,7 @@ type Network = "stellar-testnet" | "stellar-pubnet";
 
 export function ReconciliationWorkbench({ initialNetwork = "stellar-testnet" }: { initialNetwork?: Network }) {
   const [account, setAccount] = useState("");
-  const [network, setNetwork] = useState<Network>(initialNetwork);
+  const [network, setNetwork] = useInsightParam<Network>("network", initialNetwork, ["stellar-testnet", "stellar-pubnet"]);
   const [fromLedger, setFromLedger] = useState("10");
   const [toLedger, setToLedger] = useState("20");
   const networkRef = useRef(network);

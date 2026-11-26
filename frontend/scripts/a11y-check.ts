@@ -67,8 +67,9 @@ function main() {
   );
   check(
     "AppShell nav landmarks have an accessible name",
-    /aria-label="Primary"/.test(appShell),
-    'Add `aria-label="Primary"` to both the desktop and mobile <nav> elements in AppShell.',
+    (/aria-label="Primary"/.test(appShell) || /aria-label=\{t\("navPrimary"\)\}/.test(appShell)) &&
+      (/aria-label="Primary, mobile"/.test(appShell) || /aria-label=\{t\("navPrimaryMobile"\)\}/.test(appShell)),
+    'Add localized accessible names to both the desktop and mobile <nav> elements in AppShell.',
   );
 
   check(

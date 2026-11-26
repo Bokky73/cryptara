@@ -8,52 +8,12 @@ import { WalletConnectButton } from "@/components/WalletConnectButton";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { CommandTrigger } from "@/components/commandPalette/CommandTrigger";
+import { LocaleSelect } from "@/i18n/LocaleSelect";
+import { useI18n } from "@/i18n/I18nProvider";
 import type { SessionAsset } from "@/lib/commandPalette/schema";
 
 type NavItem = { href: string; label: string };
 type NavPillar = { id: string; label: string; items: NavItem[] };
-
-const navPillars: NavPillar[] = [
-  {
-    id: "scan",
-    label: "Scan",
-    items: [
-      { href: "/scan", label: "Scan" },
-      { href: "/dashboard", label: "Dashboard" },
-    ],
-  },
-  {
-    id: "portfolio",
-    label: "Portfolio & Watchlist",
-    items: [
-      { href: "/watchlist", label: "Watchlist" },
-      { href: "/alerts", label: "Alerts" },
-    ],
-  },
-  {
-    id: "insights",
-    label: "Insights Hub",
-    items: [{ href: "/insights", label: "Insights Hub" }],
-  },
-  {
-    id: "strategy",
-    label: "Strategy & Execution",
-    items: [
-      { href: "/strategy", label: "Strategy" },
-      { href: "/rules", label: "Rules" },
-      { href: "/agents", label: "Agents" },
-    ],
-  },
-  {
-    id: "operations",
-    label: "Operations",
-    items: [
-      { href: "/history", label: "History" },
-      { href: "/operations", label: "Operations" },
-      { href: "/recovery", label: "Recovery" },
-    ],
-  },
-];
 
 const navLinkClassName =
   "rounded-full px-4 py-2 text-sm text-[var(--color-nav-fg)] transition hover:bg-[var(--color-nav-hover-bg)] hover:text-[var(--color-fg)] focus-visible:bg-white/8 focus-visible:text-white";
@@ -77,6 +37,48 @@ const headerControlClassName =
 
 export function AppShell({ children, commandAssets }: { children: ReactNode; commandAssets?: readonly SessionAsset[] }) {
   const pathname = usePathname();
+  const { t, locale } = useI18n();
+  const navPillars: NavPillar[] = [
+    {
+      id: "scan",
+      label: t("navScan"),
+      items: [
+        { href: "/scan", label: t("navScan") },
+        { href: "/dashboard", label: t("navDashboard") },
+      ],
+    },
+    {
+      id: "portfolio",
+      label: t("navPortfolioWatchlist"),
+      items: [
+        { href: "/watchlist", label: t("navWatchlist") },
+        { href: "/alerts", label: t("navAlerts") },
+      ],
+    },
+    {
+      id: "insights",
+      label: t("navInsightsHub"),
+      items: [{ href: "/insights", label: t("navInsightsHub") }],
+    },
+    {
+      id: "strategy",
+      label: t("navStrategyExecution"),
+      items: [
+        { href: "/strategy", label: t("navStrategy") },
+        { href: "/rules", label: t("navRules") },
+        { href: "/agents", label: t("navAgents") },
+      ],
+    },
+    {
+      id: "operations",
+      label: t("navOperations"),
+      items: [
+        { href: "/history", label: t("navHistory") },
+        { href: "/operations", label: t("navOperations") },
+        { href: "/recovery", label: t("navRecovery") },
+      ],
+    },
+  ];
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -118,10 +120,6 @@ export function AppShell({ children, commandAssets }: { children: ReactNode; com
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [drawerOpen, closeDrawer]);
 
-  useEffect(() => {
-    setDrawerOpen(false);
-  }, [pathname]);
-
   return (
     <div className="min-h-screen overflow-hidden bg-background text-foreground">
       {/*
@@ -133,14 +131,14 @@ export function AppShell({ children, commandAssets }: { children: ReactNode; com
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:inline-flex focus:min-h-[44px] focus:items-center focus:rounded-full focus:bg-[var(--color-fg)] focus:px-5 focus:py-2 focus:text-sm focus:font-semibold focus:text-[var(--color-bg)] focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-[var(--color-focus)]"
       >
-        Skip to main content
+        {t("skipToMainContent")}
       </a>
       <header className="sticky top-0 z-30 border-b border-[var(--color-border)] bg-[var(--color-header-bg)] backdrop-blur-2xl">
         <div className="mx-auto flex h-20 w-full max-w-7xl items-center justify-between gap-3 px-5 sm:px-8">
           <Link href="/" className="flex items-center gap-3">
             <Image
               src="/brand/logo.png"
-              alt="Cryptara guardian emblem"
+              alt={t("brandAlt")}
               width={44}
               height={44}
               className="rounded-2xl border border-[var(--color-border)]"
@@ -150,7 +148,7 @@ export function AppShell({ children, commandAssets }: { children: ReactNode; com
               <div className="text-sm font-semibold tracking-[0.18em] text-brand">CRYPTARA</div>
             </div>
           </Link>
-          <nav aria-label="Primary" className="hidden items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-glass-bg)] p-1 md:flex">
+          <nav aria-label={t("navPrimary")} className="hidden items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-glass-bg)] p-1 md:flex">
             {navPillars.map((pillar) => {
               const pillarActive = pillar.items.some((item) => isActive(pathname, item.href));
               return (
@@ -193,16 +191,14 @@ export function AppShell({ children, commandAssets }: { children: ReactNode; com
             <div className={headerControlClassName}>
               <WalletConnectButton />
             </div>
-            <CommandTrigger assets={commandAssets} />
-            <ThemeToggle />
-            <WalletConnectButton />
+            <LocaleSelect locale={locale} />
             <button
               ref={triggerRef}
               type="button"
               onClick={() => setDrawerOpen(true)}
               aria-expanded={drawerOpen}
               aria-controls="mobile-nav-drawer"
-              aria-label="Open navigation menu"
+              aria-label={t("navOpenMenu")}
               className="rounded-full border border-[var(--color-border)] p-2 text-[var(--color-nav-fg)] hover:bg-[var(--color-nav-hover-bg)] hover:text-[var(--color-fg)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)] md:hidden"
             >
               <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
@@ -224,7 +220,7 @@ export function AppShell({ children, commandAssets }: { children: ReactNode; com
             ref={drawerRef}
             role="dialog"
             aria-modal="true"
-            aria-label="Navigation menu"
+            aria-label={t("navMenu")}
             className="absolute right-0 top-0 flex h-full w-80 max-w-[85vw] flex-col gap-4 overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-header-bg)] p-5 shadow-2xl"
           >
             <div className="flex items-center justify-between">
@@ -232,7 +228,7 @@ export function AppShell({ children, commandAssets }: { children: ReactNode; com
               <button
                 type="button"
                 onClick={closeDrawer}
-                aria-label="Close navigation menu"
+                aria-label={t("navCloseMenu")}
                 className="rounded-full border border-[var(--color-border)] p-2 text-[var(--color-nav-fg)] hover:bg-[var(--color-nav-hover-bg)] hover:text-[var(--color-fg)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]"
               >
                 <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
@@ -240,7 +236,7 @@ export function AppShell({ children, commandAssets }: { children: ReactNode; com
                 </svg>
               </button>
             </div>
-            <nav aria-label="Primary, mobile" className="flex flex-col gap-4">
+            <nav aria-label={t("navPrimaryMobile")} className="flex flex-col gap-4">
               {navPillars.map((pillar) => (
                 <div key={pillar.id} className="flex flex-col gap-1">
                   <span className="px-3 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-nav-fg)]">
@@ -252,6 +248,7 @@ export function AppShell({ children, commandAssets }: { children: ReactNode; com
                       <Link
                         key={item.href}
                         href={item.href}
+                        onClick={closeDrawer}
                         className={active ? activeMobileNavLinkClassName : mobileNavLinkClassName}
                         aria-current={active ? "page" : undefined}
                       >

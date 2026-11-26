@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ShieldCheck, ShieldAlert, ChevronDown, ChevronUp, Zap } from "lucide-react";
+import { useState } from "react";
+import { ShieldCheck, ShieldAlert, ChevronDown, ChevronUp } from "lucide-react";
+import { useI18n } from "@/i18n/I18nProvider";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -294,6 +297,13 @@ export function AutoModeGuardrailPanel({ state: initialState, chainFamily = "evm
       ) : null}
 
       {/* Header toggle */}
+export function AutoModeGuardrailPanel({ state }: Props) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const reason = state.reason ?? t("autoKillSwitchReason");
+  const actorSuffix = state.actor ? t("autoHaltedActorSuffix", { actor: state.actor }) : "";
+  return (
+    <section aria-label={t("autoGuardrailsAria")} className="rounded-xl border border-white/10 bg-black/30 p-3">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
@@ -306,6 +316,7 @@ export function AutoModeGuardrailPanel({ state: initialState, chainFamily = "evm
             <ShieldCheck className="h-4 w-4 text-emerald-400" aria-hidden="true" />
           )}
           <span>{engaged ? "Auto Mode halted by guardrails" : "Non-custodial guardrails active"}</span>
+          <span>{state.engaged ? t("autoModeHalted") : t("autoGuardrailsActive")}</span>
         </span>
         {expanded
           ? <ChevronUp className="h-3.5 w-3.5 text-white/50" aria-hidden="true" />
@@ -357,6 +368,11 @@ export function AutoModeGuardrailPanel({ state: initialState, chainFamily = "evm
             </div>
           ) : null}
         </div>
+        <p className="mt-2 text-xs leading-5 text-white/60">
+          {state.engaged
+            ? t("autoHaltedReason", { reason, actorSuffix })
+            : t("autoNonCustodialNotice")}
+        </p>
       ) : null}
     </section>
   );

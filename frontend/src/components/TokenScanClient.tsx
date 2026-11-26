@@ -1,12 +1,14 @@
 "use client";
 
 import { AlertCircle, CheckCircle2, CreditCard, Lock, X } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { x402Client, x402HTTPClient } from "@x402/core/client";
 import type { PaymentRequired } from "@x402/core/types";
 import { toClientEvmSigner } from "@x402/evm";
 import { registerExactEvmScheme } from "@x402/evm/exact/client";
 import { useAccount, usePublicClient, useSwitchChain, useWalletClient } from "wagmi";
+import { useI18n, type I18nValue } from "@/i18n/I18nProvider";
+import type { MessageKey } from "@/i18n/messages";
 import type { RiskReportVerdict, ScoreFactor, TokenScanResult, TransactionPreview } from "@/server/types";
 import { NoDataState } from "@/components/NoDataState";
 import { RiskBreakdownCard } from "@/components/RiskBreakdownCard";
@@ -15,43 +17,22 @@ import { StellarRiskPublishButton } from "@/components/StellarRiskPublishButton"
 import { LiveRegion } from "@/components/a11y/LiveRegion";
 import { RiskSnapshotActions } from "@/components/RiskSnapshotActions";
 import { captureOfflineScan } from "@/lib/offlineStore";
+import { parseTokenQuery, type TokenInputIssueCode, type TokenInputKind } from "@/lib/tokenQuery";
+import { recordScannedAsset } from "@/lib/commandPalette/persistedRecents";
+import { detectScanTarget } from "@/lib/commandPalette/scanTarget";
 import { buildX402Fingerprint, hashX402PaymentHeader, type X402ReceiptEntry } from "@/lib/x402ReceiptStore";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { useX402PaymentReceipts } from "@/hooks/useSigning";
 
-const paymentStatusLabels: Record<PaymentStage, { title: string; detail: string }> = {
-  idle: {
-    title: "Payment required",
-    detail: "Detailed Scan starts the x402 payment first. The premium report is generated only after payment verification.",
-  },
-  wallet_required: {
-    title: "Connect wallet",
-    detail: "Connect an EVM wallet to sign the x402 payment and run the scan.",
-  },
-  requesting: {
-    title: "Preparing payment",
-    detail: "Fetching the x402 payment requirement for this detailed scan.",
-  },
-  payment_required: {
-    title: "Payment required",
-    detail: "The API returned HTTP 402. Your wallet will sign the x402 payment next.",
-  },
-  signing: {
-    title: "Sign payment",
-    detail: "Confirm the typed-data signature in your wallet. The detailed scan will start after verification.",
-  },
-  verifying: {
-    title: "Verifying payment",
-    detail: "Submitting the signed payment to the protected detailed scan endpoint.",
-  },
-  verified: {
-    title: "Payment verified",
-    detail: "Payment was accepted and the AI Risk Report is unlocked.",
-  },
-  failed: {
-    title: "Payment failed",
-    detail: "Payment could not be completed. Check wallet/network state and retry.",
-  },
+const paymentStatusLabels: Record<PaymentStage, { title: MessageKey; detail: MessageKey }> = {
+  idle: { title: "payIdleTitle", detail: "payIdleDetail" },
+  wallet_required: { title: "payWalletRequiredTitle", detail: "payWalletRequiredDetail" },
+  requesting: { title: "payPreparingTitle", detail: "payPreparingDetail" },
+  payment_required: { title: "payPaymentRequiredTitle", detail: "payPaymentRequiredDetail" },
+  signing: { title: "paySigningTitle", detail: "paySigningDetail" },
+  verifying: { title: "payVerifyingTitle", detail: "payVerifyingDetail" },
+  verified: { title: "payVerifiedTitle", detail: "payVerifiedDetail" },
+  failed: { title: "payFailedTitle", detail: "payFailedDetail" },
 };
 const chains = [
   { value: "base", label: "Base" },
@@ -62,8 +43,64 @@ const chains = [
   { value: "polygon", label: "Polygon" },
   { value: "optimism", label: "Optimism" },
   { value: "stellar-testnet", label: "Stellar" },
+  { value: "stellar-pubnet", label: "Stellar Pubnet" },
   { value: "solana", label: "Solana later", disabled: true },
 ];
+
+const WHAT_WOULD_CHANGE_LABEL = "What would change this decision";
+
+const verdictKeys: Record<RiskReportVerdict, MessageKey> = {
+  buy_small: "verdictBuySmall",
+  watch: "verdictWatch",
+  avoid: "verdictAvoid",
+  hold: "verdictHold",
+  reduce_exposure: "verdictReduceExposure",
+  manual_review: "verdictManualReview",
+};
+
+const statusKeys: Record<string, MessageKey> = {
+  prepared: "statusPrepared",
+  user_rejected: "statusUserRejected",
+  submitted: "statusSubmitted",
+  confirmed: "statusConfirmed",
+  failed: "statusFailed",
+  replaced: "statusReplaced",
+  expired: "statusExpired",
+  pending: "statusPending",
+  stale: "statusStale",
+  required: "statusRequired",
+  "not required": "statusNotRequired",
+  "not prepared": "statusNotPrepared",
+  unavailable: "statusUnavailable",
+  yes: "statusYes",
+  no: "statusNo",
+  "no action": "statusNo",
+};
+
+const sampleTagKeys = {
+  "EVM Bluechip": "tagEvmBluechip",
+  "Base DEX": "tagBaseDex",
+  "Stellar Classic": "tagStellarClassic",
+  "High Risk": "tagHighRisk",
+} as const satisfies Record<string, MessageKey>;
+
+const validationIssueKeys: Record<TokenInputIssueCode, MessageKey> = {
+  empty: "validationEmpty",
+  too_long: "validationTooLong",
+  invalid_evm_address: "validationInvalidEvmAddress",
+  invalid_evm_checksum: "validationInvalidEvmChecksum",
+  invalid_stellar_asset: "validationInvalidStellarAsset",
+  invalid_dexscreener_url: "validationInvalidDexUrl",
+  unsupported_dexscreener_chain: "validationUnsupportedDexChain",
+};
+
+const inputKindKeys: Record<TokenInputKind, MessageKey> = {
+  "evm-address": "inputKindEvmAddress",
+  "stellar-classic": "inputKindStellarClassic",
+  "soroban-contract": "inputKindSorobanContract",
+  "dexscreener-url": "inputKindDexScreenerUrl",
+  symbol: "inputKindSymbol",
+};
 
 type PaymentStage = "idle" | "wallet_required" | "requesting" | "payment_required" | "signing" | "verifying" | "verified" | "failed";
 type PaymentTerms = {
@@ -74,36 +111,28 @@ type PaymentTerms = {
   available: boolean;
 };
 
-function shortenAddress(value?: string) {
-  if (!value || value.length < 12) return value ?? "Shown before signature";
+function shortenAddress(value: string | undefined, t: I18nValue["t"]) {
+  if (!value || value.length < 12) return value ?? t("shownBeforeSignature");
 
   return `${value.slice(0, 6)}...${value.slice(-4)}`;
 }
 
-function formatUsd(value?: number) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return "N/A";
-  }
+function formatUsd(value: number | undefined, t: I18nValue["t"], format: I18nValue["format"]) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return t("notAvailable");
 
-  return value.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: value >= 1 ? 0 : 6,
-  });
+  return format.currencyWithDigits(value, value >= 1 ? 0 : 6);
 }
 
-function formatPercent(value?: number) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return "N/A";
-  }
+function formatPercent(value: number | undefined, t: I18nValue["t"], format: I18nValue["format"]) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return t("notAvailable");
 
-  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+  return `${value >= 0 ? "+" : ""}${format.number(value)}%`;
 }
 
-function verdictLabel(verdict?: RiskReportVerdict) {
-  if (!verdict) return "Manual review";
+function verdictLabel(verdict: RiskReportVerdict | undefined, t: I18nValue["t"]) {
+  if (!verdict) return t("verdictManualReview");
 
-  return verdict.replaceAll("_", " ");
+  return t(verdictKeys[verdict]);
 }
 
 function riskTone(score: number) {
@@ -113,11 +142,11 @@ function riskTone(score: number) {
   return "risk-tone-low";
 }
 
-function riskLevelLabel(score: number) {
-  if (score >= 75) return "Critical risk";
-  if (score >= 50) return "High risk";
-  if (score >= 25) return "Medium risk";
-  return "Low risk";
+function riskLevelLabel(score: number, t: I18nValue["t"]) {
+  if (score >= 75) return t("riskCritical");
+  if (score >= 50) return t("riskHigh");
+  if (score >= 25) return t("riskMedium");
+  return t("riskLow");
 }
 
 function factorTone(factor: ScoreFactor) {
@@ -127,10 +156,10 @@ function factorTone(factor: ScoreFactor) {
   return "border-[var(--color-border)] bg-[var(--color-glass-bg)] text-muted";
 }
 
-function formatMetaValue(value: string | number | boolean | null | undefined) {
-  if (value === undefined || value === null || value === "") return "N/A";
-  if (typeof value === "boolean") return value ? "yes" : "no";
-  if (typeof value === "number") return Number.isInteger(value) ? value.toLocaleString("en-US") : value.toFixed(2);
+function formatMetaValue(value: string | number | boolean | null | undefined, t: I18nValue["t"], format: I18nValue["format"]) {
+  if (value === undefined || value === null || value === "") return t("notAvailable");
+  if (typeof value === "boolean") return value ? t("statusYes") : t("statusNo");
+  if (typeof value === "number") return format.number(value);
 
   return value;
 }
@@ -189,14 +218,17 @@ function getPaymentChainId(paymentRequirement: PaymentRequired | null) {
 }
 
 const SAMPLE_TOKENS = [
-  { label: "USDC (Ethereum)", chain: "ethereum", query: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", tag: "EVM Bluechip" },
-  { label: "AERO (Base)", chain: "base", query: "0x940181a94A35A4569E4529A3CDfB74e38FD98631", tag: "Base DEX" },
-  { label: "XLM (Stellar)", chain: "stellar-testnet", query: "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN", tag: "Stellar Classic" },
-  { label: "Risky MEME (Demo)", chain: "base", query: "MEME", tag: "High Risk" },
-];
+  { labelKey: "sampleUsdcEthereum", chain: "ethereum", query: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", tag: "EVM Bluechip" },
+  { labelKey: "sampleAeroBase", chain: "base", query: "0x940181a94A35A4569E4529A3CDfB74e38FD98631", tag: "Base DEX" },
+  { labelKey: "sampleXlmStellar", chain: "stellar-testnet", query: "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN", tag: "Stellar Classic" },
+  { labelKey: "sampleRiskyMeme", chain: "base", query: "MEME", tag: "High Risk" },
+] as const satisfies readonly { labelKey: MessageKey; chain: string; query: string; tag: string }[];
 
 export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: string }) {
+  const { t, format } = useI18n();
+export function TokenScanClient({ initialQuery = "MEME", initialChain, autoRun = false }: { initialQuery?: string; initialChain?: string; autoRun?: boolean }) {
   const queryErrorId = useId();
+  const inputHelpId = useId();
   const paymentModalTitleId = useId();
   const paymentModalRef = useRef<HTMLButtonElement>(null);
   const { address, chainId, isConnected } = useAccount();
@@ -205,7 +237,11 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
   const { switchChainAsync } = useSwitchChain();
   const [showOnboarding, setShowOnboarding] = useState(true);
   const [query, setQuery] = useState(initialQuery || "MEME");
-  const [chain, setChain] = useState("base");
+  const [chain, setChain] = useState(() => {
+    const initialInput = parseTokenQuery(query);
+    return initialInput.ok && initialInput.suggestedChain ? initialInput.suggestedChain : "base";
+  });
+  const [chain, setChain] = useState(() => chains.some((item) => item.value === initialChain && !item.disabled) ? initialChain! : "base");
   const [walletAddress, setWalletAddress] = useState("");
   const [scan, setScan] = useState<TokenScanResult | null>(null);
   const [isScanning, setIsScanning] = useState(false);
@@ -220,24 +256,40 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
   const [dismissedReceiptHash, setDismissedReceiptHash] = useState<string | null>(null);
   const receipts = useX402PaymentReceipts();
   const { actionsDisabled } = useOnlineStatus();
+  const parsedInput = useMemo(() => parseTokenQuery(query, { chain }), [chain, query]);
+  const activeQuery = parsedInput.ok ? parsedInput.query : query.trim();
+  const activeChain = parsedInput.ok ? parsedInput.suggestedChain ?? chain : chain;
+  const inputIssue = !parsedInput.ok ? t(validationIssueKeys[parsedInput.code]) : null;
+  const inputWarning = parsedInput.ok && parsedInput.warning ? t("validationInvalidEvmChecksum") : null;
+  const localizedStatus = (value: string) => (statusKeys[value] ? t(statusKeys[value]) : value.replaceAll("_", " "));
   const report = scan?.riskReport;
   const normalizedInput = report?.input ?? scan?.normalizedInput;
   const executionPreview = report?.executionPreview as TransactionPreview | undefined;
   const decisionCard = report?.agentCards.find((card) => card.agent === "decision");
-  const whatWouldChange = decisionCard?.factors.find((factor) => factor.label === "What would change this decision");
+  const whatWouldChange = decisionCard?.factors.find((factor) => factor.label === WHAT_WOULD_CHANGE_LABEL);
   const paymentOption = getPaymentOption(paymentRequirement);
+  const x402Payload = useMemo(() => buildX402RequestPayload(activeQuery, activeChain, walletAddress), [activeChain, activeQuery, walletAddress]);
+  const visibleResumeCandidate = scan || !x402Payload.query ? null : resumeCandidate;
   const isPaymentWorking = premiumStatus === "requesting" || premiumStatus === "signing" || premiumStatus === "verifying" || isPreparingPremium;
   const isBusy = isScanning || isPaymentWorking;
   const showPaymentPanel = premiumStatus !== "idle";
   const statusMessage = scanError
     ? scanError
     : isScanning
-      ? "Analyzing token risk…"
+      ? t("scanAnalyzing")
       : isPaymentWorking
-        ? premiumDetail ?? paymentStatusLabels[premiumStatus].detail
+        ? premiumDetail ?? t(paymentStatusLabels[premiumStatus].detail)
         : scan
-          ? `Scan complete. ${scan.symbol} risk ${scan.overallRiskScore} out of 100.`
+          ? t("scanComplete", { symbol: scan.symbol, score: scan.overallRiskScore })
           : null;
+
+  function handleQueryChange(value: string) {
+    setQuery(value);
+    const nextInput = parseTokenQuery(value, { chain });
+    if (nextInput.ok && nextInput.kind === "dexscreener-url" && nextInput.suggestedChain && nextInput.suggestedChain !== chain) {
+      setChain(nextInput.suggestedChain);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -258,13 +310,9 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
   // stored receipt instead of asking the user to sign (and pay) again.
   useEffect(() => {
     let active = true;
-    const payload = buildX402RequestPayload(query, chain, walletAddress);
-    if (!payload.query || scan) {
-      setResumeCandidate(null);
-      return;
-    }
+    if (!x402Payload.query || scan) return;
 
-    buildX402Fingerprint(payload)
+    buildX402Fingerprint(x402Payload)
       .then((fingerprint) => receipts.findReceipt(fingerprint))
       .then((entry) => {
         if (active) setResumeCandidate(entry && entry.paymentHeaderHash !== dismissedReceiptHash ? entry : null);
@@ -276,7 +324,7 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
     return () => {
       active = false;
     };
-  }, [query, chain, walletAddress, scan, dismissedReceiptHash, receipts]);
+  }, [x402Payload, scan, dismissedReceiptHash, receipts]);
 
   useEffect(() => {
     if (!showPaymentModal) return;
@@ -293,8 +341,22 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [showPaymentModal]);
 
+  // Palette "Run AI Risk Scan" handoff. Only the free scan auto-runs; paid scans always need a click.
+  // The run marker is dropped so a refresh does not scan again.
+  useEffect(() => {
+    if (!autoRun) return;
+    const timer = window.setTimeout(() => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("run");
+      window.history.replaceState(null, "", url);
+      void runScan();
+    }, 0);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot on mount
+  }, []);
+
   async function runScan() {
-    if (actionsDisabled) return;
+    if (actionsDisabled || inputIssue) return;
     setIsScanning(true);
     setScanError(null);
     setPremiumStatus("idle");
@@ -305,26 +367,28 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
       const response = await fetch("/api/scan/token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, chain, walletAddress: walletAddress.trim() || undefined }),
+        body: JSON.stringify({ query: activeQuery, chain: activeChain, walletAddress: walletAddress.trim() || undefined }),
       });
 
       if (!response.ok) {
-        throw new Error("Free trial scan failed. Check the input and try again.");
+        throw new Error(t("scanRetryInput"));
       }
 
       const data = (await response.json()) as TokenScanResult;
       setScan(data);
       captureOfflineScan(data, "free token scan");
+      const target = detectScanTarget(query, null);
+      if (target) recordScannedAsset({ query: target.query, chain });
     } catch (error) {
       setScan(null);
-      setScanError(error instanceof Error ? error.message : "Free trial scan failed.");
+      setScanError(error instanceof Error ? error.message : t("scanFreeTrialFailed"));
     } finally {
       setIsScanning(false);
     }
   }
 
   function createEvmHttpClient() {
-    if (!walletClient || !address) throw new Error("Connect an EVM wallet first.");
+    if (!walletClient || !address) throw new Error(t("scanConnectEvmFirst"));
 
     const protocolClient = new x402Client();
     const signer = toClientEvmSigner(
@@ -350,16 +414,16 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
     setScanError(null);
     setPremiumDetail(null);
 
-    if (!query.trim()) {
+    if (inputIssue) {
       setPremiumStatus("failed");
-      setScanError("Enter a contract address, token symbol, or DexScreener URL before starting detailed scan payment.");
+      setScanError(inputIssue);
       return;
     }
 
     if (!isConnected || !walletClient || !address) {
       setScan(null);
       setPremiumStatus("wallet_required");
-      setPremiumDetail("Connect your wallet, then press Continue detailed scan to sign the x402 payment.");
+      setPremiumDetail(t("scanConnectWalletThenContinue"));
       return;
     }
 
@@ -368,10 +432,10 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
     setIsPreparingPremium(true);
     setIsScanning(false);
     setPremiumStatus("requesting");
-    setPremiumDetail("Requesting x402 payment terms from the protected detailed scan endpoint.");
+    setPremiumDetail(t("scanRequestingTerms"));
 
     try {
-      const url = buildDeepScanUrl(query, chain, walletAddress);
+      const url = buildDeepScanUrl(activeQuery, activeChain, walletAddress);
       const httpClient = createEvmHttpClient();
       const response = await fetch(url, {
         method: "GET",
@@ -382,13 +446,13 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
         const body = (await response.json().catch(() => null)) as unknown;
         const required = httpClient.getPaymentRequiredResponse((name) => response.headers.get(name), body);
         if (!required) {
-          throw new Error("The server did not return valid x402 payment requirements.");
+          throw new Error(t("scanInvalidRequirements"));
         }
         setPaymentRequirement(required);
         setPremiumStatus("payment_required");
-        setPremiumDetail("Review the exact x402 payment details before your wallet signs anything.");
+        setPremiumDetail(t("scanReviewPaymentTerms"));
 
-        const fingerprint = await buildX402Fingerprint(buildX402RequestPayload(query, chain, walletAddress));
+        const fingerprint = await buildX402Fingerprint(buildX402RequestPayload(activeQuery, activeChain, walletAddress));
         const existing = await receipts.findReceipt(fingerprint);
         setResumeCandidate(existing && existing.paymentHeaderHash !== dismissedReceiptHash ? existing : null);
         setShowPaymentModal(true);
@@ -397,24 +461,24 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
 
       if (!response.ok) {
         const data = (await response.json().catch(() => null)) as { detail?: string; error?: string } | null;
-        throw new Error(data?.detail ?? data?.error ?? "Detailed scan request failed.");
+        throw new Error(data?.detail ?? data?.error ?? t("scanDetailedRequestFailed"));
       }
 
       const data = (await response.json()) as { premium?: { receiptId?: string; note?: string }; scan?: TokenScanResult };
 
       if (!data.scan) {
-        throw new Error("Scan completed without a report payload.");
+        throw new Error(t("scanNoReportPayload"));
       }
 
       setScan(data.scan);
       captureOfflineScan(data.scan, "paid detailed scan");
       setPremiumStatus("verified");
-      setPremiumDetail(`Payment verified. Receipt: ${data.premium?.receiptId ?? "recorded"}.`);
+      setPremiumDetail(t("scanPaymentVerified", { receiptId: data.premium?.receiptId ?? "recorded" }));
     } catch (error) {
       setScan(null);
       setPremiumStatus("failed");
-      setScanError(error instanceof Error ? error.message : "Scan failed.");
-      setPremiumDetail(error instanceof Error ? error.message : "Payment or scan failed.");
+      setScanError(error instanceof Error ? error.message : t("scanFailed"));
+      setPremiumDetail(error instanceof Error ? error.message : t("scanPaymentOrScanFailed"));
     } finally {
       setIsScanning(false);
       setIsPreparingPremium(false);
@@ -428,32 +492,32 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
     setScan(null);
     setIsPreparingPremium(true);
     setPremiumStatus("signing");
-    setPremiumDetail("Wallet signature is open. Sign the x402 payment authorization.");
+    setPremiumDetail(t("scanWalletSignatureOpen"));
 
     try {
       const httpClient = createEvmHttpClient();
-      const url = buildDeepScanUrl(query, chain, walletAddress);
+      const url = buildDeepScanUrl(activeQuery, activeChain, walletAddress);
       const requiredChainId = getPaymentChainId(required);
 
       if (requiredChainId && chainId !== requiredChainId) {
-        setPremiumDetail(`Switching wallet network to eip155:${requiredChainId} for x402 payment.`);
+        setPremiumDetail(t("scanSwitchingNetwork", { chainId: requiredChainId }));
         await switchChainAsync({ chainId: requiredChainId });
       }
 
       setPremiumStatus("signing");
-      setPremiumDetail("Wallet signature is open. Sign the x402 payment authorization.");
+      setPremiumDetail(t("scanWalletSignatureOpen"));
       const paymentPayload = await httpClient.createPaymentPayload(required);
       const paymentHeaders = httpClient.encodePaymentSignatureHeader(paymentPayload);
       const paymentSignature = Object.values(paymentHeaders)[0] ?? "";
       const paymentHeaderHash = await hashX402PaymentHeader(paymentSignature);
-      const fingerprint = await buildX402Fingerprint(buildX402RequestPayload(query, chain, walletAddress));
+      const fingerprint = await buildX402Fingerprint(buildX402RequestPayload(activeQuery, activeChain, walletAddress));
 
       // Persist BEFORE submitting: a lost response must not force a second
       // signature, and the hash matches the server's receipt lookup.
       receipts.savePending({ fingerprint, paymentSignature, paymentHeaderHash, payer: address });
 
       setPremiumStatus("verifying");
-      setPremiumDetail("Submitting signed payment and generating the detailed AI Risk Report.");
+      setPremiumDetail(t("scanSubmittingPayment"));
       setIsScanning(true);
       const paidResponse = await fetch(url, {
         method: "GET",
@@ -472,15 +536,15 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
           data?.detail ??
             data?.error ??
             (settlementLikely
-              ? "The scan response was lost after payment. Resume with the stored receipt; do not sign again yet."
-              : "Paid scan request failed after payment signature."),
+              ? t("scanResponseLost")
+              : t("scanPaidRequestFailed")),
         );
       }
 
       const data = (await paidResponse.json()) as { premium?: { receiptId?: string; note?: string }; scan?: TokenScanResult };
 
       if (!data.scan) {
-        throw new Error("Detailed scan completed without a report payload.");
+        throw new Error(t("scanDetailedNoReport"));
       }
 
       setScan(data.scan);
@@ -489,22 +553,22 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
       setResumeCandidate(null);
       setDismissedReceiptHash(null);
       setPremiumStatus("verified");
-      setPremiumDetail(`Payment verified. Receipt: ${data.premium?.receiptId ?? "recorded"}.`);
+      setPremiumDetail(t("scanPaymentVerified", { receiptId: data.premium?.receiptId ?? "recorded" }));
     } catch (error) {
-      const stored = await buildX402Fingerprint(buildX402RequestPayload(query, chain, walletAddress)).then((fingerprint) =>
+      const stored = await buildX402Fingerprint(buildX402RequestPayload(activeQuery, activeChain, walletAddress)).then((fingerprint) =>
         receipts.findReceipt(fingerprint),
       );
       if (stored) setResumeCandidate(stored);
 
       setScan(null);
       setPremiumStatus("failed");
-      setScanError(error instanceof Error ? error.message : "Scan failed.");
+      setScanError(error instanceof Error ? error.message : t("scanFailed"));
       setPremiumDetail(
         stored
-          ? "Payment may have settled. Use “Resume with existing receipt” below instead of signing again."
+          ? t("scanPaymentMaySettled")
           : error instanceof Error
             ? error.message
-            : "Payment or scan failed.",
+            : t("scanPaymentOrScanFailed"),
       );
     } finally {
       setIsScanning(false);
@@ -520,7 +584,7 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
     setScan(null);
     setIsScanning(true);
     setPremiumStatus("verifying");
-    setPremiumDetail("Reusing the stored x402 receipt to retrieve your paid scan. No new payment will be requested.");
+    setPremiumDetail(t("scanResumeStoredReceipt"));
 
     try {
       const response = await fetch("/api/x402/deep-scan/resume", {
@@ -528,7 +592,7 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify({
           paymentHeaderHash: entry.paymentHeaderHash,
-          ...buildX402RequestPayload(query, chain, walletAddress),
+          ...buildX402RequestPayload(activeQuery, activeChain, walletAddress),
         }),
       });
 
@@ -543,14 +607,14 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
           receipts.discard(entry);
           setDismissedReceiptHash(entry.paymentHeaderHash);
           setResumeCandidate(null);
-          throw new Error("The stored receipt is no longer usable. Review the payment details to sign a new payment.");
+          throw new Error(t("scanReceiptUnusable"));
         }
-        throw new Error(data?.detail ?? data?.error ?? "Could not resume the paid scan with the stored receipt.");
+        throw new Error(data?.detail ?? data?.error ?? t("scanResumeReceiptFailed"));
       }
 
       const data = (await response.json()) as { premium?: { receiptId?: string; note?: string }; scan?: TokenScanResult };
       if (!data.scan) {
-        throw new Error("Resumed scan completed without a report payload.");
+        throw new Error(t("scanResumedNoReport"));
       }
 
       setScan(data.scan);
@@ -558,20 +622,20 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
       receipts.markSettled(entry, data.premium?.receiptId ?? entry.receiptId);
       setResumeCandidate(null);
       setPremiumStatus("verified");
-      setPremiumDetail(`Payment verified from stored receipt. Receipt: ${data.premium?.receiptId ?? "recorded"}.`);
+      setPremiumDetail(t("scanPaymentVerifiedFromReceipt", { receiptId: data.premium?.receiptId ?? "recorded" }));
     } catch (error) {
       setPremiumStatus("failed");
-      setScanError(error instanceof Error ? error.message : "Could not resume the paid scan.");
-      setPremiumDetail(error instanceof Error ? error.message : "Could not resume the paid scan.");
+      setScanError(error instanceof Error ? error.message : t("scanResumeFailed"));
+      setPremiumDetail(error instanceof Error ? error.message : t("scanResumeFailed"));
     } finally {
       setIsScanning(false);
     }
   }
 
   function discardStoredReceipt() {
-    if (!resumeCandidate) return;
-    receipts.discard(resumeCandidate);
-    setDismissedReceiptHash(resumeCandidate.paymentHeaderHash);
+    if (!visibleResumeCandidate) return;
+    receipts.discard(visibleResumeCandidate);
+    setDismissedReceiptHash(visibleResumeCandidate.paymentHeaderHash);
     setResumeCandidate(null);
   }
 
@@ -595,26 +659,26 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
       <LiveRegion message={statusMessage} politeness={scanError ? "assertive" : "polite"} />
       <section className="glass-panel rounded-lg p-5">
           {showOnboarding ? (
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#d9a441]/25 bg-[#d9a441]/8 p-3 text-xs text-white/80">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand bg-brand-subtle p-3 text-xs text-white/80">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="font-semibold text-[#f2c86d]">How Cryptara works:</span>
-                <span>1. No wallet needed to scan</span>
+                <span className="font-semibold text-brand-muted">{t("scanHowWorks")}</span>
+                <span>{t("scanHowNoWallet")}</span>
                 <span className="text-white/30">•</span>
-                <span>2. 5 deterministic evaluation agents</span>
+                <span>{t("scanHowAgents")}</span>
                 <span className="text-white/30">•</span>
-                <span>3. Approval-only action plan</span>
+                <span>{t("scanHowApprovalOnly")}</span>
               </div>
               <button
                 type="button"
                 onClick={() => setShowOnboarding(false)}
                 className="text-[11px] text-white/50 hover:text-white"
-                aria-label="Dismiss guide"
+                aria-label={t("dismissGuide")}
               >
-                Dismiss
+                {t("dismiss")}
               </button>
             </div>
           ) : null}
-          <h1 className="text-3xl font-semibold tracking-tight">Scan token</h1>
+          <h1 className="text-3xl font-semibold tracking-tight">{t("scanTitle")}</h1>
           <div className="mt-5 grid gap-3 lg:grid-cols-[9rem_1fr_auto_auto]">
             <select
               value={chain}
@@ -623,63 +687,84 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
             >
               {chains.map((item) => (
                 <option key={item.value} value={item.value} disabled={item.disabled} className="bg-dropdown text-foreground">
-                  {item.label}
+                  {item.value === "solana" ? t("chainSolanaSoon") : item.label}
                 </option>
               ))}
             </select>
             <input
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="DexScreener URL or contract address"
-              aria-label="DexScreener URL or contract address"
-              aria-invalid={Boolean(scanError)}
-              aria-describedby={scanError ? queryErrorId : undefined}
+              onChange={(event) => handleQueryChange(event.target.value)}
+              placeholder={t("scanQueryPlaceholder")}
+              aria-label={t("scanQueryPlaceholder")}
+              aria-invalid={Boolean(inputIssue || scanError)}
+              aria-describedby={
+                [
+                  inputIssue || inputWarning || (parsedInput.ok ? t("validationDetectedInput", { kind: t(inputKindKeys[parsedInput.kind]) }) : null)
+                    ? inputHelpId
+                    : null,
+                  scanError ? queryErrorId : null,
+                ]
+                  .filter(Boolean)
+                  .join(" ") || undefined
+              }
               className="h-12 min-w-0 flex-1 rounded-full input-surface h-12 rounded-full border px-5 text-sm outline-none transition"
             />
             <button
               type="button"
               onClick={runScan}
-              disabled={isBusy || actionsDisabled}
+              disabled={isBusy || actionsDisabled || Boolean(inputIssue)}
               className="h-12 rounded-full bg-brand px-6 text-sm font-semibold text-[var(--color-fg-inverse)] transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isScanning && !isPaymentWorking ? "Running token agents..." : "Run token agents"}
+              {isScanning && !isPaymentWorking ? t("runningAgents") : t("runAgents")}
             </button>
             <button
               type="button"
               onClick={runDetailedScan}
-              disabled={isBusy || actionsDisabled}
+              disabled={isBusy || actionsDisabled || Boolean(inputIssue)}
               className="h-12 rounded-full border border-brand px-6 text-sm font-semibold text-brand-muted transition hover:border-brand hover:bg-brand-subtle disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isPaymentWorking ? "Processing..." : "Run deep scan agents"}
+              {isPaymentWorking ? t("processing") : t("runDeepAgents")}
             </button>
+          </div>
+          <div id={inputHelpId} className="mt-2 space-y-1 text-xs">
+            {inputIssue ? <p role="alert" className="text-red-300">{inputIssue}</p> : null}
+            {inputWarning ? <p className="text-amber-300">{inputWarning}</p> : null}
+            {parsedInput.ok ? (
+              <p className="text-white/46">
+                {t("validationDetectedInput", { kind: t(inputKindKeys[parsedInput.kind]) })}
+                {parsedInput.pairAddress ? ` · ${t("pairLabel")} ${parsedInput.pairAddress}` : ""}
+                {parsedInput.kind === "symbol" ? ` · ${t("validationSymboleInput")}` : ""}
+              </p>
+            ) : null}
           </div>
           <input
             value={walletAddress}
             onChange={(event) => setWalletAddress(event.target.value)}
-            placeholder="Optional wallet address for portfolio exposure"
+            placeholder={t("scanWalletPlaceholder")}
+            aria-label={t("scanWalletPlaceholder")}
             className="mt-3 h-12 w-full rounded-full input-surface h-12 rounded-full border px-5 text-sm outline-none transition"
           />
 
           {/* Quick-try sample token chips */}
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="text-xs text-white/46">Try an example:</span>
+            <span className="text-xs text-white/46">{t("tryExample")}</span>
             {SAMPLE_TOKENS.map((sample) => (
               <button
-                key={sample.label}
+                key={sample.labelKey}
                 type="button"
                 onClick={() => {
                   setChain(sample.chain);
                   setQuery(sample.query);
                 }}
-                className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/72 transition hover:border-[#d9a441]/40 hover:bg-white/10 hover:text-white"
+                className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/72 transition hover:border-brand hover:bg-white/10 hover:text-white"
               >
-                <span>{sample.label}</span>
-                <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] text-[#f2c86d]">{sample.tag}</span>
+                <span>{t(sample.labelKey)}</span>
+                <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] text-brand-muted">{t(sampleTagKeys[sample.tag as keyof typeof sampleTagKeys])}</span>
               </button>
             ))}
           </div>
 
-          <div className="mt-3 text-xs text-white/42">Free Trial is free. Detailed Scan costs {paymentTerms?.priceUsd ?? "$0.99"}.</div>
+          <div className="mt-3 text-xs text-white/42">{t("scanPricing", { price: paymentTerms?.priceUsd ?? "$0.99" })}</div>
       </section>
 
       {showPaymentPanel ? (
@@ -691,8 +776,8 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
                   {premiumStatus === "verified" ? <CheckCircle2 className="h-5 w-5" /> : <Lock className="h-5 w-5" />}
                 </div>
                 <div className="min-w-0">
-                  <h2 className="mt-2 text-xl font-semibold">{paymentStatusLabels[premiumStatus].title}</h2>
-                  <p className="mt-2 max-w-2xl text-sm leading-6 text-white/58">{premiumDetail ?? paymentStatusLabels[premiumStatus].detail}</p>
+                  <h2 className="mt-2 text-xl font-semibold">{t(paymentStatusLabels[premiumStatus].title)}</h2>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-white/58">{premiumDetail ?? t(paymentStatusLabels[premiumStatus].detail)}</p>
                 </div>
               </div>
 
@@ -706,32 +791,31 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
                       disabled={isPaymentWorking || actionsDisabled}
                       className="inline-flex h-11 items-center justify-center rounded-full bg-brand px-5 text-sm font-semibold text-[var(--color-fg-inverse)] transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      Continue detailed scan
+                      {t("continueDetailedScan")}
                     </button>
                   ) : null}
                 </div>
               ) : null}
 
-              {resumeCandidate && premiumStatus !== "verified" ? (
+              {visibleResumeCandidate && premiumStatus !== "verified" ? (
                 <div className="mt-5 rounded-2xl border border-brand/40 bg-black/18 p-4">
                   <div className="flex items-start gap-2 text-sm text-white/72">
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
                     <div>
-                      <div className="font-semibold">Resume with existing receipt</div>
+                      <div className="font-semibold">{t("resumeWithReceipt")}</div>
                       <p className="mt-1 text-xs leading-5 text-white/52">
-                        A recent x402 payment receipt matches this exact scan payload. Reuse it to retrieve the report
-                        without signing (or paying) again.
+                        {t("resumeReceiptDetail")}
                       </p>
                     </div>
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button
                       type="button"
-                      onClick={() => resumeWithReceipt(resumeCandidate)}
+                      onClick={() => resumeWithReceipt(visibleResumeCandidate)}
                       disabled={isBusy || actionsDisabled}
                       className="inline-flex h-10 items-center justify-center rounded-full bg-brand px-5 text-xs font-semibold text-[var(--color-fg-inverse)] transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      Resume with existing receipt
+                      {t("resumeWithReceipt")}
                     </button>
                     <button
                       type="button"
@@ -739,7 +823,7 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
                       disabled={isBusy}
                       className="inline-flex h-10 items-center justify-center rounded-full border border-white/15 px-5 text-xs text-white/60 transition hover:border-white/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      Discard receipt
+                      {t("discardReceipt")}
                     </button>
                   </div>
                 </div>
@@ -750,15 +834,15 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
               <div className="rounded-2xl bg-black/22 p-4">
                 <div className="flex items-center gap-2 text-sm text-white/52">
                   <CreditCard className="h-4 w-4 text-brand" />
-                  x402 payment
+                  {t("x402Payment")}
                 </div>
-                <div className="mt-4 text-4xl font-semibold text-white">{paymentTerms?.priceUsd ?? "Price loading"}</div>
-                <div className="mt-1 text-xs uppercase tracking-[0.18em] text-white/36">per detailed scan</div>
+                <div className="mt-4 text-4xl font-semibold text-white">{paymentTerms?.priceUsd ?? t("priceLoading")}</div>
+                <div className="mt-1 text-xs uppercase tracking-[0.18em] text-white/36">{t("perDetailedScan")}</div>
                 <div className="mt-4 space-y-2 text-xs leading-5 text-white/48">
-                  <div>Network: {paymentOption?.network ?? paymentTerms?.network ?? "Shown before signature"}</div>
-                  <div>Asset: {paymentOption?.asset ?? paymentTerms?.asset ?? "USDC"}</div>
-                  <div>Recipient: {shortenAddress(paymentOption?.payTo ?? paymentTerms?.payTo)}</div>
-                  {paymentOption?.amount ? <div>Amount: {paymentOption.amount}</div> : null}
+                  <div>{t("networkLabel")} {paymentOption?.network ?? paymentTerms?.network ?? t("shownBeforeSignature")}</div>
+                  <div>{t("assetLabel")} {paymentOption?.asset ?? paymentTerms?.asset ?? "USDC"}</div>
+                  <div>{t("recipientLabel")} {shortenAddress(paymentOption?.payTo ?? paymentTerms?.payTo, t)}</div>
+                  {paymentOption?.amount ? <div>{t("amountLabel")} {paymentOption.amount}</div> : null}
                 </div>
               </div>
               <button
@@ -767,7 +851,11 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
                 disabled={isPaymentWorking || premiumStatus === "verified" || actionsDisabled}
                 className="mt-4 h-12 w-full rounded-full bg-brand px-5 text-sm font-semibold text-[var(--color-fg-inverse)] transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {premiumStatus === "verified" ? "Payment verified" : isPaymentWorking ? "Processing..." : "Pay and Run Detailed Scan"}
+                {premiumStatus === "verified"
+                  ? t("payVerifiedTitle")
+                  : isPaymentWorking
+                    ? t("processing")
+                    : t("payAndRunDetailedScan")}
               </button>
             </div>
           </div>
@@ -777,13 +865,13 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
       {isScanning ? (
         <section className="flex items-center gap-3 rounded-lg border border-brand bg-brand-subtle p-4">
           <span className="h-2 w-2 animate-pulse rounded-full bg-brand" />
-          <div className="text-sm text-white/68">Analyzing token risk...</div>
+          <div className="text-sm text-white/68">{t("scanAnalyzingDots")}</div>
         </section>
       ) : null}
 
       {scanError ? (
         <div id={queryErrorId}>
-          <NoDataState title="Scan failed" detail={scanError} action="No result was saved. Fix the input or retry with a supported contract/DexScreener URL." />
+          <NoDataState title={t("scanFailed")} detail={scanError} action={t("noResultSaved")} />
         </div>
       ) : null}
 
@@ -791,21 +879,21 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
         <section className="grid gap-5 xl:grid-cols-[.85fr_1.15fr]">
           <div className="space-y-5">
             <div className={`rounded-[28px] border p-6 ${riskTone(report?.buyRisk ?? scan.overallRiskScore)}`}>
-              <div className="text-sm uppercase tracking-[0.18em] opacity-75">AI Risk Report</div>
-              <div className="mt-2 text-xs font-semibold uppercase tracking-[0.16em]">{riskLevelLabel(report?.buyRisk ?? scan.overallRiskScore)}</div>
+              <div className="text-sm uppercase tracking-[0.18em] opacity-75">{t("aiRiskReport")}</div>
+              <div className="mt-2 text-xs font-semibold uppercase tracking-[0.16em]">{riskLevelLabel(report?.buyRisk ?? scan.overallRiskScore, t)}</div>
               <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <h2 className="text-4xl font-semibold">{scan.symbol}</h2>
-                  <div className="mt-2 text-sm capitalize opacity-70">{verdictLabel(report?.verdict)}</div>
+                  <div className="mt-2 text-sm opacity-70">{verdictLabel(report?.verdict, t)}</div>
                 </div>
                 <div className="grid grid-cols-2 gap-3 text-left sm:text-right">
                   <div>
                     <div className="text-5xl font-semibold">{report?.buyRisk ?? scan.overallRiskScore}%</div>
-                    <div className="text-xs uppercase tracking-[0.2em] opacity-60">Buy risk</div>
+                    <div className="text-xs uppercase tracking-[0.2em] opacity-60">{t("buyRisk")}</div>
                   </div>
                   <div>
                     <div className="text-5xl font-semibold">{Math.round((report?.confidence ?? 0) * 100)}%</div>
-                    <div className="text-xs uppercase tracking-[0.2em] opacity-60">Confidence</div>
+                    <div className="text-xs uppercase tracking-[0.2em] opacity-60">{t("confidence")}</div>
                   </div>
                 </div>
               </div>
@@ -821,17 +909,17 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
               <RiskSnapshotActions source={scan} />
               {normalizedInput ? (
                 <details className="mt-4 text-xs text-white/58">
-                  <summary className="cursor-pointer text-white/42">Token details</summary>
+                  <summary className="cursor-pointer text-white/42">{t("tokenDetails")}</summary>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <div className="rounded-2xl bg-black/20 p-3">Chain: {normalizedInput.chain}</div>
-                  <div className="rounded-2xl bg-black/20 p-3">Source: {normalizedInput.source.replaceAll("_", " ")}</div>
-                  <div className="rounded-2xl bg-black/20 p-3">Contract: {normalizedInput.contractAddress ?? "unresolved"}</div>
-                  <div className="rounded-2xl bg-black/20 p-3">Pair: {normalizedInput.pairAddress ?? "N/A"}</div>
+                  <div className="rounded-2xl bg-black/20 p-3">{t("chainLabel")} {normalizedInput.chain}</div>
+                  <div className="rounded-2xl bg-black/20 p-3">{t("sourceLabel")} {normalizedInput.source.replaceAll("_", " ")}</div>
+                  <div className="rounded-2xl bg-black/20 p-3">{t("contractLabel")} {normalizedInput.contractAddress ?? t("unresolved")}</div>
+                  <div className="rounded-2xl bg-black/20 p-3">{t("pairLabel")} {normalizedInput.pairAddress ?? t("notAvailable")}</div>
                 </div></details>
               ) : null}
             </div>
             <div className="glass-panel rounded-[28px] p-6">
-              <h2 className="text-xl font-semibold">Top reasons</h2>
+              <h2 className="text-xl font-semibold">{t("topReasons")}</h2>
               <div className="mt-4 space-y-3">
                 {(report?.topReasons.length ? report.topReasons : scan.reasons).slice(0, 3).map((reason) => (
                   <div key={reason} className="rounded-2xl bg-white/6 p-4 text-sm leading-6 text-white/62">
@@ -842,18 +930,18 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
             </div>
             {report?.agentCards.length ? (
               <details className="glass-panel rounded-lg p-5">
-                <summary className="cursor-pointer text-sm font-semibold text-white/68">Agent details</summary>
+                <summary className="cursor-pointer text-sm font-semibold text-white/68">{t("agentDetails")}</summary>
                 <div className="mt-5 grid gap-3">
                   {report.agentCards.map((card) => (
                     <article key={card.agent} className="rounded-2xl bg-white/6 p-4">
                       <div className="flex items-start justify-between gap-4">
                         <div>
                           <div className="text-sm font-semibold">{card.displayName}</div>
-                          <div className="mt-1 text-xs capitalize text-white/42">{card.scoreKind} score</div>
+                          <div className="mt-1 text-xs text-white/42">{t("scoreKindScore", { scoreKind: card.scoreKind })}</div>
                         </div>
                         <div className="text-right">
                           <div className="text-2xl font-semibold">{card.score}</div>
-                          <div className="text-xs text-white/42">{Math.round(card.confidence * 100)}% conf</div>
+                          <div className="text-xs text-white/42">{t("confidenceShort", { percent: Math.round(card.confidence * 100) })}</div>
                         </div>
                       </div>
                       <p className="mt-3 text-sm leading-6 text-white/54">{card.summary}</p>
@@ -890,7 +978,7 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
                               <div className="mt-2 flex flex-wrap gap-2">
                                 {factorMetaEntries(factor).map(([key, value]) => (
                                   <span key={`${card.agent}:${factor.label}:${key}`} className="rounded-full bg-white/8 px-2 py-1 text-[11px] capitalize opacity-75">
-                                    {key.replace(/([A-Z])/g, " $1")}: {formatMetaValue(value)}
+                                    {key.replace(/([A-Z])/g, " $1")}: {formatMetaValue(value, t, format)}
                                   </span>
                                 ))}
                               </div>
@@ -900,7 +988,7 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
                       </div>
                       {card.missingData.length ? (
                         <div className="mt-3 rounded-xl border border-brand bg-brand-subtle px-3 py-2 text-xs leading-5 text-brand-muted">
-                          Missing data: {card.missingData.map((item) => item.field).join(", ")}
+                          {t("missingData")} {card.missingData.map((item) => item.field).join(", ")}
                         </div>
                       ) : null}
                     </article>
@@ -910,45 +998,45 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
             ) : null}
             {whatWouldChange ? (
               <div className="glass-panel rounded-[28px] p-6">
-                <h2 className="text-xl font-semibold">What would change this decision</h2>
+                <h2 className="text-xl font-semibold">{t("whatWouldChangeDecision")}</h2>
                 <div className="mt-3 rounded-2xl bg-white/6 p-4 text-sm leading-6 text-white/58">{whatWouldChange.detail}</div>
               </div>
             ) : null}
             {executionPreview ? (
               <details className="glass-panel rounded-lg p-5">
-                <summary className="cursor-pointer text-sm font-semibold text-white/68">Execution details</summary>
+                <summary className="cursor-pointer text-sm font-semibold text-white/68">{t("executionDetails")}</summary>
                 <h2 className="mt-2 text-xl font-semibold">{executionPreview.title}</h2>
                 <div className="mt-5 grid gap-3 sm:grid-cols-2">
                   {[
-                    ["Suggested action", executionPreview.action?.replaceAll("_", " ") ?? "no action"],
-                    ["Trade required", executionPreview.action === "swap" || executionPreview.action === "reduce_exposure" ? "yes" : "no"],
-                    ["Quote status", executionPreview.quote?.status ?? "not required"],
-                    ["Simulation status", executionPreview.simulation?.status ?? "unavailable"],
-                    ["Wallet approval", executionPreview.requiresApproval ? "required" : "not prepared"],
-                    ["Server can sign", executionPreview.audit?.serverCanSign ? "yes" : "no"],
+                    [t("suggestedAction"), localizedStatus(executionPreview.action ?? "no action")],
+                    [t("tradeRequired"), localizedStatus(executionPreview.action === "swap" || executionPreview.action === "reduce_exposure" ? "yes" : "no")],
+                    [t("quoteStatus"), localizedStatus(executionPreview.quote?.status ?? "not required")],
+                    [t("simulationStatus"), localizedStatus(executionPreview.simulation?.status ?? "unavailable")],
+                    [t("walletApproval"), localizedStatus(executionPreview.requiresApproval ? "required" : "not prepared")],
+                    [t("serverCanSign"), localizedStatus(executionPreview.audit?.serverCanSign ? "yes" : "no")],
                   ].map(([label, value]) => (
                     <div key={label} className="rounded-2xl bg-white/6 p-4">
                       <div className="text-sm text-white/42">{label}</div>
-                      <div className="mt-1 text-lg font-semibold capitalize">{value}</div>
+                      <div className="mt-1 text-lg font-semibold">{value}</div>
                     </div>
                   ))}
                 </div>
                 {executionPreview.blockedReason ? (
                   <div className="mt-4 rounded-2xl risk-tone-high p-4 text-sm leading-6">
-                    Executable transaction unavailable: {executionPreview.blockedReason}
+                    {t("executableUnavailable", { reason: executionPreview.blockedReason })}
                   </div>
                 ) : null}
                 <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4 text-sm leading-6 text-white/58">
-                  Auto execute is off. The server cannot sign. Any real blockchain action requires explicit wallet approval.
+                  {t("autoExecuteOff")}
                 </div>
               </details>
             ) : null}
             {scan.market ? (
               <details className="glass-panel rounded-lg p-5">
-                <summary className="cursor-pointer text-sm font-semibold text-white/68">Market details</summary>
+                <summary className="cursor-pointer text-sm font-semibold text-white/68">{t("marketDetails")}</summary>
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <div className="mt-1 text-sm text-white/42">{scan.market.dexId ?? "DEX"} pair data</div>
+                    <div className="mt-1 text-sm text-white/42">{t("dexPairData", { dex: scan.market.dexId ?? "DEX" })}</div>
                   </div>
                   {scan.market.pairUrl ? (
                     <a
@@ -957,18 +1045,18 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
                       rel="noreferrer"
                       className="rounded-full border border-white/10 px-4 py-2 text-sm text-white/62 transition hover:text-white"
                     >
-                      Open
+                      {t("open")}
                     </a>
                   ) : null}
                 </div>
                 <div className="mt-5 grid gap-3 sm:grid-cols-2">
                   {[
-                    ["Liquidity", formatUsd(scan.market.liquidityUsd)],
-                    ["24h volume", formatUsd(scan.market.volume24hUsd)],
-                    ["FDV", formatUsd(scan.market.fdvUsd)],
-                    ["24h change", formatPercent(scan.market.priceChange24hPercent)],
-                    ["Pair age", typeof scan.market.pairAgeDays === "number" ? `${scan.market.pairAgeDays} days` : "N/A"],
-                    ["Price", formatUsd(scan.market.priceUsd)],
+                    [t("liquidity"), formatUsd(scan.market.liquidityUsd, t, format)],
+                    [t("volume24h"), formatUsd(scan.market.volume24hUsd, t, format)],
+                    [t("fdv"), formatUsd(scan.market.fdvUsd, t, format)],
+                    [t("change24h"), formatPercent(scan.market.priceChange24hPercent, t, format)],
+                    [t("pairAge"), typeof scan.market.pairAgeDays === "number" ? t("days", { count: scan.market.pairAgeDays }) : t("notAvailable")],
+                    [t("price"), formatUsd(scan.market.priceUsd, t, format)],
                   ].map(([label, value]) => (
                     <div key={label} className="rounded-2xl bg-white/6 p-4">
                       <div className="text-sm text-white/42">{label}</div>
@@ -983,20 +1071,20 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
             <RiskBreakdownCard items={scan.riskBreakdown} />
             {scan.dataQuality ? (
               <details className="glass-panel rounded-lg p-5">
-                <summary className="cursor-pointer text-sm font-semibold text-white/68">Data quality</summary>
+                <summary className="cursor-pointer text-sm font-semibold text-white/68">{t("dataQuality")}</summary>
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <div className="mt-1 text-sm leading-6 text-white/48">{scan.dataQuality.detail}</div>
                   </div>
-                  <span className="rounded-full border border-white/10 bg-white/7 px-3 py-1 text-xs capitalize text-white/54">
-                    {scan.dataQuality.mode}
-                  </span>
+                    <span className="rounded-full border border-white/10 bg-white/7 px-3 py-1 text-xs text-white/54">
+                      {localizedStatus(scan.dataQuality.mode)}
+                    </span>
                 </div>
                 <div className="mt-5 grid gap-3 sm:grid-cols-3">
                   {[
-                    ["Connected", scan.dataQuality.connectedSources],
-                    ["Unavailable", scan.dataQuality.unavailableSources],
-                    ["Mock", scan.dataQuality.mockSources],
+                    [t("connected"), scan.dataQuality.connectedSources],
+                    [t("statusUnavailable"), scan.dataQuality.unavailableSources],
+                    [t("mock"), scan.dataQuality.mockSources],
                   ].map(([label, value]) => (
                     <div key={label} className="rounded-2xl bg-white/6 p-4">
                       <div className="text-sm text-white/42">{label}</div>
@@ -1006,15 +1094,15 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
                 </div>
                 {scan.dataQuality.mockSources > 0 ? (
                   <div className="mt-4 rounded-2xl risk-tone-high p-4 text-sm leading-6">
-                    Demo/mock data is present and explicitly counted here. It must not be treated as live production evidence.
+                    {t("mockDataNotice")}
                   </div>
                 ) : null}
               </details>
             ) : null}
             {scan.dataQuality?.mode === "unavailable" || scan.dataQuality?.connectedSources === 0 ? (
               <NoDataState
-                title="Not enough connected sources"
-                detail="Provider unavailable or token identity could not be resolved. This result is conservative and uses no mock data."
+                title={t("notEnoughConnectedSources")}
+                detail={t("notEnoughSourcesDetail")}
               />
             ) : null}
           </div>
@@ -1036,13 +1124,13 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-brand">x402 payment required</div>
-                <h2 id={paymentModalTitleId} className="mt-1 text-xl font-semibold">Confirm detailed scan payment</h2>
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-brand">{t("x402PaymentRequired")}</div>
+                <h2 id={paymentModalTitleId} className="mt-1 text-xl font-semibold">{t("confirmDetailedPayment")}</h2>
               </div>
               <button
                 type="button"
                 onClick={cancelPayment}
-                aria-label="Close payment details"
+                aria-label={t("closePaymentDetails")}
                 className="rounded-full p-1 text-white/50 transition hover:bg-white/10 hover:text-white"
               >
                 <X className="h-5 w-5" />
@@ -1050,55 +1138,55 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
             </div>
 
             <p className="mt-3 text-sm leading-6 text-white/60">
-              Review the exact terms below. Your wallet only signs after you confirm; no payment is sent on cancel.
+              {t("reviewExactTerms")}
             </p>
 
             <dl className="mt-5 space-y-3 rounded-xl border border-white/10 bg-black/22 p-4 text-sm">
               <div className="flex flex-wrap justify-between gap-2">
-                <dt className="text-white/48">Asset</dt>
+                <dt className="text-white/48">{t("assetLabel")}</dt>
                 <dd className="font-medium">{paymentOption?.asset ?? paymentTerms?.asset ?? "USDC"}</dd>
               </div>
               <div className="flex flex-wrap justify-between gap-2">
-                <dt className="text-white/48">Amount</dt>
-                <dd className="font-medium">{paymentOption?.amount ?? "Shown by the x402 quote"}</dd>
+                <dt className="text-white/48">{t("amountLabel")}</dt>
+                <dd className="font-medium">{paymentOption?.amount ?? t("shownByQuote")}</dd>
               </div>
               <div className="flex flex-wrap justify-between gap-2">
-                <dt className="text-white/48">Price</dt>
+                <dt className="text-white/48">{t("price")}</dt>
                 <dd className="font-medium">{paymentTerms?.priceUsd ?? "$0.99"}</dd>
               </div>
               <div className="flex flex-wrap justify-between gap-2">
-                <dt className="text-white/48">Network</dt>
-                <dd className="font-medium">{paymentOption?.network ?? paymentTerms?.network ?? "Shown by the x402 quote"}</dd>
+                <dt className="text-white/48">{t("networkLabel")}</dt>
+                <dd className="font-medium">{paymentOption?.network ?? paymentTerms?.network ?? t("shownByQuote")}</dd>
               </div>
               <div className="space-y-1">
-                <dt className="text-white/48">Recipient (X402_PAY_TO)</dt>
+                <dt className="text-white/48">{t("recipientX402")}</dt>
                 <dd className="break-all font-mono text-xs text-white/80">
-                  {paymentOption?.payTo ?? paymentTerms?.payTo ?? "Shown by the x402 quote"}
+                  {paymentOption?.payTo ?? paymentTerms?.payTo ?? t("shownByQuote")}
                 </dd>
               </div>
             </dl>
 
-            {resumeCandidate ? (
+            {visibleResumeCandidate ? (
               <div className="mt-4 rounded-xl border border-brand/40 bg-brand-subtle p-4">
                 <div className="flex items-start gap-2 text-sm text-white/72">
                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
-                  <span>A matching recent receipt already covers this exact scan payload.</span>
+                  <span>{t("matchingReceipt")}</span>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={() => resumeWithReceipt(resumeCandidate)}
+                    onClick={() => resumeWithReceipt(visibleResumeCandidate)}
                     disabled={isBusy || actionsDisabled}
                     className="inline-flex h-10 items-center justify-center rounded-full bg-brand px-5 text-xs font-semibold text-[var(--color-fg-inverse)] transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    Resume with existing receipt
+                    {t("resumeWithReceipt")}
                   </button>
                   <button
                     type="button"
                     onClick={discardStoredReceipt}
                     className="inline-flex h-10 items-center justify-center rounded-full border border-white/15 px-5 text-xs text-white/60 transition hover:border-white/30 hover:text-white"
                   >
-                    Sign a new payment instead
+                    {t("signNewPayment")}
                   </button>
                 </div>
               </div>
@@ -1110,7 +1198,7 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
                 onClick={cancelPayment}
                 className="h-11 rounded-full border border-white/15 px-5 text-sm text-white/60 transition hover:border-white/30 hover:text-white"
               >
-                Cancel
+                {t("cancel")}
               </button>
               <button
                 ref={paymentModalRef}
@@ -1119,7 +1207,7 @@ export function TokenScanClient({ initialQuery = "MEME" }: { initialQuery?: stri
                 disabled={isPaymentWorking || actionsDisabled}
                 className="h-11 rounded-full bg-brand px-6 text-sm font-semibold text-[var(--color-fg-inverse)] transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Confirm &amp; sign payment
+                {t("confirmSignPayment")}
               </button>
             </div>
           </div>

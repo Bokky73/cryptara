@@ -20,13 +20,15 @@
     "test:recovery": "npm --prefix frontend run test:recovery",
     "test:stellar-rpc": "node scripts/check-stellar-rpc.mjs",
     "test:a11y": "npm --prefix frontend run test:a11y",
+    "test:i18n": "npm --prefix frontend run test:i18n",
+    "test:token-input": "npm --prefix frontend run test:token-input",
     "smoke": "node scripts/smoke-api.mjs",
     "bootstrap": "node scripts/bootstrap.mjs",
     "doctor": "node scripts/doctor.mjs",
     "seed": "node scripts/seed-dev.mjs",
     "reset": "node scripts/reset-dev.mjs",
     "monitor:production": "node scripts/monitor-production.mjs",
-    "quality:gate": "npm run deploy:check && npm run test:stellar-config && npm run test:simulation && npm run test:auto-mode && npm run test:agents && npm run test:a11y && npm run lint && npm run build",
+    "quality:gate": "npm run deploy:check && npm run test:stellar-config && npm run test:simulation && npm run test:auto-mode && npm run test:agents && npm run test:i18n && npm run test:token-input && npm run test:a11y && npm run lint && npm run build",
     "quality:gate:full": "npm run quality:gate && npm run smoke",
     "verify": "npm run quality:gate",
     "acceptance": "node scripts/acceptance-matrix.mjs",
@@ -43,7 +45,8 @@
     "test:erasure-residue": "npm --prefix frontend run test:erasure-residue",
     "test:privacy": "npm --prefix frontend run test:privacy",
     "test:e2e": "npm --prefix frontend run test:e2e",
-  "test:perf": "npm --prefix frontend run test:perf"
+    "test:perf": "npm --prefix frontend run test:perf --"
+
   },
   "dependencies": {
     "next": "16.4.6",

@@ -11,7 +11,7 @@ test("AppShell entry supports search, inert IME, navigation and no search persis
   const mutations: string[]=[];
   page.on("request", request => { if(request.method()==="POST"&&new URL(request.url()).pathname.startsWith("/api/"))mutations.push(request.url()); });
   await page.goto("/offline");
-  const trigger=page.getByRole("button",{name:"Search",exact:true});
+  const trigger=page.getByRole("button",{name:"Search routes and insights",exact:true});
   await trigger.focus();await page.keyboard.press("Control+k");
   const input=page.getByRole("combobox");await expect(input).toBeFocused();
   await input.fill("unmatched-private-query");await expect(page.getByRole("option")).toHaveCount(0);
@@ -24,7 +24,7 @@ test("AppShell entry supports search, inert IME, navigation and no search persis
 });
 test("mobile modal traps focus, blocks background controls and respects reduced motion", async ({page})=>{
   await page.setViewportSize({width:390,height:844});await page.emulateMedia({reducedMotion:"reduce"});
-  await page.goto("/offline");const trigger=page.getByRole("button",{name:"Search",exact:true});await trigger.click();
+  await page.goto("/offline");const trigger=page.getByRole("button",{name:"Search routes and insights",exact:true});await trigger.click();
   const input=page.getByRole("combobox"),close=page.getByRole("button",{name:"Close search"});
   await expect(input).toBeFocused();await input.press("Shift+Tab");await expect(close).toBeFocused();await close.press("Tab");await expect(input).toBeFocused();
   await input.press("ArrowDown");await expect(input).toHaveAttribute("aria-activedescendant","command-result-1");
