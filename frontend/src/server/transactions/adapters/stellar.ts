@@ -159,7 +159,7 @@ export function getStellarChainAdapter(options: StellarAdapterOptions): {
         return computeSimulatedHash(payload, options.network);
       }
       const transaction = TransactionBuilder.fromXDR(payload, networkPassphrase);
-      return transaction.hash().toString("hex");
+      return Buffer.from(transaction.hash()).toString("hex");
     },
     async submit(payload, overrides) {
       const simulator = getStellarSimulator(family, options.network);
@@ -175,7 +175,7 @@ export function getStellarChainAdapter(options: StellarAdapterOptions): {
         : (() => {
             try {
               const transaction = performPreSubmitChecks(payload, config, expectation);
-              return transaction.hash().toString("hex");
+              return Buffer.from(transaction.hash()).toString("hex");
             } catch (error) {
               throw new Error(error instanceof Error ? error.message : "Stellar XDR could not be parsed for the configured network passphrase.");
             }

@@ -18,7 +18,7 @@ export const GET = withApiHandler(
     rateLimit: { namespace: "alerts:list", limit: 60, windowMs: 60_000 },
   },
   async ({ query }) => {
-    return NextResponse.json({ alerts: listDiscoveryAlerts(query.walletAddress) });
+    return NextResponse.json({ alerts: await listDiscoveryAlerts(query.walletAddress) });
   },
 );
 
@@ -29,7 +29,7 @@ export const POST = withApiHandler(
     maxBodyBytes: 8 * 1024,
   },
   async ({ body }) => {
-    const alert = acknowledgeDiscoveryAlert(body.alertId);
+    const alert = await acknowledgeDiscoveryAlert(body.alertId);
 
     if (!alert) {
       return jsonError("not_found", "Alert not found");

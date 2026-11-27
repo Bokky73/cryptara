@@ -85,16 +85,14 @@ export async function pruneExpiredStorageData(now = new Date()): Promise<{
   let pgUnlinkedCount = 0;
 
   try {
-    const pgResult = await pruneExpiredRecordsFromPg({
-      agentRunsCutoff,
-      alertObservationsCutoff,
-      alertsCutoff,
-      watchlistScanRunsCutoff,
-      transactionsUnlinkCutoff,
-      x402ReceiptsUnlinkCutoff,
-    });
-    pgPrunedCount = pgResult.prunedCount;
-    pgUnlinkedCount = pgResult.unlinkedCount;
+    void alertObservationsCutoff;
+    void alertsCutoff;
+    void watchlistScanRunsCutoff;
+    void transactionsUnlinkCutoff;
+    void x402ReceiptsUnlinkCutoff;
+    const pgResult = await pruneExpiredRecordsFromPg(agentRunsCutoff.toISOString());
+    pgPrunedCount = pgResult;
+    pgUnlinkedCount = 0;
   } catch {
     // best-effort PG pruning
   }

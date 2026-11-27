@@ -29,7 +29,7 @@ function storageReader(): RunReader {
     // the `server-only` boundary.
     async getRun({ runId, walletAddress }) {
       const { getAgentRunRecord } = await import("@/server/storage");
-      const record = getAgentRunRecord(runId);
+      const record = await getAgentRunRecord(runId);
 
       // Filtered here as well as in the feature: the record leaves storage
       // only if it belongs to the caller.

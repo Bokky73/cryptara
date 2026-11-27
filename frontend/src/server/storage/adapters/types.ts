@@ -1,18 +1,24 @@
 import type {
   AgentResult,
   AgentRunRecord,
+  Alert,
   AlertDelivery,
+  AlertObservation,
+  AlertRule,
+  DiscoveryAlert,
   NotificationPreferences,
   RecommendationRecord,
   StorageCounts,
   StorageHealth,
   StorageProvider,
+  TransactionLifecycleEvent,
   TransactionRecord,
   TransactionObservation,
   UserApprovalRecord,
   UserRule,
   X402PaymentReceipt,
   WatchlistEntry,
+  WatchlistScanRun,
 } from "@/server/types";
 import type { RiskSnapshotRecord } from "@/server/snapshots/schema";
 
@@ -80,6 +86,7 @@ export interface AgentRunInsert {
   summary: string;
   results: AgentResult[];
   sourceStatuses: AgentRunRecord["sourceStatuses"];
+
   inputSnapshot: Record<string, unknown>;
   userAction: AgentRunRecord["userAction"];
   createdAt: string;
@@ -192,106 +199,166 @@ export function rowToAlertDelivery(row: AlertDeliveryRow | Record<string, unknow
   };
 }
 
+export type AlertBundle = {
+  rule: AlertRule;
+  observation: AlertObservation;
+  alert: Alert;
+  deliveries: AlertDelivery[];
+};
+
+export type WatchlistEntryInsert = WatchlistEntry;
+
+export type WatchlistScanRunInsert = {
+  id: string;
+  entryId: string;
+  walletAddress: string;
+  identityKey: string;
+  agentRunId?: string;
+  classification: string;
+  classificationReasons: string[];
+  confidence: number;
+  score: number;
+  sourceLineage: unknown[];
+  missingData: unknown[];
+  riskReport?: unknown;
+  status: string;
+  previousRunId?: string;
+  scannedAt: string;
+};
+
+export type DiscoveryAlertInsert = {
+  id: string;
+  walletAddress: string;
+  entryId?: string;
+  runId?: string;
+  kind: string;
+  title: string;
+  detail: string;
+  severity: string;
+  sourceLabel?: string;
+  acknowledged: boolean;
+  createdAt: string;
+};
+
+export type WalletExportData = Record<string, unknown[]>;
+
+export type WalletDeleteResult = {
+  deletedCount: number;
+  unlinkedAuditCount: number;
+};
+
 /**
  * Unified storage adapter interface.
- * Every method returns a Promise so the same API works for both
- * in-memory (synchronous → wrapped) and Supabase (real async I/O).
+ * Every read and write is async. The memory adapter wraps synchronous stores,
+ * while Postgres/Supabase adapters perform real I/O. Production mode never
+ * falls back to an in-memory source of truth.
  */
 export interface IStorageAdapter {
   readonly provider: StorageProvider;
   readonly persistent: boolean;
 
-  // ─── Agent runs ──────────────────────────────────────────────────
   listAgentRunRecords(walletAddress?: string): Promise<AgentRunRecord[]>;
   getAgentRunRecord(id: string): Promise<AgentRunRecord | null>;
   createAgentRunRecord(record: AgentRunInsert): Promise<AgentRunRecord>;
 
-  // ─── Recommendations ─────────────────────────────────────────────
   listRecommendationRecords(walletAddress?: string): Promise<RecommendationRecord[]>;
   createRecommendationRecord(record: RecommendationRecord): Promise<RecommendationRecord>;
 
-  // ─── Transactions ────────────────────────────────────────────────
   listTransactionRecords(walletAddress?: string): Promise<TransactionRecord[]>;
   getTransactionRecord(hash: string): Promise<TransactionRecord | null>;
+  getTransactionRecordForFamily(hash: string, family: "evm" | "stellar"): Promise<TransactionRecord | null>;
+  getTransactionRecordByIdempotencyKey(walletAddress: string, idempotencyKey: string): Promise<TransactionRecord | null>;
   createTransactionRecord(record: TransactionRecord): Promise<TransactionRecord>;
+  updateTransactionRecord(hash: string, patch: Partial<TransactionRecord>): Promise<TransactionRecord | null>;
+  removeTransactionRecordByHash(hash: string): Promise<boolean>;
+  listTransactionLifecycleEvents(hash: string): Promise<TransactionLifecycleEvent[]>;
+  createTransactionLifecycleEvent(event: TransactionLifecycleEvent): Promise<TransactionLifecycleEvent>;
   listTransactionObservations(hash: string): Promise<TransactionObservation[]>;
   createTransactionObservation(observation: TransactionObservation): Promise<TransactionObservation>;
 
-  // ─── Approvals ───────────────────────────────────────────────────
   listApprovalRecords(walletAddress?: string): Promise<UserApprovalRecord[]>;
   createApprovalRecord(record: UserApprovalRecord): Promise<UserApprovalRecord>;
 
-  // ─── User rules ──────────────────────────────────────────────────
   getUserRuleRecord(walletAddress: string): Promise<UserRule | null>;
   upsertUserRuleRecord(rule: UserRule): Promise<UserRule>;
 
-  // ─── x402 receipts ───────────────────────────────────────────────
   listX402PaymentReceipts(): Promise<X402PaymentReceipt[]>;
   getX402PaymentReceiptByHeaderHash(paymentHeaderHash: string): Promise<X402PaymentReceipt | null>;
+  getX402PaymentReceiptByTxHash(transactionHash: string): Promise<X402PaymentReceipt | null>;
   createX402PaymentReceipt(record: X402PaymentReceipt): Promise<X402PaymentReceipt>;
 
-  // ─── Public risk snapshots ──────────────────────────────────────
-  /** List risk snapshots, optionally narrowed to one canonical asset identity. */
   listRiskSnapshots(identityKey?: string): Promise<RiskSnapshotRecord[]>;
   getRiskSnapshot(id: string): Promise<RiskSnapshotRecord | null>;
   createRiskSnapshot(record: RiskSnapshotRecord): Promise<RiskSnapshotRecord>;
   revokeRiskSnapshot(id: string, revokedAt: string): Promise<RiskSnapshotRecord | null>;
-  // ─── Alert deliveries ────────────────────────────────────────────
-  listAlertDeliveries(alertId?: string, walletAddress?: string): Promise<AlertDelivery[]>;
-  getAlertDeliveryByIdempotencyKey(
-    walletAddress: string,
-    idempotencyKey: string,
-  ): Promise<AlertDelivery | null>;
-  createAlertDelivery(record: AlertDelivery): Promise<AlertDelivery>;
-  updateAlertDelivery(
-    id: string,
-    walletAddress: string,
-    patch: Partial<AlertDelivery>,
-  ): Promise<AlertDelivery | null>;
 
-  // ─── Notification preferences ───────────────────────────────
+  listAlertRules(walletAddress?: string): Promise<AlertRule[]>;
+  getAlertRule(id: string): Promise<AlertRule | null>;
+  upsertAlertRule(rule: AlertRule): Promise<AlertRule>;
+  deleteAlertRule(id: string, walletAddress?: string): Promise<boolean>;
+  ensureAlertRulesForWallet(walletAddress?: string): Promise<AlertRule[]>;
+  listAlertObservations(walletAddress?: string, limit?: number): Promise<AlertObservation[]>;
+  createAlertObservation(observation: AlertObservation): Promise<AlertObservation>;
+  listAlerts(walletAddress?: string, status?: Alert["status"], limit?: number): Promise<Alert[]>;
+  getAlert(id: string, walletAddress?: string): Promise<Alert | null>;
+  createAlert(alert: Alert): Promise<Alert>;
+  updateAlert(id: string, walletAddress: string, patch: Partial<Alert>): Promise<Alert | null>;
+  createAlertBundle(bundle: AlertBundle): Promise<AlertBundle>;
+
+  listAlertDeliveries(alertId?: string, walletAddress?: string): Promise<AlertDelivery[]>;
+  getAlertDeliveryByIdempotencyKey(walletAddress: string, idempotencyKey: string): Promise<AlertDelivery | null>;
+  createAlertDelivery(record: AlertDelivery): Promise<AlertDelivery>;
+  updateAlertDelivery(id: string, walletAddress: string, patch: Partial<AlertDelivery>): Promise<AlertDelivery | null>;
+
   getNotificationPreferences(scope: {
     walletAddress: string;
     chainFamily: "evm" | "stellar";
     network: string;
   }): Promise<NotificationPreferences | null>;
+  listNotificationPreferences(walletAddress?: string): Promise<NotificationPreferences[]>;
   upsertNotificationPreferences(prefs: NotificationPreferences): Promise<NotificationPreferences>;
+  deleteNotificationPreferences(id: string): Promise<boolean>;
 
-  // ─── Health & counts ─────────────────────────────────────────────
+  listWatchlistEntries(walletAddress?: string): Promise<WatchlistEntry[]>;
+  getWatchlistEntry(id: string): Promise<WatchlistEntry | null>;
+  addWatchlistEntry(entry: WatchlistEntry): Promise<{ entry: WatchlistEntry; alreadyExisted: boolean }>;
+  addWatchlistEntriesBulk(entries: WatchlistEntry[]): Promise<{ added: WatchlistEntry[] }>;
+  removeWatchlistEntry(id: string): Promise<boolean>;
+  updateWatchlistEntryDetails(id: string, details: Partial<WatchlistEntry>): Promise<WatchlistEntry | null>;
+  listWatchlistScanRuns(entryId?: string): Promise<WatchlistScanRun[]>;
+  addWatchlistScanRun(run: WatchlistScanRunInsert): Promise<WatchlistScanRun>;
+  updateWatchlistEntryLatestScan(
+    id: string,
+    update: {
+      scanRunId: string;
+      classification: WatchlistScanRun["classification"];
+      score: number;
+      scannedAt: string;
+      status: WatchlistScanRun["status"];
+    },
+  ): Promise<WatchlistEntry | null>;
+  createDiscoveryAlert(alert: DiscoveryAlertInsert): Promise<DiscoveryAlert>;
+  listDiscoveryAlerts(walletAddress?: string): Promise<DiscoveryAlert[]>;
+  acknowledgeDiscoveryAlert(id: string): Promise<DiscoveryAlert | null>;
+
+  exportWalletData(walletAddress: string, network?: string, chainFamily?: "evm" | "stellar"): Promise<WalletExportData>;
+  deleteWalletData(walletAddress: string, network?: string, chainFamily?: "evm" | "stellar"): Promise<WalletDeleteResult>;
+  pruneExpiredRecords(now: string): Promise<number>;
+
   getStorageHealth(): Promise<StorageHealth>;
   getStorageCounts(): Promise<StorageCounts>;
   performHealthProbe(): Promise<HealthProbeResult>;
-  // ─── Watchlist ───────────────────────────────────────────────────
-  addWatchlistEntriesBulk?(entries: WatchlistEntry[]): Promise<{ added: WatchlistEntry[] }>;
 
-  // ─── Retention / Erasure ─────────────────────────────────────────
-  /**
-   * Perform a full, structured wallet erasure for this adapter.
-   * Returns a per-table report of rows deleted or anonymized.
-   * The caller (eraseWalletData orchestrator) assembles the receipt.
-   */
   eraseWalletData?(
     walletAddress: string,
     chainFamily: "evm" | "stellar",
     network?: string,
   ): Promise<ErasureAdapterResult>;
-
-  /**
-   * Scan this adapter's stores for residual wallet identity after erasure.
-   * Returns any leaks found (empty array = clean).
-   */
   residueCheck?(
     walletAddress: string,
     chainFamily: "evm" | "stellar",
     network?: string,
   ): Promise<ResidueAdapterResult>;
-
-  /**
-   * Store an erasure receipt for compliance audit purposes.
-   * The receipt contains only a one-way wallet hash — never the raw address.
-   */
   storeErasureReceipt?(receipt: StoredErasureReceipt): Promise<StoredErasureReceipt>;
-
-  /** Retrieve an erasure receipt by its receiptId. */
   getErasureReceipt?(receiptId: string): Promise<StoredErasureReceipt | null>;
 }

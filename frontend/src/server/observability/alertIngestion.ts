@@ -46,15 +46,15 @@ export async function ingestAgentRunAlerts(record: AgentRunRecord): Promise<Inge
   // page would have no rules seeded, so all observations (including
   // rpc_degradation from unavailable providers) would silently produce no
   // alerts.
-  ensureDefaultRulesForWallet(walletAddress);
+  await ensureDefaultRulesForWallet(walletAddress);
 
   const observations: AlertObservation[] = extractObservationsForRun(record);
   const persistedObservationIds: string[] = [];
   const evaluations: AlertEvaluation[] = [];
-  const rules = listEnabledRulesForEvaluation(walletAddress);
+  const rules = await listEnabledRulesForEvaluation(walletAddress);
 
   for (const observation of observations) {
-    const persisted = createAlertObservation({
+    const persisted = await createAlertObservation({
       walletAddress,
       triggerType: observation.triggerType,
       observationKey: observation.observationKey,
@@ -90,12 +90,12 @@ export function scheduleIngestion(record: AgentRunRecord): void {
  * default rule set scoped to that wallet. Idempotent: if any rule already
  * exists for the wallet, skip.
  */
-export function ensureDefaultRulesForWallet(walletAddress: string): AlertRule[] {
+export async function ensureDefaultRulesForWallet(walletAddress: string): Promise<AlertRule[]> {
   const normalized = walletAddress.trim().toLowerCase();
 
   if (!normalized) return [];
 
-  const existing = listEnabledRulesForEvaluation(normalized);
+  const existing = await listEnabledRulesForEvaluation(normalized);
 
   if (existing.length > 0) return existing;
 
@@ -118,7 +118,7 @@ export function ensureDefaultRulesForWallet(walletAddress: string): AlertRule[] 
       createdAt: now,
       updatedAt: now,
     };
-    const persisted = upsertAlertRule(rule);
+    const persisted = await upsertAlertRule(rule);
     seeded.push(persisted);
   }
 

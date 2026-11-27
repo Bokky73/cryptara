@@ -60,7 +60,7 @@ const bodySchema = z.object({
   valueUsd: z.number().min(0).optional(),
   riskScore: z.number().min(0).max(100).optional(),
   sourceAccount: z.string().optional(),
-  simulationStatus: z.enum(["not_required", "pending", "passed", "failed", "unavailable"]).optional(),
+  simulationStatus: z.enum(["not_required", "pending", "passed", "failed", "unavailable", "unsupported"]).optional(),
   policyAllowed: z.boolean().optional(),
   policyViolations: z.array(z.string()).optional(),
   expectedEffects: z.array(z.object({
@@ -228,7 +228,7 @@ export async function POST(request: Request) {
     allowed: parsed.data.policyAllowed ?? true,
     violations: parsed.data.policyViolations ?? [],
   };
-  const existing = getTransactionRecord(parsed.data.txHash);
+  const existing = await getTransactionRecord(parsed.data.txHash);
   if (existing) {
     if (parsed.data.walletAddress.toLowerCase() !== (existing.walletAddress ?? "").toLowerCase()) {
       return NextResponse.json({
@@ -243,7 +243,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "duplicate_tx_hash", detail: "This transaction hash is already confirmed." }, { status: 409 });
     }
   } else {
-    createTransactionRecord({
+    await createTransactionRecord({
       hash: parsed.data.txHash,
       type: "approval",
       decisionAction: parsed.data.action,
@@ -303,7 +303,7 @@ export async function POST(request: Request) {
     }
   }
 
-  const approval = createApprovalRecord({
+  const approval = await createApprovalRecord({
     walletAddress: parsed.data.walletAddress,
     decisionId: parsed.data.decisionId,
     txHash: transaction.hash,

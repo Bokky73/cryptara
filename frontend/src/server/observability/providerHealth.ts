@@ -15,6 +15,28 @@ import { redactSecrets } from "@/server/observability/logging";
 
 // ── Types ──────────────────────────────────────────────────────────
 
+export type ProviderHealthRecordInput = {
+  provider: string;
+  kind: string;
+  ok: boolean;
+  latencyMs?: number;
+  errorCode?: string;
+  circuitState: CircuitState;
+};
+
+const providerHealthSamples = new Map<string, ProviderHealthRecordInput & { recordedAt: string }>();
+
+export function recordProviderHealth(input: ProviderHealthRecordInput): void {
+  providerHealthSamples.set(`${input.kind}:${input.provider}`, {
+    ...input,
+    recordedAt: new Date().toISOString(),
+  });
+}
+
+export function getProviderHealthSamples(): Array<ProviderHealthRecordInput & { recordedAt: string }> {
+  return [...providerHealthSamples.values()];
+}
+
 export type HealthStatus = "healthy" | "degraded" | "unavailable" | "unconfigured";
 
 export type ProviderHealthCheck = {
@@ -88,7 +110,8 @@ export function getCircuitHealthFor(providerKey: string): ProviderCircuitHealth 
  * meaning the provider should be treated as unavailable.
  */
 export function isProviderCircuitOpen(providerKey: string): boolean {
-  return sharedProviderCircuits.snapshot(providerKey)?.state === "open";
+  const key = redactSecrets(providerKey);
+  return sharedProviderCircuits.snapshots().find((entry) => entry.key === key)?.state === "open";
 }
 
 // ── Disable switches ───────────────────────────────────────────────

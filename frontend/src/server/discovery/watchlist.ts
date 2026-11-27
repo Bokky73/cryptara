@@ -124,7 +124,7 @@ export async function addToWatchlist(input: WatchlistEntryInput): Promise<AddWat
 
   const enriched: DiscoveryEntry = { ...input, resolved };
 
-  const { entry, alreadyExisted } = addWatchlistEntry({
+  const { entry, alreadyExisted } = await addWatchlistEntry({
     ...enriched,
     identityKey,
   });
@@ -136,7 +136,7 @@ export async function rescanWatchlistEntry(
   entryId: string,
   options: { walletAddress?: string; providers?: DiscoveryCandidateProviders } = {},
 ) {
-  const entry = getWatchlistEntry(entryId);
+  const entry = await getWatchlistEntry(entryId);
   if (!entry) {
     return { ok: false as const, error: "Entry not found" };
   }
@@ -179,7 +179,7 @@ export async function scanEntry(entry: WatchlistEntry, options: { walletAddress?
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown error";
-    const partialRun = addWatchlistScanRun({
+    const partialRun = await addWatchlistScanRun({
       entryId: entry.id,
       walletAddress: entry.walletAddress,
       identityKey: entry.identityKey,
@@ -201,9 +201,9 @@ export async function scanEntry(entry: WatchlistEntry, options: { walletAddress?
       status: "failed",
     });
 
-    const failedAlerts = deriveAlertsFromScan({
+    const failedAlerts = await deriveAlertsFromScan({
       entry,
-      previousRun: listWatchlistScanRuns(entry.id)[1],
+      previousRun: (await listWatchlistScanRuns(entry.id))[1],
       scan: {
         candidate,
         identity: resolveTokenIdentity(candidate as Parameters<typeof resolveTokenIdentity>[0]),
@@ -250,13 +250,13 @@ export async function scanEntry(entry: WatchlistEntry, options: { walletAddress?
       entry,
       scan: undefined,
       newRun: partialRun,
-      previousRun: listWatchlistScanRuns(entry.id)[1],
+      previousRun: (await listWatchlistScanRuns(entry.id))[1],
       stale: true,
       alerts: failedAlerts,
     };
   }
 
-  const runtimeRunRecord = createAgentRunRecord({
+  const runtimeRunRecord = await createAgentRunRecord({
     walletAddress: entry.walletAddress,
     mode: "discovery_candidate",
     inputSnapshot: {
@@ -273,7 +273,7 @@ export async function scanEntry(entry: WatchlistEntry, options: { walletAddress?
     results: scan.results,
   });
 
-  const newRun = addWatchlistScanRun({
+  const newRun = await addWatchlistScanRun({
     entryId: entry.id,
     walletAddress: entry.walletAddress,
     identityKey: entry.identityKey,
@@ -288,9 +288,9 @@ export async function scanEntry(entry: WatchlistEntry, options: { walletAddress?
     status: scan.decision.status === "blocked" ? "partial" : "completed",
   });
 
-  const alerts = deriveAlertsFromScan({
+  const alerts = await deriveAlertsFromScan({
     entry,
-    previousRun: listWatchlistScanRuns(entry.id)[1],
+    previousRun: (await listWatchlistScanRuns(entry.id))[1],
     scan,
     runId: newRun.id,
   });
@@ -300,7 +300,7 @@ export async function scanEntry(entry: WatchlistEntry, options: { walletAddress?
     entry,
     scan,
     newRun,
-    previousRun: listWatchlistScanRuns(entry.id)[1],
+    previousRun: (await listWatchlistScanRuns(entry.id))[1],
     alerts,
   };
 }
@@ -309,11 +309,11 @@ export async function removeFromWatchlist(entryId: string) {
   return removeEntry(entryId);
 }
 
-export function listWatchlist(walletAddress: string): WatchlistEntry[] {
+export async function listWatchlist(walletAddress: string): Promise<WatchlistEntry[]> {
   return listWatchlistEntries(walletAddress);
 }
 
-export function listWatchlistHistory(entryId: string): WatchlistScanRun[] {
+export async function listWatchlistHistory(entryId: string): Promise<WatchlistScanRun[]> {
   return listWatchlistScanRuns(entryId);
 }
 
@@ -335,13 +335,13 @@ const liquidityDropKeywords = [
   "liquidity exit",
 ];
 
-export function deriveAlertsFromScan(input: {
+export async function deriveAlertsFromScan(input: {
   scan: DiscoveryScanResult;
   previousRun?: WatchlistScanRun;
   entry: WatchlistEntry;
   runId?: string;
   forceTriggerKinds?: DiscoveryAlertKind[];
-}): DiscoveryAlert[] {
+}): Promise<DiscoveryAlert[]> {
   const triggers: AlertTrigger[] = [];
   const { scan, previousRun, entry } = input;
 
@@ -402,18 +402,20 @@ export function deriveAlertsFromScan(input: {
     }
   }
 
-  return triggers.map((trigger) =>
+  const runId = input.runId ?? (await listWatchlistHistory(entry.id))[0]?.id;
+
+  return Promise.all(triggers.map((trigger) =>
     createDiscoveryAlert({
       walletAddress: entry.walletAddress,
       entryId: entry.id,
-      runId: input.runId ?? listWatchlistHistory(entry.id)[0]?.id,
+      runId,
       kind: trigger.kind,
       title: trigger.title,
       detail: trigger.detail,
       severity: trigger.severity,
       sourceLabel: trigger.sourceLabel,
     }),
-  );
+  ));
 }
 
 export type { ScanDiscoveryResultSummary as DiscoveryScanSummary };

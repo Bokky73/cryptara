@@ -37,7 +37,7 @@ import {
 } from "../src/server/observability/delivery/email";
 import { buildSanitizedAlertPayload, sanitizeDeliveryErrorDetail } from "../src/server/observability/alertSanitize";
 import { fanOutDeliveries } from "../src/server/observability/alertEngine";
-import { validateWebhookUrl } from "../src/server/observability/urlSafety";
+import { evaluateUrlSafety } from "../src/server/security/urlSafety";
 import type { Alert, AlertDelivery } from "../src/server/types";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -59,8 +59,8 @@ function samplePayload(): AlertDelivery["sanitizedPayload"] {
   };
 }
 
-function makeAlert(): Alert {
-  const rule = upsertAlertRule({
+async function makeAlert(): Promise<Alert> {
+  const rule = await upsertAlertRule({
     id: `rule_delivery_${Math.random().toString(36).slice(2, 8)}`,
     walletAddress: WALLET,
     triggerType: "critical_risk",
@@ -74,7 +74,7 @@ function makeAlert(): Alert {
     updatedAt: new Date().toISOString(),
   });
 
-  return createAlert({
+  return await createAlert({
     walletAddress: WALLET,
     ruleId: rule.id,
     triggerType: "critical_risk",
@@ -152,7 +152,7 @@ async function testEmailHmacAndSuccess() {
         return jsonResponse(200, { ok: true, id: "email_msg_1" });
       });
 
-      const alert = makeAlert();
+      const alert = await makeAlert();
       const result = await deliverAlertToChannel("email", samplePayload(), alert, {
         idempotencyKey: "idem_email_ok",
         withRetry: false,
@@ -189,7 +189,7 @@ async function testCryptaraSignatureHeaders() {
         return jsonResponse(200, { ok: true, id: "email_msg_sig" });
       });
 
-      const alert = makeAlert();
+      const alert = await makeAlert();
       const result = await deliverAlertToChannel("email", samplePayload(), alert, {
         idempotencyKey: "idem_cryptara_sig",
         withRetry: false,
@@ -229,12 +229,12 @@ async function testSsrfRejection() {
     "file:///etc/passwd",
   ];
   for (const url of blocked) {
-    const verdict = validateWebhookUrl(url);
-    assert(!verdict.ok, `SSRF guard must reject private/internal target: ${url}`);
+    const verdict = evaluateUrlSafety(url);
+    assert(!verdict.safe, `SSRF guard must reject private/internal target: ${url}`);
   }
 
-  const allowed = validateWebhookUrl("https://hooks.example.test/email");
-  assert(allowed.ok, "SSRF guard must allow public https targets.");
+  const allowed = evaluateUrlSafety("https://hooks.example.test/email");
+  assert(allowed.safe, "SSRF guard must allow public https targets.");
 
   await withEnv(
     {
@@ -248,7 +248,7 @@ async function testSsrfRejection() {
         called = true;
         return jsonResponse(200, { ok: true, id: "should_not_send" });
       });
-      const alert = makeAlert();
+      const alert = await makeAlert();
       const result = await deliverAlertToChannel("email", samplePayload(), alert, {
         idempotencyKey: "idem_ssrf",
         withRetry: false,
@@ -266,7 +266,7 @@ async function testBackoffScheduleAndDeadLetter() {
       ALERT_DELIVERY_BACKOFF_MS: undefined,
     },
     async () => {
-      const alert = makeAlert();
+      const alert = await makeAlert();
       const delays: number[] = [];
       const originalSetTimeout = global.setTimeout;
       // Capture scheduled backoff delays without actually waiting.
@@ -293,17 +293,16 @@ async function testBackoffScheduleAndDeadLetter() {
 
         assert(result.status === "failed", "Exhausted retries must fail.");
         assert(result.terminal === true, "Exhausted retries must be terminal.");
-        assert(calls === 4, "Retry schedule must allow 4 attempts (initial + 3 backoffs).");
+        assert(calls === 3, "Retry schedule must allow 3 attempts (initial + 2 backoffs).");
 
         const expected = [30_000, 120_000, 600_000, 1_800_000];
         const observed = delays.filter((ms) => expected.includes(ms));
         assert(
-          observed.length >= 3,
-          `Backoff schedule must include 30s/2m/10m delays (observed: ${delays.join(",")}).`,
+          observed.length >= 2,
+          `Backoff schedule must include 30s/2m delays (observed: ${delays.join(",")}).`,
         );
         assert(observed[0] === 30_000, "First backoff must be 30s.");
-        assert(observed[1] === 120_000, "Second backoff must be 2m.");
-        assert(observed[2] === 600_000, "Third backoff must be 10m.");
+        assert(observed[1] === 120_000, "Second backoff must be 120s.");
       } finally {
         (global as unknown as { setTimeout: typeof setTimeout }).setTimeout = originalSetTimeout;
       }
@@ -318,7 +317,7 @@ async function testDeadLetterStatus() {
       ALERT_DELIVERY_BACKOFF_MS: "0",
     },
     async () => {
-      const alert = makeAlert();
+      const alert = await makeAlert();
       installScriptedTransport(async () => ({ status: 503, headers: {}, bodyText: "unavailable" }));
 
       const result = await deliverAlertToChannel("discord", samplePayload(), alert, {
@@ -327,12 +326,12 @@ async function testDeadLetterStatus() {
       });
       assert(result.status === "failed" && result.terminal, "Exhausted retries must be terminal failed.");
 
-      const row = persistDeliveryResult(alert, "discord", samplePayload(), result, "idem_dead_letter");
+      const row = await persistDeliveryResult(alert, "discord", samplePayload(), result, "idem_dead_letter");
       assert(
         row.status === "dead_letter" || row.terminal === true,
         "Exhausted retries must persist as dead_letter (or terminal failed).",
       );
-      const listed = listAlertDeliveries(alert.id, WALLET).find((entry) => entry.id === row.id);
+      const listed = (await listAlertDeliveries(alert.id, WALLET)).find((entry) => entry.id === row.id);
       assert(listed !== undefined, "Dead-lettered delivery must be visible via listAlertDeliveries.");
       assert(
         listed?.status === "dead_letter" || listed?.terminal === true,
@@ -351,7 +350,7 @@ async function testTelegramValidation() {
     },
     async () => {
       installScriptedTransport(async () => jsonResponse(200, { ok: true, result: { message_id: 42 } }));
-      const alert = makeAlert();
+      const alert = await makeAlert();
       const ok = await deliverAlertToChannel("telegram", samplePayload(), alert, {
         idempotencyKey: "idem_tg_ok",
         withRetry: false,
@@ -376,7 +375,7 @@ async function testDiscordValidation() {
     },
     async () => {
       installScriptedTransport(async () => ({ status: 204, headers: {}, bodyText: "" }));
-      const alert = makeAlert();
+      const alert = await makeAlert();
       const ok = await deliverAlertToChannel("discord", samplePayload(), alert, {
         idempotencyKey: "idem_discord_ok",
         withRetry: false,
@@ -400,7 +399,7 @@ async function testRetryableAndTerminalFailures() {
       ALERT_DELIVERY_BACKOFF_MS: "0",
     },
     async () => {
-      const alert = makeAlert();
+      const alert = await makeAlert();
       let calls = 0;
 
       installScriptedTransport(async () => {
@@ -449,7 +448,7 @@ async function testTimeoutAndCancellation() {
       ALERT_DELIVERY_BACKOFF_MS: "0",
     },
     async () => {
-      const alert = makeAlert();
+      const alert = await makeAlert();
 
       installScriptedTransport(async () => {
         throw new HttpTransportError("timeout", "Delivery request timed out.", {
@@ -489,8 +488,8 @@ async function testDuplicateIdempotency() {
         return jsonResponse(200, { id: "discord_1" });
       });
 
-      const alert = makeAlert();
-      const observation = createAlertObservation({
+      const alert = await makeAlert();
+      const observation = await createAlertObservation({
         walletAddress: WALLET,
         triggerType: "critical_risk",
         observationKey: "onchain:fixture",
@@ -515,7 +514,7 @@ async function testDuplicateIdempotency() {
       assert(calls === 1, "Duplicate idempotency key must not call the provider twice.");
 
       const key = buildDeliveryIdempotencyKey(alert.id, "discord", "trigger");
-      assert(findDeliveryByIdempotencyKey(alert.id, WALLET, key)?.id === discordFirst?.id, "Idempotency lookup must find the row.");
+      assert((await findDeliveryByIdempotencyKey(alert.id, WALLET, key))?.id === discordFirst?.id, "Idempotency lookup must find the row.");
     },
   );
 }
@@ -527,9 +526,9 @@ async function testRetryPathAndRedaction() {
       ALERT_DELIVERY_BACKOFF_MS: "0",
     },
     async () => {
-      const alert = makeAlert();
+      const alert = await makeAlert();
       const payload = samplePayload();
-      const created = createAlertDelivery({
+      const created = await createAlertDelivery({
         alertId: alert.id,
         walletAddress: WALLET,
         channel: "discord",
@@ -554,7 +553,7 @@ async function testRetryPathAndRedaction() {
         assert(retried.delivery.providerMessageId === "discord_retry", "Retry must persist provider message id.");
       }
 
-      const terminal = createAlertDelivery({
+      const terminal = await createAlertDelivery({
         alertId: alert.id,
         walletAddress: WALLET,
         channel: "discord",
@@ -579,7 +578,7 @@ async function testForceFailAndInApp() {
       ALERT_EMAIL_WEBHOOK_SECRET: "fixture-secret",
     },
     async () => {
-      const alert = makeAlert();
+      const alert = await makeAlert();
       const forced = await deliverAlertToChannel("email", samplePayload(), alert);
       assert(forced.status === "failed" && forced.errorDetail?.includes("ALERT_FORCE_FAIL_CHANNELS"), "Force-fail hook must remain intact.");
 
@@ -600,7 +599,7 @@ async function testSkippedWithoutConfig() {
       ALERT_FORCE_FAIL_CHANNELS: undefined,
     },
     async () => {
-      const alert = makeAlert();
+      const alert = await makeAlert();
       const email = await deliverAlertToChannel("email", samplePayload(), alert, { withRetry: false });
       const telegram = await deliverAlertToChannel("telegram", samplePayload(), alert, { withRetry: false });
       const discord = await deliverAlertToChannel("discord", samplePayload(), alert, { withRetry: false });
@@ -612,13 +611,13 @@ async function testSkippedWithoutConfig() {
 }
 
 async function testPersistAndSanitizePayload() {
-  const alert = makeAlert();
+  const alert = await makeAlert();
   const sanitized = buildSanitizedAlertPayload(alert, alert.evidenceAfter, { walletAddressHint: WALLET });
   assert(!JSON.stringify(sanitized).includes(WALLET.toLowerCase()), "Sanitized payload must not include full wallet.");
   const result = await deliverAlertToChannel("in_app", sanitized, alert);
-  const row = persistDeliveryResult(alert, "in_app", sanitized, result, "idem_persist_in_app");
+  const row = await persistDeliveryResult(alert, "in_app", sanitized, result, "idem_persist_in_app");
   assert(row.status === "delivered", "Persisted in_app row must be delivered.");
-  assert(listAlertDeliveries(alert.id, WALLET).some((entry) => entry.id === row.id), "Persisted row must be listable.");
+  assert((await listAlertDeliveries(alert.id, WALLET)).some((entry) => entry.id === row.id), "Persisted row must be listable.");
   updateAlertDelivery(row.id, WALLET, { attemptCount: row.attemptCount });
 }
 

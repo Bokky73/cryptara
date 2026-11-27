@@ -84,17 +84,17 @@ async function runScanForParams(params: ScanPageSearchParams): Promise<{
 
   return {
     scan,
-    alerts: listDiscoveryAlerts(wallet).slice(0, 5),
+    alerts: (await listDiscoveryAlerts(wallet)).slice(0, 5),
     entry: undefined,
     newRun: undefined,
     previousRunId: undefined,
   };
 }
 
-function priorRuns(entryId: string | undefined) {
+async function priorRuns(entryId: string | undefined) {
   if (!entryId) return [];
 
-  return listWatchlistScanRuns(entryId).slice(0, 8);
+  return (await listWatchlistScanRuns(entryId)).slice(0, 8);
 }
 
 export default async function DiscoveryScanPage({ searchParams }: { searchParams: Promise<ScanPageSearchParams> }) {
@@ -102,8 +102,8 @@ export default async function DiscoveryScanPage({ searchParams }: { searchParams
   const wallet = (params.wallet ?? DEFAULT_WALLET).trim().toLowerCase();
   const { scan, alerts, entry, newRun, previousRunId, error } = await runScanForParams(params);
 
-  const priorRunsList = priorRuns(params.entryId);
-  const watchlistEntries = listWatchlistEntries(wallet).slice(0, 6);
+  const priorRunsList = await priorRuns(params.entryId);
+  const watchlistEntries = (await listWatchlistEntries(wallet)).slice(0, 6);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col gap-8 px-6 py-12">

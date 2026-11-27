@@ -47,7 +47,7 @@ export async function PATCH(
   }
 
   // Find the existing transaction record or approval record
-  const existingApproval = findApprovalRecord(id);
+  const existingApproval = await findApprovalRecord(id);
 
   if (!existingApproval) {
     return NextResponse.json({ error: "approval_not_found", detail: `No approval record found with id: ${id}` }, { status: 404 });
@@ -58,15 +58,16 @@ export async function PATCH(
   const status = parsed.data.status;
 
   // If the transaction hash isn't recorded yet, create a transaction record
-  if (parsed.data.txHash && !getTransactionRecord(parsed.data.txHash)) {
+  if (parsed.data.txHash && !(await getTransactionRecord(parsed.data.txHash))) {
     const isStellar = status === "submitted" || status === "confirmed" || status === "failed";
-    createTransactionRecord({
+    await createTransactionRecord({
       hash: parsed.data.txHash,
       type: existingApproval.action === "create_trustline" ? "trustline_create" : "approval",
       decisionAction: existingApproval.action as AgentRecommendedAction | undefined,
       asset: existingApproval.asset ?? "Approval update",
       valueUsd: existingApproval.valueUsd ?? 0,
       status: status === "confirmed" ? "confirmed" : "submitted",
+      chainFamily: isStellar ? "stellar" : "evm",
       network: existingApproval.network ?? "unknown",
       walletAddress: existingApproval.walletAddress,
       userApproved: true,
@@ -82,9 +83,9 @@ export async function PATCH(
   }
 
   // Update the existing transaction record if hash matches
-  const existingTx = parsed.data.txHash ? getTransactionRecord(parsed.data.txHash) : undefined;
+  const existingTx = parsed.data.txHash ? await getTransactionRecord(parsed.data.txHash) : undefined;
   if (existingTx) {
-    createTransactionRecord({
+    await createTransactionRecord({
       ...existingTx,
       status: status === "confirmed" ? "confirmed"
         : status === "failed" ? "failed"
@@ -106,7 +107,7 @@ export async function PATCH(
 }
 
 // Find an approval record by id using the storage API
-function findApprovalRecord(id: string): {
+async function findApprovalRecord(id: string): Promise<{
   id: string;
   walletAddress: string;
   decisionId?: string;
@@ -117,8 +118,8 @@ function findApprovalRecord(id: string): {
   valueUsd?: number;
   status: string;
   createdAt: string;
-} | null {
-  const records = listApprovalRecords();
+} | null> {
+  const records = await listApprovalRecords();
   const found = records.find((record) => record.id === id);
   if (!found) return null;
 

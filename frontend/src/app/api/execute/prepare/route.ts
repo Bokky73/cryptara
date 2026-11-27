@@ -305,8 +305,7 @@ export const POST = withApiHandler(
       code: "auth_error",
       message: authz.reason ?? "Not authorized to prepare executions.",
       status: 403,
-      requestId,
-    });
+    }, { requestId });
   }
 
   const prepareGate = gateFeature("execute_prepare", data.walletAddress ?? "");
@@ -315,25 +314,23 @@ export const POST = withApiHandler(
       code: "feature_disabled",
       message: prepareGate.detail ?? "Execution preparation is disabled.",
       status: 403,
-      requestId,
-      legacy: { feature: "execute_prepare" },
-    });
+    }, { requestId, legacy: { feature: "execute_prepare" } });
   }
 
   try {
     assertApprovalOnly({ autoExecute: false });
   } catch (error) {
-    return jsonError({ code: "auth_error", message: error instanceof Error ? error.message : "Execution policy failed", status: 403, requestId });
+    return jsonError({ code: "auth_error", message: error instanceof Error ? error.message : "Execution policy failed", status: 403 }, { requestId });
   }
 
   try {
     assertPrepareAllowedByRecovery();
   } catch (error) {
-    return jsonError({ code: "incident_mode", message: error instanceof Error ? error.message : "Incident mode is active.", status: 423, requestId, legacy: { incidentMode: getIncidentMode() } });
+    return jsonError({ code: "incident_mode", message: error instanceof Error ? error.message : "Incident mode is active.", status: 423 }, { requestId, legacy: { incidentMode: getIncidentMode() } });
   }
 
   const { portfolio } = await getPortfolioSnapshot(data.walletAddress);
-  const rules = getUserRuleRecord(data.walletAddress ?? portfolio.walletAddress);
+  const rules = await getUserRuleRecord(data.walletAddress ?? portfolio.walletAddress);
   const preview = await buildExecutionPreviewFromPortfolio(portfolio, { ...data, rules });
 
   const walletAddress = data.walletAddress ?? portfolio.walletAddress;
@@ -365,7 +362,7 @@ export const POST = withApiHandler(
         if (effect.kind === "swap" || effect.kind === "transfer") {
           if (effect.fromToken && !preview.quote.route.some((t) => t.toLowerCase() === effect.fromToken!.toLowerCase())) {
             if (effect.fromToken !== preview.fromToken) {
-              return jsonError({ code: "expected_effects_mismatch", message: `Expected effect fromToken "${effect.fromToken}" does not match preview route or fromToken.`, status: 422, requestId });
+              return jsonError({ code: "expected_effects_mismatch", message: `Expected effect fromToken "${effect.fromToken}" does not match preview route or fromToken.`, status: 422 }, { requestId });
             }
           }
         }
@@ -411,7 +408,7 @@ export const POST = withApiHandler(
     rawPayload,
   };
 
-  const prepared = prepareTransaction(prepareInput);
+  const prepared = await prepareTransaction(prepareInput);
   const previewForClient: TransactionPreview = {
     ...preview,
     targetContract: preview.targetContract ?? displayTargetContract(chainFamily as "evm" | "stellar", data.expectedEffects),

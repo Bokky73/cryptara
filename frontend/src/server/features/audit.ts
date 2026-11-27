@@ -21,9 +21,10 @@ export interface FeatureFlagAuditInput {
  * decisions for these flags are always recorded as structured audit events.
  */
 export const SENSITIVE_FEATURE_FLAGS: readonly FeatureFlagKey[] = [
-  "FEATURE_PUBNET_PUBLISHING",
-  "FEATURE_EXECUTION_PREPARATION",
-  "FEATURE_AUTO_MODE_AUTHORIZATION",
+  "scan_token",
+  "execute_prepare",
+  "execute_submit",
+  "auto_mode_authorization",
 ] as const;
 
 export function isSensitiveFeatureFlag(key: FeatureFlagKey): boolean {

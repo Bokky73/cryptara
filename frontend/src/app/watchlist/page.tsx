@@ -96,12 +96,11 @@ function getAssetSubLabel(entry: WatchlistEntry): string | null {
 async function loadWatchlistWithScanMeta(wallet: string) {
   try {
     await ensureStorageReady();
-    const entries = listWatchlistEntries(wallet);
-    return entries.map((entry) => {
-      const recentRuns = listWatchlistScanRuns(entry.id).slice(0, 3);
-      const totalRuns = listWatchlistScanRuns(entry.id).length;
-      return { entry, recentRuns, totalRuns };
-    });
+    const entries = await listWatchlistEntries(wallet);
+    return Promise.all(entries.map(async (entry) => {
+      const runs = await listWatchlistScanRuns(entry.id);
+      return { entry, recentRuns: runs.slice(0, 3), totalRuns: runs.length };
+    }));
   } catch {
     return [];
   }

@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const records = listTransactionRecords(walletAddress);
+    const records = await listTransactionRecords(walletAddress);
     const report = await analyseFees(body, records, productionReader());
 
     return NextResponse.json({ report }, { headers: noStore });

@@ -11,7 +11,15 @@ import { HttpTransportError } from "@/server/observability/delivery/http";
 import { deliverEmailAlert } from "@/server/observability/delivery/email";
 import { deliverTelegramAlert } from "@/server/observability/delivery/telegram";
 import { deliverDiscordAlert } from "@/server/observability/delivery/discord";
-import { assertSafeWebhookUrl } from "@/server/observability/urlSafety";
+import { evaluateUrlSafety } from "@/server/security/urlSafety";
+
+function assertSafeWebhookUrl(url: string): string {
+  const result = evaluateUrlSafety(url);
+  if (!result.safe) {
+    throw new Error(`Unsafe webhook URL: ${result.issues.join(", ")}`);
+  }
+  return result.normalizedUrl ?? url;
+}
 
 export type DeliveryResult = {
   status: AlertDelivery["status"];
@@ -34,7 +42,7 @@ export type RetryAlertDeliveryResult =
   | { ok: true; delivery: AlertDelivery }
   | { ok: false; status: number; error: string };
 
-const MAX_ATTEMPTS = 4;
+const MAX_ATTEMPTS = 3;
 const DEFAULT_BACKOFF_MS = 250;
 
 /**
@@ -182,7 +190,7 @@ export async function deliverAlertToChannel(
     }
 
     if (result.terminal) {
-      return { ...stamped, terminal: true, status: "dead_letter" };
+      return { ...stamped, terminal: true };
     }
 
     lastFailure = stamped;
@@ -198,7 +206,7 @@ export async function deliverAlertToChannel(
   }
 
   return {
-    status: "dead_letter",
+    status: "failed",
     channel,
     errorDetail: lastFailure?.errorDetail ?? "Delivery failed after bounded retries.",
     attemptCount: maxAttempts,
@@ -216,26 +224,45 @@ export function buildDeliveryIdempotencyKey(
   return `${alertId}:${channel}:${event}`;
 }
 
-export function findDeliveryByIdempotencyKey(
+export async function findDeliveryByIdempotencyKey(
   alertId: string,
   walletAddress: string,
   idempotencyKey: string,
-): AlertDelivery | undefined {
+): Promise<AlertDelivery | undefined> {
   const wallet = walletAddress.trim().toLowerCase();
 
-  return listAlertDeliveries(alertId, wallet).find(
+  return (await listAlertDeliveries(alertId, wallet)).find(
     (delivery) => delivery.idempotencyKey === idempotencyKey,
   );
 }
 
-export function persistDeliveryResult(
+export async function enqueueAlertDelivery(
+  alert: Pick<Alert, "id" | "walletAddress">,
+  channel: AlertDeliveryChannel,
+  payload: AlertDelivery["sanitizedPayload"],
+  idempotencyKey: string,
+): Promise<AlertDelivery> {
+  const result = await deliverAlertToChannel(
+    channel,
+    payload,
+    {
+      walletAddress: alert.walletAddress,
+      triggerType: payload.triggerType,
+      severity: payload.severity,
+    },
+    { idempotencyKey, withRetry: false },
+  );
+  return persistDeliveryResult(alert, channel, payload, result, idempotencyKey);
+}
+
+export async function persistDeliveryResult(
   alert: Pick<Alert, "id" | "walletAddress">,
   channel: AlertDeliveryChannel,
   payload: AlertDelivery["sanitizedPayload"],
   result: DeliveryResult,
   idempotencyKey: string,
-): AlertDelivery {
-  const existing = findDeliveryByIdempotencyKey(alert.id, alert.walletAddress, idempotencyKey);
+): Promise<AlertDelivery> {
+  const existing = await findDeliveryByIdempotencyKey(alert.id, alert.walletAddress, idempotencyKey);
   const patch: Partial<AlertDelivery> = {
     status: result.status,
     attemptCount: result.attemptCount ?? 0,
@@ -253,14 +280,14 @@ export function persistDeliveryResult(
 
   if (existing) {
     return (
-      updateAlertDelivery(existing.id, alert.walletAddress, patch) ?? {
+      (await updateAlertDelivery(existing.id, alert.walletAddress, patch)) ?? {
         ...existing,
         ...patch,
       }
     );
   }
 
-  return createAlertDelivery({
+  return await createAlertDelivery({
     alertId: alert.id,
     walletAddress: alert.walletAddress,
     channel,
@@ -286,7 +313,7 @@ export async function retryAlertDelivery(
   walletAddress: string,
 ): Promise<RetryAlertDeliveryResult> {
   const wallet = walletAddress.trim().toLowerCase();
-  const delivery = listAlertDeliveries(undefined, wallet).find((row) => row.id === deliveryId);
+  const delivery = (await listAlertDeliveries(undefined, wallet)).find((row) => row.id === deliveryId);
 
   if (!delivery) {
     return { ok: false, status: 404, error: "Delivery not found." };
@@ -318,7 +345,7 @@ export async function retryAlertDelivery(
     },
   );
 
-  const updated = updateAlertDelivery(delivery.id, wallet, {
+  const updated = await updateAlertDelivery(delivery.id, wallet, {
     status: result.status,
     attemptCount: (delivery.attemptCount ?? 0) + (result.attemptCount ?? 1),
     ...(result.errorDetail
@@ -360,7 +387,7 @@ async function deliverOnce(
   options: DeliverAlertOptions,
 ): Promise<DeliveryResult> {
   try {
-    if (channel === "discord" || channel === "telegram") {
+    if (channel !== "in_app") {
       const destination = resolveWebhookDestination(channel, payload);
       if (destination) {
         try {
@@ -455,7 +482,11 @@ function resolveWebhookDestination(
   if (candidate) return candidate;
 
   if (channel === "discord") {
-    return process.env.DISCORD_WEBHOOK_URL || undefined;
+    return process.env.DISCORD_WEBHOOK_URL || process.env.ALERT_DISCORD_WEBHOOK_URL || undefined;
+  }
+
+  if (channel === "email") {
+    return process.env.ALERT_EMAIL_WEBHOOK_URL || undefined;
   }
 
   return undefined;

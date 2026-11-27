@@ -54,10 +54,10 @@ const preferencesPatchSchema = z.object({
 function resolveScope(wallet: string, chainFamily?: string, network?: string) {
   const family = chainFamily === "stellar" ? "stellar" : "evm";
   const net = network && network.trim() ? network.trim() : family === "stellar" ? "stellar-testnet" : "legacy-evm";
-  return { chainFamily: family as "evm" | "stellar", network: net, wallet };
+  return { chainFamily: family as "evm" | "stellar", network: net, walletAddress: wallet };
 }
 
-export function GET(request: NextRequest) {
+export async function GET(request: NextRequest) {
   const rateLimited = checkRateLimitProfile(request, "alertRead");
   if (rateLimited) return rateLimited;
 
@@ -69,7 +69,7 @@ export function GET(request: NextRequest) {
   const wallet = session.wallet!;
 
   const scope = resolveScope(wallet, url.searchParams.get("chainFamily") ?? undefined, url.searchParams.get("network") ?? undefined);
-  const existing = getNotificationPreferences(scope);
+  const existing = await getNotificationPreferences(scope);
 
   const preferences: NotificationPreferences =
     existing ?? defaultNotificationPreferences({ walletAddress: wallet, chainFamily: scope.chainFamily, network: scope.network });
@@ -100,7 +100,7 @@ export async function PUT(request: NextRequest) {
   const wallet = session.wallet!;
 
   const scope = resolveScope(wallet, parsed.data.chainFamily, parsed.data.network);
-  const base = getNotificationPreferences(scope);
+  const base = await getNotificationPreferences(scope);
   const defaults = defaultNotificationPreferences({
     walletAddress: wallet,
     chainFamily: scope.chainFamily,
@@ -134,7 +134,7 @@ export async function PUT(request: NextRequest) {
     updatedAt: new Date().toISOString(),
   };
 
-  const saved = upsertNotificationPreferences(merged);
+  const saved = await upsertNotificationPreferences(merged);
 
   return withCacheHeaders(NextResponse.json(saved), "alerts");
 }

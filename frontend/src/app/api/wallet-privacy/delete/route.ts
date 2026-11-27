@@ -4,6 +4,7 @@ import { resolveWalletSession } from "@/server/security/walletSession";
 import { checkRateLimitProfile } from "@/server/security/rateLimit";
 import { eraseWalletData } from "@/server/privacy/retention/erase";
 import { deleteWalletDataFromPg } from "@/server/storage";
+import { isPersistentStorage } from "@/server/storage/adapters";
 import type { PgErasureResult } from "@/server/privacy/retention/erase";
 
 /**
@@ -24,6 +25,9 @@ async function pgEraseDelegate(
   network: string | undefined,
   chainFamily: "evm" | "stellar",
 ): Promise<PgErasureResult> {
+  if (!isPersistentStorage()) {
+    return { tables: [] };
+  }
   const result = await deleteWalletDataFromPg(walletAddress, network, chainFamily);
   return {
     tables: [

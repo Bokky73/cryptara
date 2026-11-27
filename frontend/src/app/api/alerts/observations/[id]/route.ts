@@ -14,7 +14,7 @@ export function GET(request: NextRequest, context: { params: Promise<{ id: strin
     const session = resolveWalletSession(request, { suppliedWallet: url.searchParams.get("walletAddress") ?? undefined });
     if (session.response) return session.response;
     const wallet = session.wallet!;
-    const observation = listAlertObservations(wallet, 500).find((entry) => entry.id === params.id);
+    const observation = (await listAlertObservations(wallet, 500)).find((entry) => entry.id === params.id);
 
     if (!observation) {
       return NextResponse.json({ error: "observation not found for wallet" }, { status: 404 });

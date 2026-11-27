@@ -1,3 +1,4 @@
+import type { AlertRule } from "@/server/types";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { withCacheHeaders } from "@/server/cache/strategy";
@@ -40,13 +41,13 @@ const ruleSchema = z.object({
   enabled: z.boolean().default(true),
 });
 
-function upsertRuleForWallet(
+async function upsertRuleForWallet(
   wallet: string,
   data: z.infer<typeof ruleSchema>,
-): ReturnType<typeof upsertAlertRule> {
-  ensureDefaultRulesForWallet(wallet);
+): Promise<AlertRule> {
+  await ensureDefaultRulesForWallet(wallet);
   const existingForKey = data.observationKey
-    ? listAlertRules(wallet).find(
+    ? (await listAlertRules(wallet)).find(
         (rule) => rule.triggerType === data.triggerType && rule.observationKey === data.observationKey,
       )
     : undefined;
@@ -79,10 +80,10 @@ export const GET = withApiHandler(
     if (session.response) return session.response;
     const wallet = session.wallet!;
 
-    ensureDefaultRulesForWallet(wallet);
+    await ensureDefaultRulesForWallet(wallet);
 
     return withCacheHeaders(
-      NextResponse.json(listAlertRules(wallet)),
+      NextResponse.json(await listAlertRules(wallet)),
       "alertRules",
     );
   },
@@ -94,12 +95,12 @@ export const POST = withApiHandler(
     rateLimit: "alertRuleWrite",
     auth: "wallet",
   },
-  async (request: NextRequest, { data }) => {
+  async ({ request, data }) => {
     const session = resolveWalletSession(request, { suppliedWallet: data.walletAddress });
     if (session.response) return session.response;
     const wallet = session.wallet!;
 
-    const record = upsertRuleForWallet(wallet, data);
+    const record = await upsertRuleForWallet(wallet, data);
 
     return withCacheHeaders(NextResponse.json(record), "alertRules");
   },
@@ -111,12 +112,12 @@ export const PUT = withApiHandler(
     rateLimit: "alertRuleWrite",
     auth: "wallet",
   },
-  async (request: NextRequest, { data }) => {
+  async ({ request, data }) => {
     const session = resolveWalletSession(request, { suppliedWallet: data.walletAddress });
     if (session.response) return session.response;
     const wallet = session.wallet!;
 
-    const record = upsertRuleForWallet(wallet, data);
+    const record = await upsertRuleForWallet(wallet, data);
 
     return withCacheHeaders(NextResponse.json(record), "alertRules");
   },
@@ -144,7 +145,7 @@ export const DELETE = withApiHandler(
       });
     }
 
-    const rule = getAlertRule(id);
+    const rule = await getAlertRule(id);
     if (!rule) {
       return jsonError("rule not found", {
         status: 404,
@@ -161,7 +162,7 @@ export const DELETE = withApiHandler(
     }
 
     return withCacheHeaders(
-      NextResponse.json({ deleted: deleteAlertRule(id, wallet) }),
+      NextResponse.json({ deleted: await deleteAlertRule(id, wallet) }),
       "alertRules",
     );
   },

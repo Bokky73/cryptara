@@ -271,12 +271,10 @@ export function gateFeature(
   });
   recordFeatureFlagEvaluation({
     key,
-    enabled: decision.enabled,
-    reason: decision.reason,
+    decision,
     environment,
     network: options?.network,
-    correlationId: options?.correlationId,
-    rolloutBucket: decision.rolloutBucket,
+    correlationId: options?.correlationId ?? "",
   });
   return decision;
 }

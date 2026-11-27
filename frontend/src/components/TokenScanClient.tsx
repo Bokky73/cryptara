@@ -1216,3 +1216,4 @@ export function TokenScanClient({ initialQuery = "MEME", initialChain, autoRun =
     </div>
   );
 }
+}

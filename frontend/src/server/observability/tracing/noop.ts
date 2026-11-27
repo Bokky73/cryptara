@@ -10,6 +10,7 @@ export const noopSpan: Span = {
   setAttributes: () => noopSpan,
   addEvent: () => noopSpan,
   addLink: () => noopSpan,
+  addLinks: () => noopSpan,
   setStatus: () => noopSpan,
   updateName: () => noopSpan,
   end: () => undefined,

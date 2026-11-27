@@ -19,7 +19,7 @@ export default async function WatchlistCollectionsPage({
   const network = params.network ?? "ethereum";
 
   const availableEntryIds = account
-    ? listWatchlist(account)
+    ? (await listWatchlist(account))
         .filter((entry) => (entry.network ?? entry.chain ?? "").toLowerCase() === network.toLowerCase())
         .map((entry) => entry.id)
     : [];

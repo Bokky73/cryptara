@@ -15,7 +15,7 @@ const querySchema = z.object({
   limit: z.coerce.number().min(1).max(500).optional(),
 });
 
-export function GET(request: NextRequest) {
+export async function GET(request: NextRequest) {
   const rateLimited = checkRateLimitProfile(request, "alertRead");
   if (rateLimited) return rateLimited;
 
@@ -34,20 +34,22 @@ export function GET(request: NextRequest) {
   if (session.response) return session.response;
   const wallet = session.wallet!;
 
-  const alerts = listAlerts(wallet, parsed.data.status, parsed.data.limit);
-  const enriched = alerts.map((alert) => {
-    const deliveries = listAlertDeliveries(alert.id, wallet);
-    const observations = listAlertObservations(wallet).filter((entry) => entry.observationKey === alert.observationKey);
-    const matchingRules = listAlertRules(wallet).filter((rule) => rule.id === alert.ruleId);
+  const alerts = await listAlerts(wallet, parsed.data.status, parsed.data.limit);
+  const enriched = await Promise.all(alerts.map(async (alert) => {
+    const [deliveries, observations, matchingRules] = await Promise.all([
+      listAlertDeliveries(alert.id, wallet),
+      listAlertObservations(wallet),
+      listAlertRules(wallet),
+    ]);
 
     return {
       ...alert,
       deliverySummary: summarizeDeliveries(deliveries),
       deliveryCount: deliveries.length,
-      observableHistoryCount: observations.length,
-      matchingRule: matchingRules[0] ?? null,
+      observableHistoryCount: observations.filter((entry) => entry.observationKey === alert.observationKey).length,
+      matchingRule: matchingRules.find((rule) => rule.id === alert.ruleId) ?? null,
     };
-  });
+  }));
 
   return withCacheHeaders(
     NextResponse.json({

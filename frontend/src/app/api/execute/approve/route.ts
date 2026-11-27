@@ -104,7 +104,7 @@ export async function POST(request: Request) {
 
 async function handleRejection(input: { idempotencyKey: string; walletAddress: string; reason?: string }) {
   try {
-    const record = getTransactionRecordByIdempotencyKey(input.walletAddress, input.idempotencyKey);
+    const record = await getTransactionRecordByIdempotencyKey(input.walletAddress, input.idempotencyKey);
 
     if (record) {
       await recordUserRejection(record.hash, {

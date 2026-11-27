@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withX402 } from "@x402/next";
 import { z } from "zod";
-import { jsonError } from "@/server/api/errors";
+import { jsonError, type ApiErrorCode } from "@/server/api/errors";
 import { runTokenScan } from "@/server/scan/tokenScan";
 import { checkRateLimit } from "@/server/security/rateLimit";
 import { createX402PaymentReceipt } from "@/server/storage";
@@ -38,20 +38,19 @@ async function deepScanHandler(request: NextRequest): Promise<NextResponse<unkno
   // Verify the HMAC-signed internal settlement context produced by the x402
   // middleware/facilitator. Client-supplied `x-payment-*` headers are never
   // trusted here; spoofed or replayed payments are rejected with HTTP 402.
-  const guard = assertFreshX402Payment({ request, requestBody: parsed.data, config });
+  const guard = await assertFreshX402Payment({ request, requestBody: parsed.data, config });
 
   if (!guard.ok) {
     return jsonError({
-      code: guard.error as any,
+      code: guard.error as ApiErrorCode,
       message: guard.detail,
       status: guard.status,
-      legacy: { receiptId: guard.receiptId },
-    });
+    }, { legacy: { receiptId: guard.receiptId } });
   }
 
   // Persist a chain-aware receipt only after the signed settlement context has
   // been verified and the tx hash confirmed as not already redeemed.
-  const receipt = createX402PaymentReceipt({
+  const receipt = await createX402PaymentReceipt({
     requestId: guard.requestId,
     paymentHeaderHash: guard.paymentHeaderHash,
     walletAddress: parsed.data.walletAddress,

@@ -1007,10 +1007,22 @@ export type AgentRunRecord = {
 
 export type StorageProvider = "memory" | "supabase_postgres";
 
+export type StoragePoolStatus = {
+  configured: boolean;
+  connected: boolean;
+  total: number;
+  idle: number;
+  waiting: number;
+  latencyMs?: number;
+  checkedAt: string;
+};
+
 export type StorageHealth = {
   provider: StorageProvider;
   persistent: boolean;
   detail: string;
+  latencyMs?: number;
+  pool?: StoragePoolStatus;
   schema?: {
     tables: string[];
     adapterApi: string[];
@@ -1197,7 +1209,7 @@ export type AlertTriggerType =
 
 export type AlertDeliveryChannel = "in_app" | "email" | "telegram" | "discord";
 
-export type AlertDeliveryStatus = "pending" | "delivered" | "failed" | "skipped";
+export type AlertDeliveryStatus = "pending" | "delivered" | "failed" | "skipped" | "dead_letter";
 
 export type AlertStatus = "triggered" | "recovered" | "acknowledged";
 

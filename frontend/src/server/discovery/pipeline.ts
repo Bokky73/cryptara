@@ -22,6 +22,18 @@ import { fetchLiveDiscoveryCandidates } from "@/server/discovery/sources";
 import { dedupeDiscoveryCandidates } from "@/server/discovery/dedup";
 import { DEFAULT_DISCOVERY_LIMITS, type DiscoveryLimits } from "@/server/discovery/pollingGuard";
 
+type ClassifiedDiscoveryCandidate = DiscoveryCandidate & {
+  identityKey?: string;
+  classification?: DiscoveryClassification;
+  classificationProvenance?: {
+    classification: DiscoveryClassification;
+    source: string;
+    identityKey: string;
+    reasons?: string[];
+    classifiedAt: string;
+  };
+};
+
 export type DiscoveryCandidateProviders = {
   listCandidates?: (chain?: string) => Promise<DiscoveryCandidate[]>;
   onchain?: OnchainAgentProviders;
@@ -274,12 +286,13 @@ export async function scanDiscoveryCandidate(
 
   const identityInput = buildIdentityInput(candidate);
   const identity = getDiscoveryIdentity(identityInput);
-  const canonicalCandidate: DiscoveryCandidate = {
+  const classifiedInput = candidate as ClassifiedDiscoveryCandidate;
+  const canonicalCandidate: ClassifiedDiscoveryCandidate = {
     ...candidate,
     identityKey: identity.identityKey,
-    classification: candidate.classification ?? "watch",
-    classificationProvenance: candidate.classificationProvenance ?? {
-      classification: candidate.classification ?? "watch",
+    classification: classifiedInput.classification ?? "watch",
+    classificationProvenance: classifiedInput.classificationProvenance ?? {
+      classification: classifiedInput.classification ?? "watch",
       source: "discovery_pipeline",
       identityKey: identity.identityKey,
       classifiedAt: new Date().toISOString(),
@@ -436,7 +449,7 @@ export async function scanDiscoveryCandidate(
     createdAt: new Date().toISOString(),
   };
 
-  const classifiedCandidate: DiscoveryCandidate = {
+  const classifiedCandidate: ClassifiedDiscoveryCandidate = {
     ...canonicalCandidate,
     classification: finalClassification,
     classificationProvenance: {

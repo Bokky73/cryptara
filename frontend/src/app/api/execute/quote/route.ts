@@ -53,7 +53,7 @@ export const POST = withApiHandler(
 
   if (!result.quote) {
     // No route available: recommendation-only mode, no executable payload
-    return jsonError({ code: "not_found" as any, message: result.error ?? "No swap route available.", status: 404, legacy: { quote: null, unsupported: true, detail: "This pair has no available route. Approval is disabled; only a recommendation can be shown.", } });
+    return jsonError({ code: "not_found", message: result.error ?? "No swap route available.", status: 404 }, { legacy: { quote: null, unsupported: true, detail: "This pair has no available route. Approval is disabled; only a recommendation can be shown." } });
   }
 
   // ALWAYS return a fresh quote with current timestamp — never reuse stale data

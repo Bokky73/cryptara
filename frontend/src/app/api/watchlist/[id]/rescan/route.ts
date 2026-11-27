@@ -81,10 +81,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (session.response) return session.response;
 
   // Ownership check: entry must belong to the session wallet
-  const entry = getWatchlistEntry(id);
+  const entry = await getWatchlistEntry(id);
   if (!entry || entry.walletAddress.toLowerCase() !== session.wallet!.toLowerCase()) {
     return NextResponse.json({ error: "Entry not found or does not belong to this wallet." }, { status: 404 });
   }
 
-  return NextResponse.json({ runs: listWatchlistHistory(id) });
+  return NextResponse.json({ runs: await listWatchlistHistory(id) });
 }

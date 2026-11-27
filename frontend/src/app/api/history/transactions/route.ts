@@ -14,18 +14,18 @@ export async function GET(request: NextRequest) {
   const limitRaw = request.nextUrl.searchParams.get("limit");
   const limit = limitRaw ? Math.min(Math.max(1, parseInt(limitRaw, 10)), 200) : 50;
 
-  const result = listTransactionRecordsPaginated(walletAddress, { cursor, limit });
-  const items = result.items.map((record) => ({
+  const result = await listTransactionRecordsPaginated(walletAddress, { cursor, limit });
+  const items = await Promise.all(result.items.map(async (record) => ({
     ...record,
-    events: listTransactionLifecycleEvents(record.hash),
-    observations: listTransactionObservations(record.hash),
+    events: await listTransactionLifecycleEvents(record.hash),
+    observations: await listTransactionObservations(record.hash),
     finality: {
       confirmations: record.confirmationCount ?? 0,
       required: record.requiredConfirmations ?? 1,
       reached: record.finalityReached ?? false,
     },
     explorerUrl: record.explorerUrl ?? attachExplorerUrl({ hash: record.hash, network: record.network, chainFamily: getChainFamily(record.network) }),
-  }));
+  })));
 
   return withCacheHeaders(NextResponse.json({ ...result, items }), "transactions");
 }
