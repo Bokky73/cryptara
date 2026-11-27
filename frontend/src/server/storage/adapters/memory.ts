@@ -415,12 +415,17 @@ export class MemoryStorageAdapter implements IStorageAdapter {
         pref.chainFamily === prefs.chainFamily &&
         pref.network === network,
     );
+    const id =
+      prefs.id ??
+      (index >= 0
+        ? preferences[index].id
+        : `nfpref_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`);
     const record: NotificationPreferences = {
       ...prefs,
-      id: index >= 0 ? preferences[index].id : `nfpref_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      id,
       walletAddress: normalizedWallet(prefs.walletAddress),
       network,
-      updatedAt: new Date().toISOString(),
+      updatedAt: prefs.updatedAt ?? new Date().toISOString(),
     };
     if (index >= 0) preferences[index] = record;
     else preferences.unshift(record);
@@ -607,9 +612,17 @@ export class MemoryStorageAdapter implements IStorageAdapter {
     return { deletedCount, unlinkedAuditCount };
   }
 
-  async pruneExpiredRecords(_now: string): Promise<number> {
-    void _now;
-    return 0;
+  async pruneExpiredRecords(now: string): Promise<number> {
+    const snapshots = store("__cryptaraRiskSnapshots");
+    const expiresAt = Date.parse(now);
+    if (!Number.isFinite(expiresAt)) return 0;
+    const remaining = snapshots.filter((record) => {
+      const recordExpiry = Date.parse(record.expiresAt);
+      return !Number.isFinite(recordExpiry) || recordExpiry >= expiresAt;
+    });
+    const removed = snapshots.length - remaining.length;
+    memoryStore.__cryptaraRiskSnapshots = remaining;
+    return removed;
   }
 
   async getStorageHealth(): Promise<StorageHealth> {

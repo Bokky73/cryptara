@@ -569,6 +569,10 @@ begin
   exception when others then null;
   end;
   begin
+    alter table watchlist_entries add column if not exists successful_scan_run_ids jsonb not null default '[]'::jsonb;
+  exception when others then null;
+  end;
+  begin
     alter table watchlist_entries add column if not exists pair_address text;
   exception when others then null;
   end;
@@ -753,6 +757,7 @@ create table if not exists watchlist_entries (
   latest_scan_run_id text,
   latest_classification text check (latest_classification in ('watch', 'risky', 'scam', 'early_opportunity')),
   latest_score integer,
+  successful_scan_run_ids jsonb not null default '[]'::jsonb,
   latest_status text check (latest_status in ('completed', 'partial', 'failed', 'stale')),
   created_at timestamptz not null default now()
 );

@@ -8,7 +8,6 @@
  */
 
 import { createRequire } from "node:module";
-import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
   Alert,
@@ -163,7 +162,10 @@ function wallet(value: unknown): string {
 }
 
 function rowToAgentRun(row: Record<string, unknown>): AgentRunRecord {
-  const snapshot = (row.input_snapshot ?? {}) as Record<string, unknown>;
+  const storedSnapshot = (row.input_snapshot ?? {}) as Record<string, unknown>;
+  const results = (storedSnapshot.resultSnapshots as AgentRunRecord["results"]) ?? [];
+  const snapshot = { ...storedSnapshot };
+  delete snapshot.resultSnapshots;
   return {
     id: asString(row.id),
     walletAddress: wallet(row.wallet_address),
@@ -174,7 +176,7 @@ function rowToAgentRun(row: Record<string, unknown>): AgentRunRecord {
     decisionScore: asNumber(row.decision_score),
     confidence: asNumber(row.confidence),
     summary: asString(row.summary),
-    results: (snapshot.resultSnapshots as AgentRunRecord["results"]) ?? [],
+    results,
     sourceStatuses: (row.source_statuses as AgentRunRecord["sourceStatuses"]) ?? [],
     inputSnapshot: snapshot,
     userAction: (row.user_action as AgentRunRecord["userAction"]) ?? "pending",
@@ -635,6 +637,16 @@ export class PostgresStorageAdapter implements IStorageAdapter {
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  async close(): Promise<void> {
+    const pool = this.pool;
+    this.pool = null;
+    this.connectPromise = null;
+    this.connected = false;
+    this.connectedAt = null;
+    this.schemaVerified = false;
+    if (pool) await pool.end();
   }
 
   getHealthSnapshot() {
@@ -1244,10 +1256,12 @@ export class PostgresStorageAdapter implements IStorageAdapter {
   }
 
   async updateAlertDelivery(id: string, walletAddress: string, patch: Partial<AlertDelivery>): Promise<AlertDelivery | null> {
-    const existing = await this.getAlertDeliveryByIdempotencyKey(walletAddress, patch.idempotencyKey ?? "");
-    const current = existing ?? (await this.one("SELECT * FROM alert_deliveries WHERE id = $1 AND wallet_address = $2", [id, walletAddress.trim().toLowerCase()]));
+    const current = await this.one(
+      "SELECT * FROM alert_deliveries WHERE id = $1 AND wallet_address = $2",
+      [id, walletAddress.trim().toLowerCase()],
+    );
     if (!current) return null;
-    const merged = rowToAlertDelivery({ ...current, ...alertDeliveryToRow({ ...rowToAlertDelivery(current), ...patch }) });
+    const merged = { ...rowToAlertDelivery(current), ...patch };
     const row = alertDeliveryToRow(merged);
     await this.run(
       `UPDATE alert_deliveries SET status = $3, error_detail = $4, attempt_count = $5, sent_at = $6, terminal = $7
@@ -1264,7 +1278,7 @@ export class PostgresStorageAdapter implements IStorageAdapter {
   }): Promise<NotificationPreferences | null> {
     const row = await this.one(
       "SELECT * FROM notification_preferences WHERE wallet_address = $1 AND chain_family = $2 AND network = $3",
-      [scope.walletAddress, scope.chainFamily, scope.network || "legacy-evm"],
+      [scope.walletAddress.trim().toLowerCase(), scope.chainFamily, scope.network || "legacy-evm"],
     );
     return row ? rowToNotificationPreferences(row) : null;
   }
@@ -1278,13 +1292,18 @@ export class PostgresStorageAdapter implements IStorageAdapter {
 
   async upsertNotificationPreferences(prefs: NotificationPreferences): Promise<NotificationPreferences> {
     const network = prefs.network || "legacy-evm";
+    const id =
+      prefs.id ??
+      `nfpref_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const updatedAt = prefs.updatedAt ?? new Date().toISOString();
+    const walletAddress = prefs.walletAddress.trim().toLowerCase();
     await this.run(
       `INSERT INTO notification_preferences (id, wallet_address, chain_family, network, prefs, updated_at)
        VALUES ($1,$2,$3,$4,$5::jsonb,$6)
        ON CONFLICT (id) DO UPDATE SET wallet_address = EXCLUDED.wallet_address, prefs = EXCLUDED.prefs, updated_at = EXCLUDED.updated_at`,
-      [prefs.id, prefs.walletAddress, prefs.chainFamily, network, json(notificationPrefsToPayload(prefs)), new Date().toISOString()],
+      [id, walletAddress, prefs.chainFamily, network, json(notificationPrefsToPayload(prefs)), updatedAt],
     );
-    return { ...prefs, network, updatedAt: new Date().toISOString() };
+    return { ...prefs, id, walletAddress, network, updatedAt };
   }
 
   async deleteNotificationPreferences(id: string): Promise<boolean> {
@@ -1323,12 +1342,12 @@ export class PostgresStorageAdapter implements IStorageAdapter {
   }
 
   async removeWatchlistEntry(id: string): Promise<boolean> {
-    await this.transaction(async (client) => {
+    return this.transaction(async (client) => {
       await client.query("DELETE FROM watchlist_scan_runs WHERE entry_id = $1", [id]);
       await client.query("DELETE FROM discovery_alerts WHERE entry_id = $1", [id]);
-      await client.query("DELETE FROM watchlist_entries WHERE id = $1", [id]);
+      const result = await client.query("DELETE FROM watchlist_entries WHERE id = $1", [id]);
+      return result.rowCount > 0;
     });
-    return true;
   }
 
   async updateWatchlistEntryDetails(id: string, details: Partial<WatchlistEntry>): Promise<WatchlistEntry | null> {
@@ -1387,9 +1406,15 @@ export class PostgresStorageAdapter implements IStorageAdapter {
     },
   ): Promise<WatchlistEntry | null> {
     await this.run(
-      `UPDATE watchlist_entries SET last_scanned_at = $2, latest_scan_run_id = $3, latest_classification = $4,
-       latest_score = $5, latest_status = $6 WHERE id = $1`,
-      [id, update.scannedAt, update.scanRunId, update.classification, update.score, update.status === "failed" ? "stale" : update.status],
+       `UPDATE watchlist_entries SET last_scanned_at = $2, latest_scan_run_id = $3,
+        latest_classification = CASE WHEN $6 = 'failed' THEN latest_classification ELSE $4 END,
+        latest_score = CASE WHEN $6 = 'failed' THEN latest_score ELSE $5 END,
+        latest_status = CASE WHEN $6 = 'failed' THEN 'stale' ELSE $6 END,
+       successful_scan_run_ids = CASE WHEN $6 = 'failed'
+         THEN COALESCE(successful_scan_run_ids, '[]'::jsonb)
+         ELSE jsonb_build_array($3::text) || COALESCE(successful_scan_run_ids, '[]'::jsonb) END
+       WHERE id = $1`,
+      [id, update.scannedAt, update.scanRunId, update.classification, update.score, update.status],
     );
     return this.getWatchlistEntry(id);
   }
@@ -1417,36 +1442,70 @@ export class PostgresStorageAdapter implements IStorageAdapter {
   }
 
   async exportWalletData(walletAddress: string, network?: string): Promise<WalletExportData> {
-    const tables = [
-      "agent_runs",
-      "recommendations",
-      "approvals",
-      "transactions",
-      "x402_payment_receipts",
-      "user_rules",
-      "alert_rules",
-      "alert_observations",
-      "alerts",
-      "alert_deliveries",
-      "watchlist_entries",
-      "watchlist_scan_runs",
-      "discovery_alerts",
-    ];
+    const tables = {
+      agent_runs: rowToAgentRun,
+      recommendations: rowToRecommendation,
+      approvals: rowToApproval,
+      transactions: rowToTransaction,
+      x402_payment_receipts: rowToX402,
+      user_rules: rowToUserRule,
+      alert_rules: rowToAlertRule,
+      alert_observations: rowToAlertObservation,
+      alerts: rowToAlert,
+      alert_deliveries: rowToAlertDelivery,
+      watchlist_entries: rowToWatchlistEntry,
+      watchlist_scan_runs: rowToWatchlistScanRun,
+      discovery_alerts: rowToDiscoveryAlert,
+    } as const;
     const result: WalletExportData = {};
-    for (const table of tables) {
-      const networkClause = network && table !== "user_rules" ? " AND network = $2" : "";
+    const networkTables = new Set(["approvals", "transactions", "x402_payment_receipts", "watchlist_entries"]);
+    const keys: Record<string, keyof WalletExportData> = {
+      agent_runs: "agentRuns",
+      recommendations: "recommendations",
+      approvals: "approvals",
+      transactions: "transactions",
+      x402_payment_receipts: "x402PaymentReceipts",
+      user_rules: "userRules",
+      alert_rules: "alertRules",
+      alert_observations: "alertObservations",
+      alerts: "alerts",
+      alert_deliveries: "alertDeliveries",
+      watchlist_entries: "watchlistEntries",
+      watchlist_scan_runs: "watchlistScanRuns",
+      discovery_alerts: "discoveryAlerts",
+    };
+    for (const [table, mapper] of Object.entries(tables)) {
+      const hasNetwork = networkTables.has(table);
+      const networkClause = network && hasNetwork ? " AND network = $2" : "";
       const values = networkClause ? [walletAddress, network] : [walletAddress];
-      result[table] = await this.all(`SELECT * FROM ${table} WHERE wallet_address = $1${networkClause}`, values);
+      const rows = network && !hasNetwork
+        ? []
+        : await this.all(`SELECT * FROM ${table} WHERE wallet_address = $1${networkClause}`, values);
+      result[keys[table]] = rows.map(mapper);
     }
     return result;
   }
 
   async deleteWalletData(walletAddress: string, network?: string): Promise<WalletDeleteResult> {
     return this.transaction(async (client) => {
-      const hardDeleteTables = ["agent_runs", "recommendations", "approvals", "user_rules", "alert_rules", "alert_observations", "alerts", "alert_deliveries", "watchlist_entries", "watchlist_scan_runs", "discovery_alerts"];
+      const hardDeleteTables: Array<[string, boolean]> = [
+        ["alert_deliveries", false],
+        ["alerts", false],
+        ["alert_observations", false],
+        ["alert_rules", false],
+        ["watchlist_scan_runs", false],
+        ["discovery_alerts", false],
+        ["watchlist_entries", true],
+        ["recommendations", false],
+        ["approvals", true],
+        ["user_rules", false],
+        ["agent_runs", false],
+      ];
       let deletedCount = 0;
-      for (const table of hardDeleteTables) {
-        const result = await client.query(`DELETE FROM ${table} WHERE wallet_address = $1`, [walletAddress]);
+      for (const [table, hasNetwork] of hardDeleteTables) {
+        const networkClause = network && hasNetwork ? " AND network = $2" : "";
+        const values = networkClause ? [walletAddress, network] : [walletAddress];
+        const result = await client.query(`DELETE FROM ${table} WHERE wallet_address = $1${networkClause}`, values);
         deletedCount += result.rowCount;
       }
       const unlink = await client.query(

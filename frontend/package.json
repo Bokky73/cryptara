@@ -43,6 +43,7 @@
     "test:responsive": "tsx --tsconfig tsconfig.json scripts/responsive-check.ts",
     "test:erasure-residue": "NODE_OPTIONS='--require ./scripts/stub-server-only.cjs' tsx --tsconfig tsconfig.json scripts/erasure-residue-check.ts",
     "test:privacy": "NODE_OPTIONS='--require ./scripts/stub-server-only.cjs' tsx --tsconfig tsconfig.json scripts/wallet-privacy-lifecycle-check.ts",
+    "test:storage": "NODE_OPTIONS='--require ./scripts/stub-server-only.cjs' tsx --tsconfig tsconfig.json scripts/storage-adapter-parity-check.ts",
     "test:offline": "tsx --tsconfig tsconfig.json scripts/offline-check.ts",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",

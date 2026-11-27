@@ -21,16 +21,55 @@ import { evaluatePubnetReadiness, summarizeReadiness } from "@/server/stellar/pu
 
 export const dynamic = "force-dynamic";
 
+function storageFailureResponse(required: boolean, detail: string) {
+  return NextResponse.json(
+    {
+      ok: false,
+      service: "cryptara",
+      env: getEnvHealth(),
+      storageReadiness: { required, ready: false, detail },
+      checkedAt: new Date().toISOString(),
+    },
+    {
+      status: 503,
+      headers: { "Cache-Control": "no-store" },
+    },
+  );
+}
+
 export async function GET() {
   // Evaluated on every health call so an operator sees the live gate state, not
   // a value cached from before the misconfiguration was introduced.
+  const storageRequired = isLiveStorageRequired();
+  let storage;
+  try {
+    storage = await getStorageHealth();
+  } catch (error) {
+    return storageFailureResponse(storageRequired, `Storage health check failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (storageRequired && !storage.persistent) {
+    return storageFailureResponse(storageRequired, `Live mode requires a reachable persistent database: ${storage.detail}`);
+  }
+
   const pubnetReadiness = summarizeReadiness(await evaluatePubnetReadiness());
-  const records = await listAgentRunRecords();
+  let records;
+  let triggeredCount = 0;
+  let recoveredCount = 0;
+  let acknowledgedCount = 0;
+  let timeline;
+  let storageCounts;
+  try {
+    records = await listAgentRunRecords();
+    triggeredCount = (await listAlerts(undefined, "triggered")).length;
+    recoveredCount = (await listAlerts(undefined, "recovered")).length;
+    acknowledgedCount = (await listAlerts(undefined, "acknowledged")).length;
+    timeline = generateIncidentTimeline(await listAlerts());
+    storageCounts = await getStorageCounts();
+  } catch (error) {
+    return storageFailureResponse(storageRequired, `Storage reads failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
   const metrics = await getAgentRunMetrics(records);
   const executionMetrics = metrics.execution;
-  const triggeredCount = (await listAlerts(undefined, "triggered")).length;
-  const recoveredCount = (await listAlerts(undefined, "recovered")).length;
-  const acknowledgedCount = (await listAlerts(undefined, "acknowledged")).length;
   const runbooks = listRunbooks().map(runbookToReadinessCheck);
   const auditSummary = getAuditEventSummary();
   const disableFlags = getExecutionDisableFlags();
@@ -82,9 +121,6 @@ export async function GET() {
     return calculateSlo(def, successes, total, shortSuccesses, shortTotal);
   });
 
-  const timeline = generateIncidentTimeline(await listAlerts());
-  const storage = await getStorageHealth();
-  const storageRequired = isLiveStorageRequired();
   const storageReady = storage.persistent || !storageRequired;
 
   return NextResponse.json(
@@ -99,7 +135,7 @@ export async function GET() {
         ready: storageReady,
         detail: storageReady ? storage.detail : `Live mode requires a reachable persistent database: ${storage.detail}`,
       },
-      storageCounts: await getStorageCounts(),
+      storageCounts,
       security: getSecurityHealth(),
       productionHealth: await getProductionHealth(),
       performance: getPerformanceHealth(),
