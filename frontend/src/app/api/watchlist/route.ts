@@ -56,7 +56,7 @@ export const GET = withApiHandler(
       return jsonError("auth_error", { reason: authz.reason, status: 403 });
     }
 
-    return NextResponse.json({ entries: listWatchlist(session.wallet!) });
+    return NextResponse.json({ entries: await listWatchlist(session.wallet!) });
   },
 );
 
@@ -112,7 +112,7 @@ export const POST = withApiHandler(
     const session = resolveWalletSession(request, { suppliedWallet: body.walletAddress });
     if (session.response) return session.response;
 
-    const entries = listWatchlist(session.wallet!);
+    const entries = await listWatchlist(session.wallet!);
     const owned = entries.find((entry) => entry.id === body.entryId);
 
     if (!owned) {

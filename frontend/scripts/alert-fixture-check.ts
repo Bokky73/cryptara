@@ -65,12 +65,14 @@ function assert(condition: unknown, message: string): asserts condition {
   }
 }
 
+process.env.ALERT_DELIVERY_BACKOFF_MS ??= "0";
+
 const now = new Date("2026-07-28T12:00:00.000Z");
 
 const WALLET_A = "0xabcWalletALowercase";
 const WALLET_B = "0xdefWalletBUppercase";
 
-function makeRule(overrides: Partial<Parameters<typeof upsertAlertRule>[0]> = {}) {
+async function makeRule(overrides: Partial<Parameters<typeof upsertAlertRule>[0]> = {}) {
   const id = overrides.id ?? `rule_${Math.random().toString(36).slice(2, 8)}`;
   const rule = {
     id,
@@ -88,10 +90,10 @@ function makeRule(overrides: Partial<Parameters<typeof upsertAlertRule>[0]> = {}
     ...overrides,
   };
 
-  return upsertAlertRule(rule);
+  return await upsertAlertRule(rule);
 }
 
-function makeObservation(overrides: {
+async function makeObservation(overrides: {
   walletAddress?: string;
   triggerType?: Parameters<typeof createAlertObservation>[0]["triggerType"];
   observationKey?: string;
@@ -100,7 +102,7 @@ function makeObservation(overrides: {
   evidence?: Parameters<typeof createAlertObservation>[0]["evidence"];
   incompleteData?: boolean;
 } = {}) {
-  return createAlertObservation({
+  return await createAlertObservation({
     walletAddress: overrides.walletAddress ?? WALLET_A,
     triggerType: overrides.triggerType ?? "critical_risk",
     observationKey: overrides.observationKey ?? "onchain:fixture",
@@ -129,9 +131,9 @@ async function runThresholdMath() {
 }
 
 async function runTriggerLifecycle() {
-  const rule = makeRule({ cooldownMinutes: 30 });
+  const rule = await makeRule({ cooldownMinutes: 30 });
 
-  const firstObservation = makeObservation({ value: 82 });
+  const firstObservation = await makeObservation({ value: 82 });
   const firstEvaluation = await evaluateAndPersistObservation(firstObservation, rule);
 
   assert(firstEvaluation.outcome === "triggered", "First observation must trigger.");
@@ -143,7 +145,7 @@ async function runTriggerLifecycle() {
   assert(firstEvaluation.alert.evidenceData.deteriorationObservationIds.length === 1, "Trigger must initialize the chain with the first observation id.");
 
   // Recreate using a fresh id (the storage layer dedupes IDs).
-  const dupObservation = createAlertObservation({
+  const dupObservation = await createAlertObservation({
     walletAddress: firstObservation.walletAddress,
     triggerType: firstObservation.triggerType,
     observationKey: firstObservation.observationKey,
@@ -157,12 +159,12 @@ async function runTriggerLifecycle() {
 }
 
 async function runRecoveryAndHysteresis() {
-  const rule = makeRule({ cooldownMinutes: 5 });
-  const bad = makeObservation({ value: 90 });
+  const rule = await makeRule({ cooldownMinutes: 5 });
+  const bad = await makeObservation({ value: 90 });
   const triggered = await evaluateAndPersistObservation(bad, rule);
   assert(triggered.outcome === "triggered", "Recovery fixture setup: must trigger.");
 
-  const borderline = makeObservation({
+  const borderline = await makeObservation({
     observationKey: bad.observationKey,
     value: 72,
     evidence: bad.evidence,
@@ -172,7 +174,7 @@ async function runRecoveryAndHysteresis() {
   assert(borderlineEvaluation.outcome === "no_match", "Within-hysteresis value must NOT recover.");
   assert(["dedupe", "below_threshold"].includes(borderlineEvaluation.reason), "Within-hysteresis value must dedupe.");
 
-  const fullyRecovered = makeObservation({
+  const fullyRecovered = await makeObservation({
     observationKey: bad.observationKey,
     value: 50,
     evidence: bad.evidence,
@@ -188,15 +190,15 @@ async function runRecoveryAndHysteresis() {
 }
 
 async function runDeterioration() {
-  const rule = makeRule({ cooldownMinutes: 30 });
-  const first = makeObservation({ value: 80 });
+  const rule = await makeRule({ cooldownMinutes: 30 });
+  const first = await makeObservation({ value: 80 });
   const firstEval = await evaluateAndPersistObservation(first, rule);
   assert(firstEval.outcome === "triggered", "Deterioration fixture setup: must trigger.");
   if (firstEval.outcome !== "triggered") return;
 
   const beforeEvidenceBefore = firstEval.alert.evidenceBefore;
   const beforeHash = firstEval.alert.evidenceData.evidenceBeforeHash;
-  const worse = makeObservation({
+  const worse = await makeObservation({
     observationKey: first.observationKey,
     value: 95,
     evidence: { ...first.evidence, sourceSnapshotHash: "snap_new" },
@@ -220,7 +222,7 @@ async function runDeterioration() {
   assert(deterioration.alert.evidenceData.evidenceAfterHash === hashEvidence(worse.evidence), "Evidence-after hash must match the new observation's evidence.");
 
   // Third event: still no mutation of the original before-snapshot.
-  const even_worse = makeObservation({
+  const even_worse = await makeObservation({
     observationKey: first.observationKey,
     value: 110,
     evidence: { ...first.evidence, sourceSnapshotHash: "snap_third" },
@@ -237,52 +239,52 @@ async function runDeterioration() {
 }
 
 async function runCooldown() {
-  const rule = makeRule({ cooldownMinutes: 60 });
-  const first = makeObservation({ value: 85 });
+  const rule = await makeRule({ cooldownMinutes: 60 });
+  const first = await makeObservation({ value: 85 });
   const triggered = await evaluateAndPersistObservation(first, rule);
   assert(triggered.outcome === "triggered", "Cooldown fixture setup: must trigger.");
 
-  const recovered = makeObservation({ observationKey: first.observationKey, value: 50, evidence: first.evidence });
+  const recovered = await makeObservation({ observationKey: first.observationKey, value: 50, evidence: first.evidence });
   await evaluateAndPersistObservation(recovered, rule);
 
-  const repeatBad = makeObservation({ observationKey: first.observationKey, value: 90, evidence: { ...first.evidence, runId: "run_repeat" } });
+  const repeatBad = await makeObservation({ observationKey: first.observationKey, value: 90, evidence: { ...first.evidence, runId: "run_repeat" } });
   const cooldownEvaluation = await evaluateAndPersistObservation(repeatBad, rule);
 
   assert(cooldownEvaluation.outcome === "no_match" && cooldownEvaluation.reason === "cooldown", "Re-trigger inside cooldown window must cool down.");
 
-  const shortRule = makeRule({ cooldownMinutes: 0, id: "rule_short" });
-  const shortEvaluation = await evaluateAndPersistObservation(makeObservation({ observationKey: first.observationKey, value: 95, evidence: { ...first.evidence, runId: "run_after" } }), shortRule);
+  const shortRule = await makeRule({ cooldownMinutes: 0, id: "rule_short" });
+  const shortEvaluation = await evaluateAndPersistObservation(await makeObservation({ observationKey: first.observationKey, value: 95, evidence: { ...first.evidence, runId: "run_after" } }), shortRule);
   assert(shortEvaluation.outcome === "triggered", "Out of cooldown must trigger a fresh alert.");
 }
 
 async function runWalletIsolation() {
-  const walletARule = makeRule({ walletAddress: WALLET_A, observationKey: undefined });
-  const walletBObservation = makeObservation({ walletAddress: WALLET_B, value: 90, observationKey: "onchain:fixture" });
-  const walletAAlertsBefore = listAlerts(WALLET_A).length;
+  const walletARule = await makeRule({ walletAddress: WALLET_A, observationKey: undefined });
+  const walletBObservation = await makeObservation({ walletAddress: WALLET_B, value: 90, observationKey: "onchain:fixture" });
+  const walletAAlertsBefore = (await listAlerts(WALLET_A)).length;
   const evaluation = await evaluateAndPersistObservation(walletBObservation, walletARule);
 
   assert(evaluation.outcome === "no_match", "Cross-wallet observation against a wallet-A rule must NOT trigger.");
-  assert(listAlerts(WALLET_A).length === walletAAlertsBefore, "Wallet A alert count must be unchanged when wallet B observation is processed.");
-  assert(listAlerts(WALLET_B).every((alert) => alert.walletAddress === WALLET_B), "Wallet B's alerts list must only contain wallet B records.");
+  assert((await listAlerts(WALLET_A)).length === walletAAlertsBefore, "Wallet A alert count must be unchanged when wallet B observation is processed.");
+  assert((await listAlerts(WALLET_B)).every((alert) => alert.walletAddress === WALLET_B), "Wallet B's alerts list must only contain wallet B records.");
 
-  assert(!listAlertRules(WALLET_B).some((rule) => rule.walletAddress === WALLET_A), "Wallet B must not see wallet A's rules.");
+  assert(!(await listAlertRules(WALLET_B)).some((rule) => rule.walletAddress === WALLET_A), "Wallet B must not see wallet A's rules.");
 
-  ensureDefaultRulesForWallet(WALLET_A.toUpperCase());
-  const rulesInAnyCase = listAlertRules(WALLET_A);
+  await ensureDefaultRulesForWallet(WALLET_A.toUpperCase());
+  const rulesInAnyCase = await listAlertRules(WALLET_A);
   assert(rulesInAnyCase.every((rule) => rule.walletAddress === WALLET_A.toLowerCase()), "All persisted rules must be stored lowercase.");
 }
 
 async function runDeliveryAdapters() {
-  const rule = makeRule({ cooldownMinutes: 1 });
-  const observation = makeObservation({ value: 88 });
+  const rule = await makeRule({ cooldownMinutes: 1 });
+  const observation = await makeObservation({ value: 88 });
   const triggered = await evaluateAndPersistObservation(observation, rule);
   assert(triggered.outcome === "triggered", "Delivery fixture must trigger.");
 
   if (triggered.outcome !== "triggered") return;
-  const inAppDelivery = listAlertDeliveries(triggered.alert.id).find((delivery) => delivery.channel === "in_app");
+  const inAppDelivery = (await listAlertDeliveries(triggered.alert.id)).find((delivery) => delivery.channel === "in_app");
   assert(inAppDelivery?.status === "delivered", "in_app delivery adapter must always succeed.");
 
-  const telegramDelivery = listAlertDeliveries(triggered.alert.id).find((delivery) => delivery.channel === "telegram");
+  const telegramDelivery = (await listAlertDeliveries(triggered.alert.id)).find((delivery) => delivery.channel === "telegram");
   assert(telegramDelivery?.status === "skipped", "Telegram delivery without env must be skipped.");
   assert((await deliverAlertToChannel("discord", {} as Parameters<typeof deliverAlertToChannel>[1], { walletAddress: WALLET_A, triggerType: "critical_risk", severity: "high" })).status === "skipped", "Discord without env must skip.");
 }
@@ -295,7 +297,7 @@ async function runDeliveryFailureFixture() {
   const previousTierDiscord = process.env.ALERT_DISCORD_WEBHOOK_URL;
   process.env.ALERT_EMAIL_WEBHOOK_URL = "https://example.invalid/email";
   process.env.ALERT_EMAIL_WEBHOOK_SECRET = "fixture-secret";
-  process.env.ALERT_DISCORD_WEBHOOK_URL = "https://example.invalid/discord";
+  process.env.ALERT_DISCORD_WEBHOOK_URL = "https://hooks.example.test/discord";
   process.env.ALERT_FORCE_FAIL_CHANNELS = "email,telegram";
   process.env.ALERT_DELIVERY_BACKOFF_MS = "0";
   setAlertDeliveryTransport(async () => ({
@@ -305,14 +307,14 @@ async function runDeliveryFailureFixture() {
   }));
 
   try {
-    const rule = makeRule({ cooldownMinutes: 0, id: `rule_force_fail_${Math.random().toString(36).slice(2, 8)}` });
-    const observation = makeObservation({ value: 92 });
+    const rule = await makeRule({ cooldownMinutes: 0, id: `rule_force_fail_${Math.random().toString(36).slice(2, 8)}` });
+    const observation = await makeObservation({ value: 92 });
     const triggered = await evaluateAndPersistObservation(observation, rule);
 
     assert(triggered.outcome === "triggered", "Force-fail fixture must trigger.");
     if (triggered.outcome !== "triggered") return;
 
-    const deliveries = listAlertDeliveries(triggered.alert.id);
+    const deliveries = await listAlertDeliveries(triggered.alert.id);
     const inApp = deliveries.find((delivery) => delivery.channel === "in_app");
     const email = deliveries.find((delivery) => delivery.channel === "email");
     const telegram = deliveries.find((delivery) => delivery.channel === "telegram");
@@ -375,12 +377,12 @@ async function runSanitizer() {
 }
 
 async function runSeederIdempotency() {
-  const seeded = ensureAlertRulesForWallet(WALLET_A);
+  const seeded = await ensureAlertRulesForWallet(WALLET_A);
   const seededCount = seeded.length;
 
   assert(seeded.length > 0, "First seeder call must persist defaults.");
 
-  const seededAgain = ensureDefaultRulesForWallet(WALLET_A);
+  const seededAgain = await ensureDefaultRulesForWallet(WALLET_A);
 
   assert(seededAgain.length === seededCount, "Second seeder call must be idempotent — no new rows.");
 
@@ -391,13 +393,13 @@ async function runSeederIdempotency() {
 }
 
 async function runIngestionEndToEnd() {
-  const rule = makeRule({ triggerType: "liquidity_drop", walletAddress: WALLET_A, threshold: 50_000, hysteresis: 5_000, cooldownMinutes: 0, observationKey: undefined, id: "rule_liq" });
+  const rule = await makeRule({ triggerType: "liquidity_drop", walletAddress: WALLET_A, threshold: 50_000, hysteresis: 5_000, cooldownMinutes: 0, observationKey: undefined, id: "rule_liq" });
   const observationHistory = [
-    makeObservation({ triggerType: "liquidity_drop", value: 80_000, observationKey: "onchain:liq", evidence: { runId: "run_liq_1", agent: "onchain", label: "Liquidity fixture", detail: "Above threshold", sourceLabels: ["DexScreener"] } }),
-    makeObservation({ triggerType: "liquidity_drop", value: 30_000, observationKey: "onchain:liq", evidence: { runId: "run_liq_2", agent: "onchain", label: "Liquidity fixture", detail: "Below threshold", sourceLabels: ["DexScreener"] } }),
+    await makeObservation({ triggerType: "liquidity_drop", value: 80_000, observationKey: "onchain:liq", evidence: { runId: "run_liq_1", agent: "onchain", label: "Liquidity fixture", detail: "Above threshold", sourceLabels: ["DexScreener"] } }),
+    await makeObservation({ triggerType: "liquidity_drop", value: 30_000, observationKey: "onchain:liq", evidence: { runId: "run_liq_2", agent: "onchain", label: "Liquidity fixture", detail: "Below threshold", sourceLabels: ["DexScreener"] } }),
   ];
 
-  const runRecord = createAgentRunRecord({
+  const runRecord = await createAgentRunRecord({
     walletAddress: WALLET_A,
     mode: "token_scan",
     inputSnapshot: { token: "fixture-token" },
@@ -413,13 +415,13 @@ async function runIngestionEndToEnd() {
   void extractObservationsForRun;
 }
 
-async function ingestionRunObservationFlow(observations: Parameters<typeof createAlertObservation>[0][], rule: ReturnType<typeof makeRule>) {
+async function ingestionRunObservationFlow(observations: Parameters<typeof createAlertObservation>[0][], rule: Awaited<ReturnType<typeof makeRule>>) {
   let triggers = 0;
   let recoveries = 0;
   let dedups = 0;
 
   for (const input of observations) {
-    const observation = createAlertObservation(input);
+    const observation = await createAlertObservation(input);
     const evaluation = await evaluateAndPersistObservation(observation, rule);
 
     if (evaluation.outcome === "triggered") triggers += 1;
@@ -431,7 +433,7 @@ async function ingestionRunObservationFlow(observations: Parameters<typeof creat
 }
 
 async function runIngestionHelper() {
-  const runRecord = createAgentRunRecord({
+  const runRecord = await createAgentRunRecord({
     walletAddress: WALLET_A,
     mode: "token_scan",
     inputSnapshot: { token: "fixture" },
@@ -469,16 +471,16 @@ async function runIngestionHelper() {
     ],
   });
 
-  const observationsBefore = listAlertObservations(WALLET_A).length;
+  const observationsBefore = (await listAlertObservations(WALLET_A)).length;
 
-  ensureDefaultRulesForWallet(WALLET_A);
-  listEnabledRulesForEvaluation(WALLET_A);
+  await ensureDefaultRulesForWallet(WALLET_A);
+  await listEnabledRulesForEvaluation(WALLET_A);
 
   const ingestResult = await ingestAgentRunAlerts(runRecord);
   assert(ingestResult.persistedObservationIds.length >= 1, "Ingestion must persist at least one observation.");
   void fanOutDeliveries;
 
-  const observationsAfter = listAlertObservations(WALLET_A).length;
+  const observationsAfter = (await listAlertObservations(WALLET_A)).length;
 
   assert(observationsAfter > observationsBefore, "Observation store must grow after ingestion.");
 }
@@ -487,8 +489,8 @@ async function runIncompleteDataSuppression() {
   // Audit requirement: an AgentResult with an unavailable provider must
   // not generate a phantom critical_risk alert. Only rpc_degradation
   // observations may flow when the result is incomplete.
-  const rule = makeRule({ id: `rule_incomplete_${Math.random().toString(36).slice(2, 8)}` });
-  const runRecord = createAgentRunRecord({
+  const rule = await makeRule({ id: `rule_incomplete_${Math.random().toString(36).slice(2, 8)}` });
+  const runRecord = await createAgentRunRecord({
     walletAddress: WALLET_A,
     mode: "token_scan",
     inputSnapshot: { token: "incomplete" },
@@ -522,23 +524,23 @@ async function runIncompleteDataSuppression() {
 
   void runRecord;
   const observations = extractObservationsForRun(runRecord);
-  const observationBeforeAlerts = listAlerts(WALLET_A).length;
+  const observationBeforeAlerts = (await listAlerts(WALLET_A)).length;
 
   for (const observation of observations) {
     await evaluateAndPersistObservation(observation, rule);
   }
 
-  const alertsAfter = listAlerts(WALLET_A).filter((alert) => alert.triggerType === "critical_risk" && alert.observationKey === "onchain:incomplete");
+  const alertsAfter = (await listAlerts(WALLET_A)).filter((alert) => alert.triggerType === "critical_risk" && alert.observationKey === "onchain:incomplete");
 
   // We may receive an rpc_degradation observation but no critical_risk alert for this result.
   assert(observations.some((observation) => observation.triggerType === "rpc_degradation"), "Unavailable provider must still surface an rpc_degradation observation.");
   assert(observations.every((observation) => observation.incompleteData === undefined || observation.triggerType === "rpc_degradation"), "Risk observations from an incomplete result are either tagged incompleteData or suppressed entirely.");
   assert(alertsAfter.length === 0 || observationBeforeAlerts === alertsAfter.length, "Critical_risk alerts must NOT be created from an incomplete result.");
-  assert(listAlerts(WALLET_A).length === observationBeforeAlerts, "Total alert count must remain unchanged — no phantom alert from a degraded provider.");
+  assert((await listAlerts(WALLET_A)).length === observationBeforeAlerts, "Total alert count must remain unchanged — no phantom alert from a degraded provider.");
 }
 
 async function runStorageHealthReporting() {
-  const health = getStorageHealth();
+  const health = await getStorageHealth();
   // Whether the adapter is connected depends on env vars; we only check
   // the contract: provider name is one of two values, and the schema
   // contract is always returned.
@@ -559,20 +561,20 @@ async function runUIRenderSmokeTest() {
   // store does not carry priors from earlier fixture routines that would
   // otherwise set `evidenceBeforeObservationId` non-undefined at trigger.
   const uiKey = `onchain:ui-render-${Math.random().toString(36).slice(2, 8)}`;
-  const rule = makeRule({ cooldownMinutes: 0, id: `rule_ui_${Math.random().toString(36).slice(2, 8)}`, observationKey: uiKey });
-  const first = makeObservation({ value: 80, observationKey: uiKey });
+  const rule = await makeRule({ cooldownMinutes: 0, id: `rule_ui_${Math.random().toString(36).slice(2, 8)}`, observationKey: uiKey });
+  const first = await makeObservation({ value: 80, observationKey: uiKey });
   const triggered = await evaluateAndPersistObservation(first, rule);
 
   assert(triggered.outcome === "triggered", "UI fixture setup must trigger.");
   if (triggered.outcome !== "triggered") return;
 
-  const second = makeObservation({ observationKey: first.observationKey, value: 92, evidence: { ...first.evidence, sourceSnapshotHash: "snap_ui_2" } });
+  const second = await makeObservation({ observationKey: first.observationKey, value: 92, evidence: { ...first.evidence, sourceSnapshotHash: "snap_ui_2" } });
   await evaluateAndPersistObservation(second, rule);
 
-  const third = makeObservation({ observationKey: first.observationKey, value: 110, evidence: { ...first.evidence, sourceSnapshotHash: "snap_ui_3" } });
+  const third = await makeObservation({ observationKey: first.observationKey, value: 110, evidence: { ...first.evidence, sourceSnapshotHash: "snap_ui_3" } });
   await evaluateAndPersistObservation(third, rule);
 
-  const hydrated = getAlert(triggered.alert.id);
+  const hydrated = await getAlert(triggered.alert.id);
   assert(hydrated, "Alert must be retrievable by id for UI rendering.");
   if (!hydrated) return;
 
@@ -599,19 +601,19 @@ async function runUIRenderSmokeTest() {
   const priorKey = `onchain:ui-prior-${Math.random().toString(36).slice(2, 8)}`;
   // Catch-all rule scoped to the prior observation key so the engine
   // doesn't reject the fresh trigger with `key_mismatch`.
-  const priorRule = makeRule({
+  const priorRule = await makeRule({
     cooldownMinutes: 0,
     id: `rule_prior_${Math.random().toString(36).slice(2, 8)}`,
     observationKey: undefined,
   });
-  const priorId = makeObservation({
+  const priorId = await makeObservation({
     walletAddress: WALLET_A,
     triggerType: "critical_risk",
     observationKey: priorKey,
     value: 60, // below threshold so the prior does NOT trigger
     evidence: { ...first.evidence, runId: "run_prior", sourceSnapshotHash: "snap_prior" },
   });
-  const freshTriggerObservation = makeObservation({
+  const freshTriggerObservation = await makeObservation({
     walletAddress: WALLET_A,
     triggerType: "critical_risk",
     observationKey: priorKey,
@@ -619,7 +621,7 @@ async function runUIRenderSmokeTest() {
     evidence: { ...first.evidence, runId: "run_fresh", sourceSnapshotHash: "snap_fresh" },
   });
   await evaluateAndPersistObservation(freshTriggerObservation, priorRule);
-  const hydratedWithPrior = listAlerts(WALLET_A).find(
+  const hydratedWithPrior = (await listAlerts(WALLET_A)).find(
     (alert) => alert.observationKey === priorKey && alert.evidenceData.evidenceAfterObservationId === freshTriggerObservation.id,
   );
 
@@ -821,7 +823,7 @@ async function runStorageHydrationFixture() {
   // tables must round-trip via hydration: SQL row → AlertRule, etc.
 
   const fixtureWallet = "0xhydration00000000000000000000000000000000ab";
-  const sampleRule = upsertAlertRule({
+  const sampleRule = await upsertAlertRule({
     id: `rule_hydrate_${Math.random().toString(36).slice(2, 8)}`,
     walletAddress: fixtureWallet,
     triggerType: "stellar_issuer_auth",
@@ -836,7 +838,7 @@ async function runStorageHydrationFixture() {
     updatedAt: now.toISOString(),
   });
 
-  const sampleObservation = createAlertObservation({
+  const sampleObservation = await createAlertObservation({
     walletAddress: fixtureWallet,
     triggerType: "stellar_issuer_auth",
     observationKey: "stellar:fixture",
@@ -887,8 +889,8 @@ async function runStorageHydrationFixture() {
   // ensureStorageReady must be idempotent (returns the same promise) and
   // must surface an honest `tried: false` when no DATABASE_URL is set
   // (this fixture runs without one).
-  const firstReady = ensureStorageReady();
-  const secondReady = ensureStorageReady();
+  const firstReady = await ensureStorageReady();
+  const secondReady = await ensureStorageReady();
 
   assert(firstReady === secondReady, "ensureStorageReady must be idempotent across consecutive calls.");
   const summary = await firstReady;
@@ -901,10 +903,10 @@ async function runStellarDualFlagFixture() {
   // revocable + auth clawback the engine must emit TWO observations:
   // stellar_issuer_auth AND stellar_clawback. The previous ternary
   // suppressed stellar_issuer_auth whenever authClawback was true.
-  const rule = makeRule({ triggerType: "stellar_issuer_auth", walletAddress: WALLET_A, threshold: 1, hysteresis: 0, cooldownMinutes: 0, observationKey: "stellar:aurora", id: "rule_stellar_dual" });
+  const rule = await makeRule({ triggerType: "stellar_issuer_auth", walletAddress: WALLET_A, threshold: 1, hysteresis: 0, cooldownMinutes: 0, observationKey: "stellar:aurora", id: "rule_stellar_dual" });
   void rule;
 
-  const dualFlagRun = createAgentRunRecord({
+  const dualFlagRun = await createAgentRunRecord({
     walletAddress: WALLET_A,
     mode: "token_scan",
     inputSnapshot: { token: "AURORA" },

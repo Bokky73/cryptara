@@ -187,136 +187,6 @@ function extractResources(
   return { ledgerFee, operationsCount, requiresRestore };
 }
 
-// ─── Footprint & auth-entry verification ──────────────────────────────
-
-/**
- * A single contract invocation observed in the prepared transaction, used to
- * cross-check the simulated footprint.  Only the contract id and function
- * name are surfaced (never argument values) so the verification stays
- * deterministic and free of secrets.
- */
-export type SorobanInvocation = {
-  contractId: string;
-  functionName: string;
-};
-
-/**
- * Extracts the contract invocations encoded in the prepared transaction's
- * `invokeHostFunction` operations.  Returns an empty list when the transaction
- * carries no Soroban operations.
- */
-export function extractInvocations(transaction: Transaction): SorobanInvocation[] {
-  const invocations: SorobanInvocation[] = [];
-
-  for (const operation of transaction.operations) {
-    if (operation.type !== "invokeHostFunction") continue;
-    try {
-      const hostFunction = operation.func;
-      if (hostFunction.switch().name !== "hostFunctionTypeInvokeContract") continue;
-      const invoke = hostFunction.invokeContract();
-      invocations.push({
-        contractId: invoke.contractAddress().contractId().toString("hex"),
-        functionName: invoke.functionName().toString(),
-      });
-    } catch {
-      // Unparseable host function — surface a sentinel so verification fails closed.
-      invocations.push({ contractId: "unparseable", functionName: "unparseable" });
-    }
-  }
-
-  return invocations;
-}
-
-/**
- * Verifies that the simulated resource footprint and auth entries correspond
- * exactly to the contract invocations present in the prepared transaction.
- *
- * Fail-closed rules:
- *  - every invocation must be represented by at least one read-write footprint
- *    entry (the invoked contract's own ledger entry),
- *  - the number of auth entries must not exceed the number of invocations
- *    (an unexpected extra auth entry implies an unrequested sub-invocation),
- *  - a restore preamble is rejected because it implies the simulation touched
- *    state the prepared transaction did not account for.
- *
- * Returns a structured verdict so callers can surface an actionable
- * `SIMULATION_STALE` / tamper error instead of submitting.
- */
-export type SorobanFootprintVerification = {
-  ok: boolean;
-  code?: "footprint_mismatch" | "unexpected_auth_entry" | "restore_required";
-  message?: string;
-  invocationCount: number;
-  readOnlyCount: number;
-  readWriteCount: number;
-  authEntryCount: number;
-};
-
-export function verifySorobanFootprint(
-  transaction: Transaction,
-  value: rpc.Api.SimulateTransactionResponse,
-): SorobanFootprintVerification {
-  const invocations = extractInvocations(transaction);
-  const success = value as rpc.Api.SimulateTransactionSuccessResponse;
-  const footprint = extractFootprint(value);
-  const readOnlyCount = countEntries(footprint.readOnly);
-  const readWriteCount = countEntries(footprint.readWrite);
-
-  let authEntryCount = 0;
-  try {
-    const sorobanData = success.transactionData as unknown as {
-      resources?: () => { footprint?: () => { readWrite?: () => unknown[] } };
-    };
-    const auth = (success.transactionData as unknown as { auth?: () => unknown[] }).auth;
-    if (typeof auth === "function") {
-      authEntryCount = countEntries(auth());
-    }
-  } catch {
-    authEntryCount = 0;
-  }
-
-  const base = {
-    invocationCount: invocations.length,
-    readOnlyCount,
-    readWriteCount,
-    authEntryCount,
-  };
-
-  if (footprint.requiresRestore) {
-    return {
-      ...base,
-      ok: false,
-      code: "restore_required",
-      message: "The simulation requires a state restore; re-simulate after restoring the ledger entry.",
-    };
-  }
-
-  if (invocations.length === 0) {
-    // No Soroban invocations — nothing to cross-check.
-    return { ...base, ok: true };
-  }
-
-  if (readWriteCount < invocations.length) {
-    return {
-      ...base,
-      ok: false,
-      code: "footprint_mismatch",
-      message: `Simulated footprint exposes ${readWriteCount} read-write entries for ${invocations.length} contract invocation(s).`,
-    };
-  }
-
-  if (authEntryCount > invocations.length) {
-    return {
-      ...base,
-      ok: false,
-      code: "unexpected_auth_entry",
-      message: `Simulation produced ${authEntryCount} auth entries for ${invocations.length} contract invocation(s); unexpected sub-invocation detected.`,
-    };
-  }
-
-  return { ...base, ok: true };
-}
-
 // ─── Error mapping ─────────────────────────────────────────────────────
 
 function buildFailureResult(
@@ -361,6 +231,347 @@ function buildFailureResult(
       status: "failed",
       error: {
         code: "wrong_network",
-        message: "The St
+        message: "The Stellar RPC provider serves a different network.",
+        retryable: false,
+        detail: errorMessage(error),
+      },
+      diagnostics: ["Network passphrase verification failed."],
+      detail: "Stellar simulation failed closed: the provider serves a different network.",
+      providerMeta: {
+        provider: "soroban_rpc",
+        network: networkConfig.id,
+        checkedAt: base.checkedAt,
+        latencyMs: 0,
+      },
+    };
+  }
 
-/* … truncated 11639 chars — edit only what you need near the top … */
+  if (isTimeoutError(error)) {
+    return {
+      ...base,
+      status: "unavailable",
+      error: {
+        code: "timeout",
+        message: "Stellar simulation timed out.",
+        retryable: true,
+        detail: errorMessage(error),
+      },
+      detail: "Stellar simulation is unavailable because the provider timed out.",
+      providerMeta: {
+        provider: "soroban_rpc",
+        network: networkConfig.id,
+        checkedAt: base.checkedAt,
+        latencyMs: 0,
+      },
+    };
+  }
+
+  return {
+    ...base,
+    status: "unavailable",
+    error: {
+      code: "provider_unavailable",
+      message: "Stellar simulation is unavailable.",
+      retryable: true,
+      detail: redactSecrets(errorMessage(error)),
+    },
+    detail: "Stellar simulation is unavailable. The provider did not return a usable result.",
+    providerMeta: {
+      provider: "soroban_rpc",
+      network: networkConfig.id,
+      checkedAt: base.checkedAt,
+      latencyMs: 0,
+    },
+  };
+}
+
+// ─── Main adapter ──────────────────────────────────────────────────────
+
+export async function simulateSorobanTransaction(
+  request: StellarSimulationRequest,
+  options: SorobanSimulationOptions = {},
+): Promise<SimulationResult> {
+  const now = options.now ?? Date.now;
+  const config: SimulationProviderConfig = {
+    ...defaultSimulationProviderConfig,
+    timeoutMs: options.timeoutMs ?? defaultSimulationProviderConfig.timeoutMs,
+    retries: options.retries ?? defaultSimulationProviderConfig.retries,
+    backoffMs: options.backoffMs ?? defaultSimulationProviderConfig.backoffMs,
+    maxStateAge: options.maxStateAge ?? defaultSimulationProviderConfig.maxStateAge,
+  };
+
+  const networkConfig = getStellarNetwork(request.chain);
+  if (!networkConfig) {
+    return {
+      provider: "soroban_rpc",
+      status: "unsupported",
+      chain: request.chain,
+      chainFamily: "stellar",
+      network: request.chain,
+      checkedAt: new Date(now()).toISOString(),
+      binding: { transactionHash: "", quoteHash: request.quoteHash },
+      error: {
+        code: "unsupported_route",
+        message: `Unsupported Stellar network: ${request.chain}`,
+        retryable: false,
+      },
+      detail: `Stellar simulation is unsupported for network ${request.chain}.`,
+    };
+  }
+
+  const transactionHash = hashPreparedTransaction({
+    chainFamily: "stellar",
+    network: request.chain,
+    rawPayload: request.xdr,
+    sourceAccount: request.sourceAccount,
+    networkPassphrase: request.expectedPassphrase ?? request.networkPassphrase ?? networkConfig.networkPassphrase,
+  });
+  const binding = { transactionHash, quoteHash: request.quoteHash };
+
+  const expectedPassphrase = request.expectedPassphrase ?? request.networkPassphrase ?? networkConfig.networkPassphrase;
+
+  let transaction: Transaction;
+  try {
+    transaction = parsePreparedTransaction(request.xdr, expectedPassphrase);
+  } catch (error) {
+    return {
+      provider: "soroban_rpc",
+      status: "failed",
+      chain: request.chain,
+      chainFamily: "stellar",
+      network: networkConfig.id,
+      checkedAt: new Date(now()).toISOString(),
+      binding,
+      error: {
+        code: "malformed_request",
+        message: "The prepared Stellar XDR could not be parsed.",
+        retryable: false,
+        detail: redactSecrets(errorMessage(error)),
+      },
+      revertReason: "malformed_xdr",
+      diagnostics: ["The prepared transaction XDR is malformed or uses the wrong network passphrase."],
+      detail: "Stellar simulation failed closed: the prepared transaction XDR is invalid.",
+    };
+  }
+
+  if (transaction.source !== request.sourceAccount) {
+    return {
+      provider: "soroban_rpc",
+      status: "failed",
+      chain: request.chain,
+      chainFamily: "stellar",
+      network: networkConfig.id,
+      checkedAt: new Date(now()).toISOString(),
+      binding,
+      error: {
+        code: "invalid_request",
+        message: "The prepared transaction source does not match the request wallet.",
+        retryable: false,
+      },
+      diagnostics: ["Source account mismatch."],
+      detail: "Stellar simulation failed closed: source account mismatch.",
+    };
+  }
+
+  let transport = options.transport;
+  if (!transport) {
+    try {
+      transport = createSorobanSimulationTransport(request.chain, {
+        timeoutMs: options.timeoutMs,
+        retries: options.retries,
+      });
+    } catch (error) {
+      return {
+        provider: "soroban_rpc",
+        status: "unsupported",
+        chain: request.chain,
+        chainFamily: "stellar",
+        network: networkConfig.id,
+        checkedAt: new Date(now()).toISOString(),
+        binding,
+        error: {
+          code: "unsupported_route",
+          message: "No Stellar RPC transport is configured.",
+          retryable: false,
+          detail: redactSecrets(errorMessage(error)),
+        },
+        detail: "Stellar simulation is unsupported because no RPC transport is configured.",
+      };
+    }
+  }
+
+  let latestLedger: number | undefined;
+  try {
+    const [networkInfo, latest] = await Promise.all([
+      transport.getNetwork(),
+      transport.getLatestLedger(),
+    ]);
+
+    if (networkInfo.passphrase !== expectedPassphrase) {
+      return {
+        provider: "soroban_rpc",
+        status: "failed",
+        chain: request.chain,
+        chainFamily: "stellar",
+        network: networkConfig.id,
+        checkedAt: new Date(now()).toISOString(),
+        binding,
+        error: {
+          code: "wrong_network",
+          message: "The Stellar network passphrase does not match the prepared transaction.",
+          retryable: false,
+          detail: `Expected ${expectedPassphrase}, provider reports ${networkInfo.passphrase}.`,
+        },
+        diagnostics: ["Network passphrase verification failed."],
+        detail: "Stellar simulation failed closed: network passphrase mismatch.",
+      };
+    }
+
+    latestLedger = latest.sequence;
+
+    // Ledger-bound check: a prepared transaction whose max ledger is already
+    // behind the provider's latest ledger can no longer be submitted.
+    const ledgerBounds = transaction.ledgerBounds;
+    if (ledgerBounds && ledgerBounds.maxLedger > 0 && latestLedger > ledgerBounds.maxLedger) {
+      return {
+        provider: "soroban_rpc",
+        status: "failed",
+        chain: request.chain,
+        chainFamily: "stellar",
+        network: networkConfig.id,
+        checkedAt: new Date(now()).toISOString(),
+        binding,
+        ledgerSeq: latestLedger,
+        error: {
+          code: "stale_state",
+          message: "The prepared transaction ledger bound has been exceeded.",
+          retryable: true,
+          detail: `Latest ledger ${latestLedger} exceeds transaction max ledger ${ledgerBounds.maxLedger}.`,
+        },
+        diagnostics: ["Stale ledger: the prepared transaction can no longer be submitted."],
+        detail: "Stellar simulation failed closed: the prepared transaction is stale.",
+      };
+    }
+
+    // Provider-lag check: if the provider is materially behind the expected
+    // ledger, the simulation reflects stale state and cannot be trusted.
+    if (options.expectedLedger !== undefined) {
+      const lag = options.expectedLedger - latestLedger;
+      if (lag > config.maxStateAge) {
+        return {
+          provider: "soroban_rpc",
+          status: "failed",
+          chain: request.chain,
+          chainFamily: "stellar",
+          network: networkConfig.id,
+          checkedAt: new Date(now()).toISOString(),
+          binding,
+          ledgerSeq: latestLedger,
+          error: {
+            code: "stale_state",
+            message: "The Stellar provider is too far behind the expected ledger.",
+            retryable: true,
+            detail: `Provider ledger ${latestLedger} lags expected ledger ${options.expectedLedger} by ${lag}.`,
+          },
+          diagnostics: ["Stale ledger: provider state is too old to trust."],
+          detail: "Stellar simulation failed closed: provider ledger is stale.",
+        };
+      }
+    }
+  } catch (error) {
+    return buildFailureResult(request, binding, networkConfig, error, options);
+  }
+
+  try {
+    const startedAt = now();
+    const simulated = await transport.simulate(transaction);
+    const latencyMs = simulated.latencyMs ?? Math.max(0, now() - startedAt);
+    const ledgerSeq = simulated.latestLedger ?? latestLedger;
+    const checkedAt = new Date(now()).toISOString();
+    const providerMeta = {
+      provider: "soroban_rpc" as const,
+      network: networkConfig.id,
+      checkedAt,
+      latencyMs,
+      providerUrl: simulated.providerUrl,
+    };
+
+    const value = simulated.value;
+
+    if (rpc.Api.isSimulationError(value)) {
+      const message = redactSecrets(value.error ?? "The simulated operation reverted.");
+      return {
+        provider: "soroban_rpc",
+        status: "failed",
+        chain: request.chain,
+        chainFamily: "stellar",
+        network: networkConfig.id,
+        checkedAt,
+        binding,
+        ledgerSeq,
+        simulatedAt: checkedAt,
+        error: {
+          code: "revert",
+          message: "The simulated Stellar operation reverted.",
+          retryable: false,
+          detail: message,
+        },
+        revertReason: message,
+        revertReasonHuman: "The simulated Stellar operation reverted.",
+        diagnostics: [`Provider reported ${countEntries(value.events)} diagnostic event(s).`],
+        detail: `Soroban simulation reverted: ${message}`,
+        providerMeta,
+      };
+    }
+
+    const expectedOutput = extractExpectedOutput(value);
+    const footprint = extractFootprint(value);
+    const resources = extractResources(transaction, value);
+    const authCount = (value as rpc.Api.SimulateTransactionSuccessResponse).result?.auth.length ?? 0;
+
+    return {
+      provider: "soroban_rpc",
+      status: "passed",
+      chain: request.chain,
+      chainFamily: "stellar",
+      network: networkConfig.id,
+      checkedAt,
+      binding,
+      ledgerSeq,
+      simulatedAt: checkedAt,
+      simulatedXdrHash: hashPreparedTransaction({
+        chainFamily: "stellar",
+        network: request.chain,
+        rawPayload: request.xdr,
+        sourceAccount: request.sourceAccount,
+        networkPassphrase: expectedPassphrase,
+      }),
+      balanceDeltas: [
+        {
+          token: "XLM",
+          symbol: "XLM",
+          delta: `-${resources.ledgerFee ?? "0"}`,
+          direction: "outflow",
+        },
+      ],
+      authorizationRisk: [
+        {
+          contractId: "soroban-invocation",
+          requiredAuthCount: authCount,
+          requiresUserAuth: authCount > 0,
+          detail: authCount > 0 ? "The wallet must authorise this contract invocation." : "No contract authorisation is required.",
+        },
+      ],
+      footprint,
+      resources,
+      expectedOutput: expectedOutput.amount
+        ? { token: expectedOutput.token ?? "soroban-return", amount: expectedOutput.amount }
+        : undefined,
+      restoreRequired: resources.requiresRestore,
+      detail: `Soroban simulation passed on ${networkConfig.id} (ledger ${ledgerSeq}).`,
+      providerMeta,
+    };
+  } catch (error) {
+    return buildFailureResult(request, binding, networkConfig, error, options);
+  }
+}

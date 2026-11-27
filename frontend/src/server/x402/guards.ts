@@ -131,7 +131,7 @@ export function verifySettlementContext(request: NextRequest | Request): Verifie
  */
 function parseAmount(value: string): number | undefined {
   if (!value) return undefined;
-  const parsed = Number(value);
+  const parsed = Number(value.replace(/[$,\s]/g, ""));
   if (!Number.isFinite(parsed) || parsed < 0) return undefined;
   return parsed;
 }
@@ -198,7 +198,7 @@ function isValidTransactionHash(hash: string, chainFamily: X402ChainFamily): boo
   return true;
 }
 
-export function assertFreshX402Payment(input: {
+export async function assertFreshX402Payment(input: {
   request: NextRequest | Request;
   requestBody: unknown;
   config: X402RuntimeConfig;
@@ -215,7 +215,7 @@ export function assertFreshX402Payment(input: {
   }
 
   const paymentHeaderHash = hashPaymentHeader(paymentSignature);
-  const existing = getX402PaymentReceiptByHeaderHash(paymentHeaderHash);
+  const existing = await getX402PaymentReceiptByHeaderHash(paymentHeaderHash);
 
   if (existing) {
     return {
@@ -345,7 +345,7 @@ export function assertFreshX402Payment(input: {
 
   // Reject replayed transaction hashes already redeemed in persistent storage.
   if (details.transactionHash) {
-    const replayedTx = getX402PaymentReceiptByTxHash(details.transactionHash);
+    const replayedTx = await getX402PaymentReceiptByTxHash(details.transactionHash);
     if (replayedTx) {
       return {
         ok: false as const,

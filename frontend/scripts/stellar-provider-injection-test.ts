@@ -90,7 +90,7 @@ async function testFetchContractStateInjection() {
           latestLedger: 1234567,
         };
       },
-    },
+    }),
   );
 
   assertAgentContract(result);
@@ -137,7 +137,7 @@ async function testFetchClassicAssetRecordInjection() {
         id: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
         flags: { auth_required: false, auth_revocable: false, auth_immutable: true, auth_clawback_enabled: false },
       }),
-    },
+    }),
   );
 
   assertAgentContract(result);
@@ -173,7 +173,7 @@ async function testFetchIssuerAccountInjection() {
           flags: { auth_required: true, auth_revocable: true, auth_immutable: false, auth_clawback_enabled: true },
         };
       },
-    },
+    }),
   );
 
   assertAgentContract(result);
@@ -255,7 +255,7 @@ async function testAllFourProvidersClassic() {
       id: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
       flags: { auth_required: false, auth_revocable: false, auth_immutable: true, auth_clawback_enabled: false },
     }),
-  };
+  });
 
   const result = await runStellarOnchainAgent(
     {
@@ -286,7 +286,7 @@ async function testPartialProviderData() {
     healthyProviders({
       fetchContractState: async () => null, // contract not deployed
       // No fetchClassicAssetRecord or fetchIssuerAccount -- falls through to live calls (will reject)
-    },
+    }),
   );
 
   assertAgentContract(result);

@@ -102,7 +102,7 @@ function countEventsByOutcome(outcome: AuditOutcome, kind?: ExecutionAuditEventK
   return events.filter((e) => e.outcome === outcome).length;
 }
 
-export function getExecutionMetrics(agentRuns: AgentRunRecord[] = []): ExecutionMetricsSnapshot {
+export async function getExecutionMetrics(agentRuns: AgentRunRecord[] = []): Promise<ExecutionMetricsSnapshot> {
   // Provider metrics from audit events
   const quoteTotal = countEventsByKind("quote_received") + countEventsByKind("quote_stale") + countEventsByKind("quote_unavailable");
   const quoteStale = countEventsByKind("quote_stale");
@@ -132,7 +132,7 @@ export function getExecutionMetrics(agentRuns: AgentRunRecord[] = []): Execution
   // Confirmation metrics from transaction records
   // TransactionRecord type doesn't include V2 lifecycle fields at the TS level,
   // but runtime records from the lifecycle manager carry them.
-  const transactions = listTransactionRecords();
+  const transactions = await listTransactionRecords();
   const confirmed = transactions.filter((t) => {
     const lifecycle = (t as Record<string, unknown>).lifecycleStatus as string | undefined;
     return lifecycle === "confirmed";

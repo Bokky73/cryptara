@@ -138,14 +138,17 @@ export type DedupableCandidate = {
  */
 export function resolveCandidateCanonicalKey(candidate: DedupableCandidate): string {
   const resolved = resolveCanonicalTokenIdentity({
-    chainFamily: candidate.chainFamily,
-    chainId: candidate.chainId,
-    address: candidate.address,
+    chain: candidate.chainId,
+    network: candidate.chainId,
+    contractAddress: candidate.address,
     assetKey: candidate.assetKey,
+    symbol: candidate.symbol,
+    tokenName: candidate.tokenName,
+    source: candidate.source,
   });
 
-  if (resolved?.canonicalKey) {
-    return resolved.canonicalKey;
+  if (resolved?.identityKey) {
+    return resolved.identityKey;
   }
 
   return buildCanonicalKey({
@@ -206,6 +209,23 @@ export function dedupeCandidatesByCanonicalIdentity<T extends DedupableCandidate
   candidates: readonly T[],
 ): T[] {
   return collapseCandidatesByCanonicalIdentity(candidates).map((group) => group.candidate);
+}
+
+export function dedupeDiscoveryCandidates<T extends {
+  id: string;
+  chain: string;
+  contractAddress?: string;
+  assetKey?: string;
+  pairAddress?: string;
+}>(candidates: readonly T[]): T[] {
+  const seen = new Set<string>();
+
+  return candidates.filter((candidate) => {
+    const key = `${candidate.chain}:${(candidate.contractAddress ?? candidate.assetKey ?? candidate.pairAddress ?? candidate.id).trim().toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // ─── Collision helpers ───────────────────────────────────────────────────────

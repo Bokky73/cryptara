@@ -78,35 +78,34 @@ async function seedWallet(wallet: string, chainFamily: "evm" | "stellar"): Promi
       : `0x${uid("").padStart(64, "0")}`.slice(0, 66);
 
   // agent_runs — uses CreateAgentRunInput (walletAddress + results minimum)
-  createAgentRunRecord({ walletAddress: wallet, results: [] });
+  await createAgentRunRecord({ walletAddress: wallet, results: [] });
 
   // recommendations — Omit<RecommendationRecord, "id" | "createdAt">
-  createRecommendationRecord({
+  await createRecommendationRecord({
     runId: uid("run"),
     walletAddress: wallet,
     action: "hold",
     decisionScore: 42,
     confidence: 0.7,
     summary: `Test recommendation for ${chainFamily}`,
-    decisionExplanation: {},
   });
 
   // approvals — Omit<UserApprovalRecord, "id" | "createdAt" | "status" | "autoExecuted">
-  createApprovalRecord({
+  await createApprovalRecord({
     walletAddress: wallet,
     txHash: txHash,
     network,
-    action: "buy",
+    action: "hold",
     asset: "TEST",
     valueUsd: 1,
     decisionId: undefined,
   });
 
   // transactions — these are anonymized (not deleted) on erasure
-  createTransactionRecord({
+  await createTransactionRecord({
     walletAddress: wallet,
     hash: txHash,
-    type: "buy",
+    type: "approval",
     asset: "TEST",
     valueUsd: 1,
     status: "confirmed",
@@ -117,8 +116,7 @@ async function seedWallet(wallet: string, chainFamily: "evm" | "stellar"): Promi
   });
 
   // x402_payment_receipts — anonymized on erasure
-  createX402PaymentReceipt({
-    id: uid("rcpt"),
+  await createX402PaymentReceipt({
     requestId: uid("req"),
     paymentHeaderHash: uid("phh"),
     walletAddress: wallet,
@@ -133,18 +131,17 @@ async function seedWallet(wallet: string, chainFamily: "evm" | "stellar"): Promi
     protectedResource: "/api/test",
     requestBodyHash: uid("rbh"),
     verificationStatus: "verified",
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
   });
 
   // user_rules
-  upsertUserRuleRecord({
+  await upsertUserRuleRecord({
     walletAddress: wallet,
     maxRiskScore: 70,
+    maxTradePercent: 25,
+    maxMemeExposurePercent: 10,
     blockedTokens: [],
-    requireApproval: true,
+    autoExecute: false,
     createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
   });
 }
 
@@ -184,15 +181,15 @@ async function runErasureResidueCheck(): Promise<void> {
   console.log("\n1. Seeding EVM wallet records");
   await seedWallet(EVM_WALLET, "evm");
 
-  const evmRuns = listAgentRunRecords(EVM_WALLET);
+  const evmRuns = await listAgentRunRecords(EVM_WALLET);
   assertSoft(evmRuns.length > 0, "EVM wallet has agent_runs after seeding");
-  const evmRecs = listRecommendationRecords(EVM_WALLET);
+  const evmRecs = await listRecommendationRecords(EVM_WALLET);
   assertSoft(evmRecs.length > 0, "EVM wallet has recommendations after seeding");
-  const evmApprovals = listApprovalRecords(EVM_WALLET);
+  const evmApprovals = await listApprovalRecords(EVM_WALLET);
   assertSoft(evmApprovals.length > 0, "EVM wallet has approvals after seeding");
-  const evmTxs = listTransactionRecords(EVM_WALLET);
+  const evmTxs = await listTransactionRecords(EVM_WALLET);
   assertSoft(evmTxs.length > 0, "EVM wallet has transactions after seeding");
-  const allReceipts = listX402PaymentReceipts();
+  const allReceipts = await listX402PaymentReceipts();
   const evmUserReceipts = allReceipts.filter(
     (r) =>
       r.walletAddress?.toLowerCase() === EVM_WALLET.toLowerCase() ||
@@ -204,7 +201,7 @@ async function runErasureResidueCheck(): Promise<void> {
   console.log("\n2. Seeding Stellar wallet records");
   await seedWallet(STELLAR_WALLET, "stellar");
 
-  const stellarRuns = listAgentRunRecords(STELLAR_WALLET);
+  const stellarRuns = await listAgentRunRecords(STELLAR_WALLET);
   assertSoft(stellarRuns.length > 0, "Stellar wallet has agent_runs after seeding");
 
   // ── 3. Erase EVM wallet ──────────────────────────────────────────
@@ -243,7 +240,7 @@ async function runErasureResidueCheck(): Promise<void> {
 
   // ── 6. Chain isolation ───────────────────────────────────────────
   console.log("\n6. Chain isolation — Stellar records survive EVM erasure");
-  const stellarRunsAfterEvmErase = listAgentRunRecords(STELLAR_WALLET);
+  const stellarRunsAfterEvmErase = await listAgentRunRecords(STELLAR_WALLET);
   assertSoft(
     stellarRunsAfterEvmErase.length > 0,
     "Stellar agent_runs still exist after EVM wallet erasure",
@@ -256,7 +253,7 @@ async function runErasureResidueCheck(): Promise<void> {
 
   // ── 7. Aggregate preservation ────────────────────────────────────
   console.log("\n7. Aggregate record preservation");
-  const allTxsAfterErase = listTransactionRecords();
+  const allTxsAfterErase = await listTransactionRecords();
   const evmTxsWithIdentity = allTxsAfterErase.filter(
     (tx) =>
       (tx.walletAddress ?? "").toLowerCase() === EVM_WALLET.toLowerCase(),

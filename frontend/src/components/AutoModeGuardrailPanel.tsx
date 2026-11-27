@@ -2,8 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ShieldCheck, ShieldAlert, ChevronDown, ChevronUp, Zap } from "lucide-react";
-import { useState } from "react";
-import { ShieldCheck, ShieldAlert, ChevronDown, ChevronUp } from "lucide-react";
 import { useI18n } from "@/i18n/I18nProvider";
 
 // ---------------------------------------------------------------------------
@@ -55,10 +53,6 @@ const ENGAGED_POLL_MS = 400;
 
 function formatBps(bps: number) {
   return `${(bps / 100).toFixed(2)} %`;
-}
-
-function formatUsd(value: number) {
-  return value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
 
 function pct(spent: number, cap: number) {
@@ -141,6 +135,7 @@ function ExpiryCountdown({ expiresAt }: { expiresAt: string }) {
 // ---------------------------------------------------------------------------
 
 export function AutoModeGuardrailPanel({ state: initialState, chainFamily = "evm", network = "legacy-evm", budget }: Props) {
+  const { format } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const [liveState, setLiveState] = useState<KillSwitchState>(initialState);
   // Track whether the kill-switch fired in *this* tab (vs another tab) for
@@ -297,13 +292,6 @@ export function AutoModeGuardrailPanel({ state: initialState, chainFamily = "evm
       ) : null}
 
       {/* Header toggle */}
-export function AutoModeGuardrailPanel({ state }: Props) {
-  const { t } = useI18n();
-  const [expanded, setExpanded] = useState(false);
-  const reason = state.reason ?? t("autoKillSwitchReason");
-  const actorSuffix = state.actor ? t("autoHaltedActorSuffix", { actor: state.actor }) : "";
-  return (
-    <section aria-label={t("autoGuardrailsAria")} className="rounded-xl border border-white/10 bg-black/30 p-3">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
@@ -316,7 +304,6 @@ export function AutoModeGuardrailPanel({ state }: Props) {
             <ShieldCheck className="h-4 w-4 text-emerald-400" aria-hidden="true" />
           )}
           <span>{engaged ? "Auto Mode halted by guardrails" : "Non-custodial guardrails active"}</span>
-          <span>{state.engaged ? t("autoModeHalted") : t("autoGuardrailsActive")}</span>
         </span>
         {expanded
           ? <ChevronUp className="h-3.5 w-3.5 text-white/50" aria-hidden="true" />
@@ -345,14 +332,14 @@ export function AutoModeGuardrailPanel({ state }: Props) {
                 label="Daily spend"
                 value={budget.dailySpentUsd}
                 max={budget.maxDailyValueUsd}
-                format={formatUsd}
+                format={format.currency}
               />
 
               <MeterBar
                 label="Max single-tx cap"
                 value={budget.maxSingleTxUsd}
                 max={budget.maxDailyValueUsd}
-                format={formatUsd}
+                format={format.currency}
               />
 
               <div className="space-y-1">
@@ -368,11 +355,6 @@ export function AutoModeGuardrailPanel({ state }: Props) {
             </div>
           ) : null}
         </div>
-        <p className="mt-2 text-xs leading-5 text-white/60">
-          {state.engaged
-            ? t("autoHaltedReason", { reason, actorSuffix })
-            : t("autoNonCustodialNotice")}
-        </p>
       ) : null}
     </section>
   );

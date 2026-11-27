@@ -32,6 +32,13 @@ export function getActiveTraceId(): string | undefined {
   return traceId;
 }
 
+export function currentTraceparent(): string | undefined {
+  const spanContext = trace.getActiveSpan()?.spanContext();
+  if (!spanContext || /^0+$/.test(spanContext.traceId)) return undefined;
+  const flags = spanContext.traceFlags.toString(16).padStart(2, "0");
+  return `00-${spanContext.traceId}-${spanContext.spanId}-${flags}`;
+}
+
 function endSpan(span: Span | undefined) {
   (span ?? trace.getActiveSpan() ?? noopSpan).end();
 }

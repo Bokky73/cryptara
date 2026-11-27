@@ -91,7 +91,6 @@ const blockedHostnameSuffixes = [
   ".localhost",
   ".local",
   ".internal",
-  ".test",
   ".invalid",
   ".home.arpa",
 ];

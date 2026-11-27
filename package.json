@@ -44,6 +44,7 @@
     "retention:purge:dry": "DRY_RUN=true node scripts/retention-purge.mjs",
     "test:erasure-residue": "npm --prefix frontend run test:erasure-residue",
     "test:privacy": "npm --prefix frontend run test:privacy",
+    "test:storage": "npm --prefix frontend run test:storage",
     "test:e2e": "npm --prefix frontend run test:e2e",
     "test:perf": "npm --prefix frontend run test:perf --"
 

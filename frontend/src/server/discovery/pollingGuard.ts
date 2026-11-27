@@ -1,5 +1,13 @@
 import type { DiscoveryCursor, ProviderPollingConfig } from "./types";
 
+export interface DiscoveryLimits {
+  maxCandidatesPerCycle: number;
+}
+
+export const DEFAULT_DISCOVERY_LIMITS: DiscoveryLimits = {
+  maxCandidatesPerCycle: 200,
+};
+
 /** Backoff takes priority even when the checkpoint is stale. */
 export function isPollDue(cursor: DiscoveryCursor | null, config: ProviderPollingConfig, now = Date.now()): boolean {
   if (!cursor) return true;

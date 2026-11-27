@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApprovalFlowClient } from "@/components/ApprovalFlowClient";
 import { TransactionPreview } from "@/components/TransactionPreview";
+import { I18nProvider } from "@/i18n/I18nProvider";
 import {
   EVM_WALLET,
   TAMPERED_EVM_DATA,
@@ -76,12 +77,14 @@ describe("client-side signing verification UI", () => {
     const tampered = { ...payload, data: TAMPERED_EVM_DATA };
 
     render(
-      <TransactionPreview
-        preview={preview}
-        payload={tampered}
-        walletAddress={EVM_WALLET}
-        onRefresh={() => undefined}
-      />,
+      <I18nProvider locale="en" timeZone="UTC">
+        <TransactionPreview
+          preview={preview}
+          payload={tampered}
+          walletAddress={EVM_WALLET}
+          onRefresh={() => undefined}
+        />
+      </I18nProvider>,
     );
 
     expect(await screen.findByTestId("signing-verification-warning")).toBeTruthy();
@@ -96,13 +99,15 @@ describe("client-side signing verification UI", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(
-      <ApprovalFlowClient
-        idempotencyKey="exec:fixture:1"
-        walletAddress={EVM_WALLET}
-        chainFamily="evm"
-        network="goat"
-        preview={preview}
-      />,
+      <I18nProvider locale="en" timeZone="UTC">
+        <ApprovalFlowClient
+          idempotencyKey="exec:fixture:1"
+          walletAddress={EVM_WALLET}
+          chainFamily="evm"
+          network="goat"
+          preview={preview}
+        />
+      </I18nProvider>,
     );
 
     expect(await screen.findByTestId("signing-verification-warning")).toBeTruthy();

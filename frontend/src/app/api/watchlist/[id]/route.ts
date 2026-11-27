@@ -9,7 +9,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   const session = resolveWalletSession(request);
   if (session.response) return session.response;
   const { id } = await params;
-  const entry = getWatchlistEntry(id);
+  const entry = await getWatchlistEntry(id);
   if (!entry || entry.walletAddress.toLowerCase() !== session.wallet!.toLowerCase()) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
@@ -19,5 +19,5 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     { walletAddress: entry.walletAddress, id },
   );
   if (!authz.allowed) return NextResponse.json({ error: "auth_error", reason: authz.reason }, { status: 403 });
-  return NextResponse.json({ ok: removeWatchlistEntry(id) });
+  return NextResponse.json({ ok: await removeWatchlistEntry(id) });
 }

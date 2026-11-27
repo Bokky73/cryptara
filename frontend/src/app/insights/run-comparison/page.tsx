@@ -18,7 +18,7 @@ export default async function RunComparisonPage({
   const account = params.account ?? null;
 
   const runs = account
-    ? listAgentRunRecords(account)
+    ? (await listAgentRunRecords(account))
         .slice(0, 50)
         .map((record) => ({
           id: record.id,

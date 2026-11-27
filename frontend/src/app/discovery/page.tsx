@@ -58,9 +58,9 @@ function statusTone(status?: WatchlistScanRun["status"]) {
 
 async function loadWatchlistView(wallet: string): Promise<ViewWatchlistEntry[]> {
   try {
-    const entries = listWatchlist(wallet);
+    const entries = await listWatchlist(wallet);
 
-    return entries.slice(0, 8).map((entry) => ({
+    return Promise.all(entries.slice(0, 8).map(async (entry) => ({
       id: entry.id,
       chain: entry.chain,
       source: entry.source,
@@ -74,8 +74,8 @@ async function loadWatchlistView(wallet: string): Promise<ViewWatchlistEntry[]> 
       latestClassification: entry.latestClassification,
       latestScore: entry.latestScore,
       latestStatus: entry.latestStatus,
-      scanRunCount: listWatchlistScanRuns(entry.id).length,
-    }));
+      scanRunCount: (await listWatchlistScanRuns(entry.id)).length,
+    })));
   } catch {
     return [];
   }
@@ -83,7 +83,7 @@ async function loadWatchlistView(wallet: string): Promise<ViewWatchlistEntry[]> 
 
 async function loadRecentAlertsView(wallet: string): Promise<ViewAlert[]> {
   try {
-    return listDiscoveryAlerts(wallet).slice(0, 8).map((alert) => ({
+    return (await listDiscoveryAlerts(wallet)).slice(0, 8).map((alert) => ({
       id: alert.id,
       kind: alert.kind,
       title: alert.title,
@@ -100,7 +100,7 @@ async function loadRecentAlertsView(wallet: string): Promise<ViewAlert[]> {
 
 async function loadRecentScanRunsView(wallet: string): Promise<ViewScanRun[]> {
   try {
-    return listWatchlistScanRuns()
+    return (await listWatchlistScanRuns())
       .filter((run) => run.walletAddress.toLowerCase() === wallet.toLowerCase())
       .slice(0, 8)
       .map((run) => ({

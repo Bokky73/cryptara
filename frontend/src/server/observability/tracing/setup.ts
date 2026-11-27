@@ -36,7 +36,7 @@ export async function initializeTracing(): Promise<void> {
     diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.DEBUG);
   }
 
-  const [{ NodeTracerProvider }, { BatchSpanProcessor }, { OTLPTraceExporter }, { Resource }, { ATTR_SERVICE_NAME }] =
+  const [{ NodeTracerProvider }, { BatchSpanProcessor }, { OTLPTraceExporter }, { resourceFromAttributes }, { ATTR_SERVICE_NAME }] =
     await Promise.all([
       import("@opentelemetry/sdk-trace-node"),
       import("@opentelemetry/sdk-trace-base"),
@@ -51,7 +51,7 @@ export async function initializeTracing(): Promise<void> {
   });
 
   const provider = new NodeTracerProvider({
-    resource: new Resource({
+    resource: resourceFromAttributes({
       [ATTR_SERVICE_NAME]: process.env.OTEL_SERVICE_NAME?.trim() || "cryptara-frontend",
     }),
     spanProcessors: [new BatchSpanProcessor(exporter)],

@@ -11,14 +11,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const { id } = await params;
-  const record = getAgentRunRecord(id);
+  const record = await getAgentRunRecord(id);
 
   if (!record) {
     return NextResponse.json({ error: "agent_run_not_found" }, { status: 404 });
   }
 
-  const decisionDetail = getDecisionDetail(id);
-  const sourceSnapshots = getSourceSnapshotDetails(id);
+  const decisionDetail = await getDecisionDetail(id);
+  const sourceSnapshots = await getSourceSnapshotDetails(id);
 
   return withCacheHeaders(
     NextResponse.json({ record, decisionDetail, sourceSnapshots }),

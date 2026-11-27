@@ -31,7 +31,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (session.response) return session.response;
   const wallet = session.wallet!;
 
-  const alert = getAlert(params.id, wallet);
+  const alert = await getAlert(params.id, wallet);
   if (!alert) {
     return NextResponse.json({ error: "alert not found for wallet" }, { status: 404 });
   }
@@ -44,13 +44,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
 
   const acknowledgedAt = new Date().toISOString();
-  const updated = updateAlert(alert.id, wallet, { status: "acknowledged", acknowledgedAt });
+  const updated = await updateAlert(alert.id, wallet, { status: "acknowledged", acknowledgedAt });
   if (!updated) {
     return NextResponse.json({ error: "alert could not be updated" }, { status: 500 });
   }
 
   const sanitized = buildSanitizedAlertPayload(updated, undefined, { walletAddressHint: wallet });
-  const delivery = createAlertDelivery({
+  const delivery = await createAlertDelivery({
     alertId: updated.id,
     walletAddress: wallet,
     channel: "in_app",
@@ -59,7 +59,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     attemptCount: 1,
     sentAt: acknowledgedAt,
   });
-  updateAlertDelivery(delivery.id, wallet, { sentAt: acknowledgedAt });
+  await updateAlertDelivery(delivery.id, wallet, { sentAt: acknowledgedAt });
 
   return withCacheHeaders(NextResponse.json(updated), "alerts");
 }

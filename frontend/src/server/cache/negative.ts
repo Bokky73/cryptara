@@ -8,7 +8,39 @@ interface NegativeEntry {
   expiresAt: number;
 }
 
+export interface NegativeCacheEntry {
+  reason: string;
+  ttlMs: number;
+}
+
+export interface NegativeCache {
+  get(key: string): NegativeCacheEntry | undefined;
+  set(key: string, value: NegativeCacheEntry): void;
+  delete(key: string): void;
+}
+
 const negativeStore = new Map<string, NegativeEntry>();
+const providerNegativeStore = new Map<string, NegativeCacheEntry & { expiresAt: number }>();
+
+export function getNegativeCache(): NegativeCache {
+  return {
+    get(key) {
+      const entry = providerNegativeStore.get(key);
+      if (!entry) return undefined;
+      if (entry.expiresAt <= Date.now()) {
+        providerNegativeStore.delete(key);
+        return undefined;
+      }
+      return { reason: entry.reason, ttlMs: entry.ttlMs };
+    },
+    set(key, value) {
+      providerNegativeStore.set(key, { ...value, expiresAt: Date.now() + normalizeTtl(value.ttlMs) });
+    },
+    delete(key) {
+      providerNegativeStore.delete(key);
+    },
+  };
+}
 
 function normalizeTtl(ttlMs: number | undefined): number {
   if (typeof ttlMs !== "number" || !Number.isFinite(ttlMs)) {

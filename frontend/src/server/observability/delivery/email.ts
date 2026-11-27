@@ -69,7 +69,7 @@ export async function deliverEmailAlert(
     };
   }
 
-  const timestamp = new Date().toISOString();
+  const timestamp = String(Math.floor(Date.now() / 1000));
   const body = JSON.stringify({
     channel: "email",
     timestamp,
@@ -85,7 +85,14 @@ export async function deliverEmailAlert(
       accept: "application/json",
       "x-alert-timestamp": timestamp,
       "x-alert-signature": `sha256=${signature}`,
-      ...(options.idempotencyKey ? { "x-idempotency-key": options.idempotencyKey } : {}),
+      "x-cryptara-timestamp": timestamp,
+      "x-cryptara-signature-256": `sha256=${signature}`,
+      ...(options.idempotencyKey
+        ? {
+            "x-idempotency-key": options.idempotencyKey,
+            "x-cryptara-delivery-id": options.idempotencyKey,
+          }
+        : {}),
     },
     body,
     signal: options.signal,

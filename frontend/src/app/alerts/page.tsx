@@ -25,8 +25,8 @@ export default async function AlertsPage() {
   // does not serve an empty list.
   await ensureStorageReady();
 
-  if (wallet) ensureDefaultRulesForWallet(wallet);
-  const rules = wallet ? listAlertRules(wallet) : [];
+  if (wallet) await ensureDefaultRulesForWallet(wallet);
+  const rules = wallet ? await listAlertRules(wallet) : [];
 
   return (
     <AppShell>

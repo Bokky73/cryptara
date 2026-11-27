@@ -29,7 +29,14 @@ import { contractAddressSchema, tokenSymbolSchema, walletAddressSchema } from ".
 import { buildRiskReport, validateRiskReport } from "../src/server/scan/riskReport";
 import { buildAnalysisChecks } from "../src/server/scan/tokenScan";
 import { getX402RouteConfig, getX402RuntimeConfig, validateX402RuntimeConfig } from "../src/server/x402/config";
-import { assertFreshX402Payment, hashPaymentHeader } from "../src/server/x402/guards";
+import {
+  assertFreshX402Payment,
+  hashPaymentHeader,
+  signSettlementContext,
+  X402_INTERNAL_CONTEXT_HEADER,
+  X402_INTERNAL_SIGNATURE_HEADER,
+  type VerifiedSettlementContext,
+} from "../src/server/x402/guards";
 import type { AgentResult, PortfolioSnapshot, TokenHolding } from "../src/server/types";
 import { NextRequest } from "next/server";
 import { POST as confirmExecution } from "../src/app/api/execute/confirm/route";
@@ -67,6 +74,42 @@ import {
 import type { TransactionLifecycleStatus } from "../src/server/types";
 import { runDiscoveryFixtures } from "../src/server/discovery/fixtures";
 
+async function withWalletSession(request: NextRequest): Promise<NextRequest> {
+  const text = await request.text();
+  let body: Record<string, unknown> = {};
+  try {
+    body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  } catch {
+    body = {};
+  }
+  const walletAddress = String(body.walletAddress ?? body.decisionWalletAddress ?? "");
+  const headers = new Headers(request.headers);
+  if (walletAddress) {
+    headers.set("cookie", `${WALLET_SESSION_COOKIE}=${encodeWalletCookie(walletAddress)}`);
+  }
+  return new NextRequest(request.url, {
+    method: request.method,
+    headers,
+    body: text,
+  });
+}
+
+async function prepareExecutionRequest(request: NextRequest) {
+  return prepareExecution(await withWalletSession(request));
+}
+
+async function submitExecutionRequest(request: NextRequest) {
+  return submitExecution(await withWalletSession(request));
+}
+
+async function confirmExecutionRequest(request: NextRequest) {
+  return confirmExecution(await withWalletSession(request));
+}
+
+async function rejectExecutionRequest(request: NextRequest) {
+  return rejectExecution(await withWalletSession(request));
+}
+
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message);
@@ -75,9 +118,10 @@ function assert(condition: unknown, message: string): asserts condition {
 
 function submitApiRequest(body: Record<string, unknown>) {
   const walletAddress = String(body.walletAddress ?? "");
-  return new Request("http://localhost/api/execute/submit", {
+  return new NextRequest("http://localhost/api/execute/submit", {
     method: "POST",
     headers: {
+      "content-type": "application/json",
       Cookie: `${WALLET_SESSION_COOKIE}=${encodeWalletCookie(walletAddress)}`,
     },
     body: JSON.stringify(body),
@@ -784,9 +828,10 @@ async function runExecutionChecks() {
   });
   assert(getRaw<{ preview?: unknown }>(executionResult, "preview") !== undefined, "Execution Agent must expose preview raw signal.");
 
-  const failedSimulationResponse = await confirmExecution(
-    new Request("http://localhost/api/execute/confirm", {
+  const failedSimulationResponse = await confirmExecutionRequest(
+    new NextRequest("http://localhost/api/execute/confirm", {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         walletAddress: "0x1111111111111111111111111111111111111111",
         txHash: `0x${"a".repeat(64)}`,
@@ -797,9 +842,10 @@ async function runExecutionChecks() {
   );
   assert(failedSimulationResponse.status === 403, "Simulation failure must block confirmation.");
 
-  const highRiskMissingSimulationResponse = await confirmExecution(
-    new Request("http://localhost/api/execute/confirm", {
+  const highRiskMissingSimulationResponse = await confirmExecutionRequest(
+    new NextRequest("http://localhost/api/execute/confirm", {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         walletAddress: "0x1111111111111111111111111111111111111111",
         txHash: `0x${"c".repeat(64)}`,
@@ -812,9 +858,10 @@ async function runExecutionChecks() {
   );
   assert(highRiskMissingSimulationResponse.status === 403, "High-risk execution confirmation must require passed simulation.");
 
-  const walletMismatchResponse = await confirmExecution(
-    new Request("http://localhost/api/execute/confirm", {
+  const walletMismatchResponse = await confirmExecutionRequest(
+    new NextRequest("http://localhost/api/execute/confirm", {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         decisionWalletAddress: "0x1111111111111111111111111111111111111111",
         walletAddress: "0x2222222222222222222222222222222222222222",
@@ -825,9 +872,10 @@ async function runExecutionChecks() {
   );
   assert(walletMismatchResponse.status === 403, "Confirm must reject wallet mismatch.");
 
-  const invalidConfirmResponse = await confirmExecution(
-    new Request("http://localhost/api/execute/confirm", {
+  const invalidConfirmResponse = await confirmExecutionRequest(
+    new NextRequest("http://localhost/api/execute/confirm", {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         walletAddress: "0x1111111111111111111111111111111111111111",
         txHash: "not-a-tx",
@@ -837,9 +885,10 @@ async function runExecutionChecks() {
   );
   assert(invalidConfirmResponse.status === 400, "Confirm must reject invalid tx hash.");
 
-  const validConfirmResponse = await confirmExecution(
-    new Request("http://localhost/api/execute/confirm", {
+  const validConfirmResponse = await confirmExecutionRequest(
+    new NextRequest("http://localhost/api/execute/confirm", {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         decisionId: "decision_fixture",
         walletAddress: "0x1111111111111111111111111111111111111111",
@@ -856,9 +905,10 @@ async function runExecutionChecks() {
   );
   assert(validConfirmResponse.status === 200, "Confirm must accept valid hash plus explicit user approval.");
 
-  const duplicateConfirmResponse = await confirmExecution(
-    new Request("http://localhost/api/execute/confirm", {
+  const duplicateConfirmResponse = await confirmExecutionRequest(
+    new NextRequest("http://localhost/api/execute/confirm", {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         decisionId: "decision_fixture",
         walletAddress: "0x1111111111111111111111111111111111111111",
@@ -872,7 +922,7 @@ async function runExecutionChecks() {
   const duplicateConfirmJson = await duplicateConfirmResponse.json();
   assert(duplicateConfirmJson.pendingVerification === true, "Re-confirming an externally-broadcast hash must report pendingVerification until on-chain verification succeeds.");
 
-  const runRecord = createAgentRunRecord({
+  const runRecord = await createAgentRunRecord({
     walletAddress: "0x1111111111111111111111111111111111111111",
     mode: "token_scan",
     inputSnapshot: { symbol: "MEME", chain: "base" },
@@ -986,7 +1036,7 @@ async function runReadinessChecks() {
   assert(hardening.chainReadiness.executionReadiness === "gas_missing", "Portfolio hardening must expose native gas readiness.");
   assert(hardening.riskDriverBreakdown.some((item) => item.key === "chain_readiness"), "Portfolio hardening must expose deterministic risk driver breakdown.");
 
-  const storageHealth = getStorageHealth();
+  const storageHealth = await getStorageHealth();
   for (const table of ["wallets", "agent_runs", "agent_results", "recommendations", "user_rules", "approvals", "transactions", "x402_payment_receipts", "token_identities", "source_snapshots"]) {
     assert(storageHealth.schema?.tables.includes(table), `Storage schema contract must include ${table}.`);
   }
@@ -1099,7 +1149,7 @@ async function runReadinessChecks() {
   assert(log.agent === "onchain" && log.sourceCount > 0, "Structured logging must include agent and source count.");
   assert(!redactSecrets("Bearer sk-abc123456789012345 api_key=secret").includes("abc123456789012345"), "Secret sanitizer must redact bearer/API key values.");
 
-  const metrics = getResultMetrics([blueChipLikeResult(), unavailableAgentResult("news")]);
+  const metrics = await getResultMetrics([blueChipLikeResult(), unavailableAgentResult("news")]);
   assert(metrics.providerFailureRate > 0 && metrics.agentSuccessRate > 0, "Metrics must expose provider failure and success rates.");
   assert(evaluateAlertThresholds({ providerFailureRate: 50, manualReviewRate: 10 }).providerFailureSpike === true, "Alert threshold must flag provider failure spikes.");
 
@@ -1167,12 +1217,12 @@ async function runTransactionLifecycleChecks() {
   assert(evmSubmitted.transaction.explorerUrl?.includes("tx"), "EVM submit must attach an explorer URL.");
   assert(evmSubmitted.result.idempotent === false, "Fresh EVM submit must not be flagged as idempotent.");
   assert(evmSubmitted.transaction.submittedAt !== undefined, "EVM submit must record a submittedAt timestamp.");
-  const evmEvents = listTransactionLifecycleEvents(evmSubmitted.transaction.hash);
+  const evmEvents = await listTransactionLifecycleEvents(evmSubmitted.transaction.hash);
   assert(evmEvents.some((event) => event.event === "prepared") && evmEvents.some((event) => event.event === "submitted"), "EVM submit must append prepared and submitted lifecycle events.");
 
   const evmPoll = await pollTransaction(evmSubmitted.transaction.hash);
   assert(evmPoll.transaction.lifecycleStatus === "confirmed" && evmPoll.terminalReached === true, "EVM poll-to-confirmed must mark the transaction confirmed.");
-  assert(listTransactionLifecycleEvents(evmPoll.transaction.hash).some((event) => event.event === "confirmed"), "EVM poll-to-confirmed must append a confirmed event.");
+  assert((await listTransactionLifecycleEvents(evmPoll.transaction.hash)).some((event) => event.event === "confirmed"), "EVM poll-to-confirmed must append a confirmed event.");
   assert(evmPoll.transaction.terminalAt !== undefined, "EVM confirmed transactions must record a terminalAt timestamp.");
 
   assert(isImmutableTerminal("confirmed"), "Confirmed lifecycle must be considered immutable terminal.");
@@ -1206,7 +1256,7 @@ async function runTransactionLifecycleChecks() {
     signedPayload: evmHash,
   });
   assert(evmDuplicateHash.outcome === "ignored_duplicate" && evmDuplicateHash.result.reuseReason === "duplicate_hash", "Duplicate EVM submit with same hash and different key must reject without overwriting.");
-  assert(listTransactionLifecycleEvents(evmHash).some((event) => event.event === "duplicate_rejected"), "Duplicate hash submit must append a duplicate_rejected lifecycle event.");
+  assert((await listTransactionLifecycleEvents(evmHash)).some((event) => event.event === "duplicate_rejected"), "Duplicate hash submit must append a duplicate_rejected lifecycle event.");
 
   configureEvmSimulator("evm", "GOAT Network", { submitOutcome: "submitted", pollOutcome: "failed" });
   const evmFailedHash = `0x${"2".repeat(64)}`;
@@ -1289,7 +1339,7 @@ async function runTransactionLifecycleChecks() {
   assert(evmRejected.outcome === "terminally_recorded", "EVM rejected submit must be persisted as a terminally_recorded submission_failed.");
   assert(evmRejected.transaction.lifecycleStatus === "failed", "EVM rejected submit must persist the failed lifecycle, not leave the record at prepared.");
   assert(evmRejected.transaction.failureReason?.includes("rejected") ?? false, "EVM rejected submit must record the rejected reason on the failed record.");
-  assert(listTransactionLifecycleEvents(evmRejected.transaction.hash).some((event) => event.event === "submission_failed"), "EVM rejected submit must append a submission_failed lifecycle event.");
+  assert((await listTransactionLifecycleEvents(evmRejected.transaction.hash)).some((event) => event.event === "submission_failed"), "EVM rejected submit must append a submission_failed lifecycle event.");
   configureEvmSimulator("evm", "GOAT Network", { submitOutcome: "submitted", pollOutcome: "confirmed" });
 
   configureEvmSimulator("evm", "GOAT Network", { submitOutcome: "submitted", pollOutcome: "confirmed" });
@@ -1372,7 +1422,7 @@ async function runTransactionLifecycleChecks() {
   assert(stellarRejected.outcome === "terminally_recorded", "Stellar rejected submit must be persisted as a terminally_recorded submission_failed.");
   assert(stellarRejected.transaction.lifecycleStatus === "failed", "Stellar rejected submit must persist the failed lifecycle, not leave the record at prepared.");
   assert(stellarRejected.transaction.failureReason?.includes("rejected") ?? false, "Stellar rejected submit must record the rejected reason on the failed record.");
-  assert(listTransactionLifecycleEvents(stellarRejected.transaction.hash).some((event) => event.event === "submission_failed"), "Stellar rejected submit must append a submission_failed lifecycle event.");
+  assert((await listTransactionLifecycleEvents(stellarRejected.transaction.hash)).some((event) => event.event === "submission_failed"), "Stellar rejected submit must append a submission_failed lifecycle event.");
 
   configureStellarSimulator("stellar", "stellar-testnet", { submitOutcome: "submitted", pollOutcome: "confirmed" });
   clearStellarSimulator();
@@ -1409,8 +1459,8 @@ async function runTransactionLifecycleChecks() {
   assert(submissionFailed.transaction.lifecycleStatus === "failed", "Submission rejection must persist the failed lifecycle, not leave the record at prepared.");
   assert(submissionFailed.result.status === "failed", "Submission report must surface failed status to callers.");
   assert(Boolean(submissionFailed.transaction.failureReason), "Failed submission must record a failureReason tied to the RPC rejection.");
-  assert(listTransactionLifecycleEvents(submissionFailed.transaction.hash).some((event) => event.event === "submission_failed"), "Failed submissions must append a submission_failed lifecycle event.");
-  assert(listTransactionLifecycleEvents(submissionFailed.transaction.hash).some((event) => event.event === "prepared"), "Failed submissions must still retain the prepared lifecycle event for audit.");
+  assert((await listTransactionLifecycleEvents(submissionFailed.transaction.hash)).some((event) => event.event === "submission_failed"), "Failed submissions must append a submission_failed lifecycle event.");
+  assert((await listTransactionLifecycleEvents(submissionFailed.transaction.hash)).some((event) => event.event === "prepared"), "Failed submissions must still retain the prepared lifecycle event for audit.");
   configureEvmSimulator("evm", "GOAT Network", { submitOutcome: "submitted", pollOutcome: "confirmed" });
 
   // ---- user_rejected is a real lifecycle path, not an orphan event ----
@@ -1431,14 +1481,14 @@ async function runTransactionLifecycleChecks() {
   assert(userRejected.lifecycleStatus === "user_rejected", "recordUserRejection must mark the transaction as user_rejected.");
   assert(isImmutableTerminal(userRejected.lifecycleStatus as TransactionLifecycleStatus), "user_rejected must be flagged as immutable terminal.");
   assert(Boolean(userRejected.failureReason), "user_rejected must record a human-readable failureReason.");
-  assert(listTransactionLifecycleEvents(userRejectedHash).some((event) => event.event === "user_rejected"), "user_rejected transactions must append a user_rejected lifecycle event.");
+  assert((await listTransactionLifecycleEvents(userRejectedHash)).some((event) => event.event === "user_rejected"), "user_rejected transactions must append a user_rejected lifecycle event.");
 
   // Re-rejecting an already terminal transaction is a no-op
   const reRejected = await recordUserRejection(userRejectedHash, { walletAddress: "0xabc" });
   assert(reRejected.lifecycleStatus === "user_rejected", "Re-rejecting a terminal user_rejected transaction must remain terminal.");
 
   // ---- prepareTransaction is idempotent across repeated POSTs with the same key ----
-  const prepared = prepareTransaction({
+  const prepared = await prepareTransaction({
     chainFamily: "evm",
     network: "GOAT Network",
     walletAddress: "0xabc",
@@ -1449,7 +1499,7 @@ async function runTransactionLifecycleChecks() {
   });
   assert(!prepared.idempotent && prepared.created === true, "First prepare must create a new prepared record.");
 
-  const preparedAgain = prepareTransaction({
+  const preparedAgain = await prepareTransaction({
     chainFamily: "evm",
     network: "GOAT Network",
     walletAddress: "0xabc",
@@ -1461,11 +1511,12 @@ async function runTransactionLifecycleChecks() {
   assert(preparedAgain.idempotent && preparedAgain.created === false, "Second prepare with the same idempotency key must be idempotent.");
   assert(preparedAgain.transaction.hash === prepared.transaction.hash, "Idempotent prepare must return the same transaction record.");
   assert(prepared.transaction.lifecycleStatus === "prepared", "Prepare must persist the prepared lifecycle.");
-  assert(listTransactionLifecycleEvents(prepared.transaction.hash).some((event) => event.event === "prepared"), "Prepared transactions must append a prepared lifecycle event.");
+  assert((await listTransactionLifecycleEvents(prepared.transaction.hash)).some((event) => event.event === "prepared"), "Prepared transactions must append a prepared lifecycle event.");
 
-  const prepareResponse = await prepareExecution(
-    new Request("http://localhost/api/execute/prepare", {
+  const prepareResponse = await prepareExecutionRequest(
+    new NextRequest("http://localhost/api/execute/prepare", {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         walletAddress: "0xabc",
         chainFamily: "evm",
@@ -1490,9 +1541,10 @@ async function runTransactionLifecycleChecks() {
   assert(prepareJson.lifecycle?.status === "prepared", "Prepare API lifecycle status must be prepared.");
   assert(typeof prepareJson.lifecycle?.idempotencyKey === "string", "Prepare API response must include the idempotency key.");
 
-  const duplicatePrepareResponse = await prepareExecution(
-    new Request("http://localhost/api/execute/prepare", {
+  const duplicatePrepareResponse = await prepareExecutionRequest(
+    new NextRequest("http://localhost/api/execute/prepare", {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         walletAddress: "0xabc",
         chainFamily: "evm",
@@ -1516,7 +1568,7 @@ async function runTransactionLifecycleChecks() {
 
   // ---- reject API persists user_rejected terminal state ----
   const rejectHash = `0x${"a".repeat(63)}1`;
-  const rejectCreated = createTransactionRecord({
+  const rejectCreated = await createTransactionRecord({
     hash: rejectHash,
     type: "approval",
     asset: "MEME",
@@ -1530,9 +1582,10 @@ async function runTransactionLifecycleChecks() {
   });
   assert(rejectCreated.lifecycleStatus === "submitted", "Rejected fixture requires an existing submitted record.");
 
-  const rejectResponse = await rejectExecution(
-    new Request("http://localhost/api/execute/reject", {
+  const rejectResponse = await rejectExecutionRequest(
+    new NextRequest("http://localhost/api/execute/reject", {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         txHash: rejectHash,
         walletAddress: "0xabc",
@@ -1544,11 +1597,12 @@ async function runTransactionLifecycleChecks() {
   assert(rejectResponse.status === 200, "Reject API must record user_rejected for known hashes.");
   const rejectJson = await rejectResponse.json();
   assert(rejectJson.status === "user_rejected", "Reject API must expose user_rejected status.");
-  assert(getTransactionRecord(rejectHash)?.lifecycleStatus === "user_rejected", "Reject API must persist user_rejected terminal state in storage.");
+  assert((await getTransactionRecord(rejectHash))?.lifecycleStatus === "user_rejected", "Reject API must persist user_rejected terminal state in storage.");
 
-  const unknownRejectResponse = await rejectExecution(
-    new Request("http://localhost/api/execute/reject", {
+  const unknownRejectResponse = await rejectExecutionRequest(
+    new NextRequest("http://localhost/api/execute/reject", {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         txHash: `0x${"b".repeat(63)}2`,
         walletAddress: "0xabc",
@@ -1557,9 +1611,10 @@ async function runTransactionLifecycleChecks() {
   );
   assert(unknownRejectResponse.status === 404, "Reject API must reject unknown transaction hashes.");
 
-  const mismatchedRejectResponse = await rejectExecution(
-    new Request("http://localhost/api/execute/reject", {
+  const mismatchedRejectResponse = await rejectExecutionRequest(
+    new NextRequest("http://localhost/api/execute/reject", {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         txHash: rejectHash,
         walletAddress: "0xdef",
@@ -1573,9 +1628,10 @@ async function runTransactionLifecycleChecks() {
   // Use a fresh network with an explicit pending simulator so the test is deterministic.
   configureEvmSimulator("evm", "ethereum", { pollOutcome: "pending" });
   const confirmPendingHash = `0x${"c".repeat(63)}3`;
-  const confirmPending = await confirmExecution(
-    new Request("http://localhost/api/execute/confirm", {
+  const confirmPending = await confirmExecutionRequest(
+    new NextRequest("http://localhost/api/execute/confirm", {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         walletAddress: "0xabc",
         txHash: confirmPendingHash,
@@ -1597,7 +1653,7 @@ async function runTransactionLifecycleChecks() {
 
   // Append a manual user_rejected event and ensure new hash is flagged
   appendLifecycleEventByName(`0x${"f".repeat(64)}`, "user_rejected", { reason: "User clicked reject in wallet." });
-  assert(listTransactionLifecycleEvents(`0x${"f".repeat(64)}`).some((event) => event.event === "user_rejected"), "Lifecycle event store must keep manual user_rejected events.");
+  assert((await listTransactionLifecycleEvents(`0x${"f".repeat(64)}`)).some((event) => event.event === "user_rejected"), "Lifecycle event store must keep manual user_rejected events.");
 
   // ---- EVM signed-payload submit exercises real payload path, not pre-hash shortcut ----
   const evmSignedPayload = `0x${"f".repeat(300)}`;
@@ -1615,7 +1671,7 @@ async function runTransactionLifecycleChecks() {
   assert(evmSignedResult.outcome === "submitted", "EVM signed-payload submit must produce a submitted lifecycle.");
   assert(evmSignedResult.transaction.lifecycleStatus === "submitted", "EVM signed-payload submit must reach submitted status.");
   const evmSignedHash = evmSignedResult.transaction.hash;
-  assert(listTransactionLifecycleEvents(evmSignedHash).some((event) => event.event === "prepared"), "EVM signed-payload submit must append a prepared lifecycle event.");
+  assert((await listTransactionLifecycleEvents(evmSignedHash)).some((event) => event.event === "prepared"), "EVM signed-payload submit must append a prepared lifecycle event.");
   const evmSignedPoll = await pollTransaction(evmSignedHash);
   assert(evmSignedPoll.transaction.lifecycleStatus === "confirmed", "EVM signed-payload transaction must confirm via poll.");
   configureEvmSimulator("evm", "GOAT Network", { submitOutcome: "submitted", pollOutcome: "confirmed" });
@@ -1659,11 +1715,12 @@ async function runTransactionLifecycleChecks() {
   const stellarRejectedLifecycle = await recordUserRejection(stellarRejectedHash, { walletAddress: stellarRejectedWallet, reason: "User clicked reject in Stellar wallet." });
   assert(stellarRejectedLifecycle.lifecycleStatus === "user_rejected", "Stellar recordUserRejection must mark the transaction as user_rejected.");
   assert(isImmutableTerminal(stellarRejectedLifecycle.lifecycleStatus as TransactionLifecycleStatus), "Stellar user_rejected must be flagged as immutable terminal.");
-  assert(listTransactionLifecycleEvents(stellarRejectedHash).some((event) => event.event === "user_rejected"), "Stellar user_rejected transactions must append a user_rejected lifecycle event.");
+  assert((await listTransactionLifecycleEvents(stellarRejectedHash)).some((event) => event.event === "user_rejected"), "Stellar user_rejected transactions must append a user_rejected lifecycle event.");
 
-  const stellarRejectApi = await rejectExecution(
-    new Request("http://localhost/api/execute/reject", {
+  const stellarRejectApi = await rejectExecutionRequest(
+    new NextRequest("http://localhost/api/execute/reject", {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         txHash: stellarRejectedHash,
         walletAddress: stellarRejectedWallet,
@@ -1677,17 +1734,15 @@ async function runTransactionLifecycleChecks() {
   assert(stellarRejectApi.status === 200, "Reject API must accept Stellar user_rejected for known hashes.");
   const stellarRejectJson = await stellarRejectApi.json();
   assert(stellarRejectJson.status === "user_rejected", "Reject API response must surface user_rejected for Stellar hashes.");
-  assert(getTransactionRecord(stellarRejectedHash)?.lifecycleStatus === "user_rejected", "Reject API must persist user_rejected terminal state for Stellar hashes in storage.");
+  assert((await getTransactionRecord(stellarRejectedHash))?.lifecycleStatus === "user_rejected", "Reject API must persist user_rejected terminal state for Stellar hashes in storage.");
   clearStellarSimulator();
 
-  const txMissing = (() => {
-    try {
-      const recorded = getTransactionRecord(`0x${"9".repeat(64)}`);
-      return recorded;
-    } catch {
-      return undefined;
-    }
-  })();
+  let txMissing: Awaited<ReturnType<typeof getTransactionRecord>>;
+  try {
+    txMissing = await getTransactionRecord(`0x${"9".repeat(64)}`);
+  } catch {
+    txMissing = undefined;
+  }
   assert(txMissing === undefined, "Unknown hash must return no transaction record.");
 
   // ---- API route level coverage ----
@@ -1751,9 +1806,10 @@ async function runTransactionLifecycleChecks() {
 
   // Confirm API chain-family validation
   configureStellarSimulator("stellar", "stellar-testnet", { submitOutcome: "submitted", pollOutcome: "confirmed" });
-  const stellarConfirmCollision = await confirmExecution(
-    new Request("http://localhost/api/execute/confirm", {
+  const stellarConfirmCollision = await confirmExecutionRequest(
+    new NextRequest("http://localhost/api/execute/confirm", {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         walletAddress: stellarWallet,
         chainFamily: "stellar",
@@ -1765,9 +1821,10 @@ async function runTransactionLifecycleChecks() {
   );
   assert(stellarConfirmCollision.status === 200, "Confirm must accept a Stellar hash when chainFamily=stellar.");
 
-  const evmConfirmCollision = await confirmExecution(
-    new Request("http://localhost/api/execute/confirm", {
+  const evmConfirmCollision = await confirmExecutionRequest(
+    new NextRequest("http://localhost/api/execute/confirm", {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         walletAddress: stellarWallet,
         chainFamily: "evm",
@@ -1802,11 +1859,11 @@ async function runTransactionLifecycleChecks() {
   assert(historyJson.items.every((record) => typeof record.explorerUrl === "string"), "History records must include an explorer URL.");
 
   // Storage invariants
-  const lookupByHash = getTransactionRecord(evmSubmitted.transaction.hash);
+  const lookupByHash = await getTransactionRecord(evmSubmitted.transaction.hash);
   assert(lookupByHash?.hash === evmSubmitted.transaction.hash, "Storage must retrieve transaction records by hash.");
-  const lookupByKey = getTransactionRecordByIdempotencyKey("0xabc", "idem_evm_success");
+  const lookupByKey = await getTransactionRecordByIdempotencyKey("0xabc", "idem_evm_success");
   assert(lookupByKey?.idempotencyKey === "idem_evm_success", "Storage must look up records by idempotency key.");
-  assert(updateTransactionRecord(evmSubmitted.transaction.hash, { valueUsd: 999 })?.valueUsd === 999, "Update should mutate tracking fields without touching status.");
+  assert((await updateTransactionRecord(evmSubmitted.transaction.hash, { valueUsd: 999 }))?.valueUsd === 999, "Update should mutate tracking fields without touching status.");
 
   clearEvmSimulator();
 }
@@ -2128,7 +2185,31 @@ async function runStellarOnchainChecks() {
   assertStellarReplay("stellar_unavailable_provider", unavailableResult);
 }
 
-function runX402Checks() {
+function signedPaymentHeaders(
+  paymentSignature: string,
+  config: Parameters<typeof assertFreshX402Payment>[0]["config"],
+  overrides: Partial<VerifiedSettlementContext> = {},
+): Record<string, string> {
+  const context: VerifiedSettlementContext = {
+    amount: config.priceUsd,
+    recipient: config.payTo,
+    network: config.network,
+    asset: config.asset,
+    payer: "",
+    transactionHash: "",
+    settlementTimestamp: new Date().toISOString(),
+    chainFamily: config.chainFamily,
+    ...overrides,
+  };
+  const signed = signSettlementContext(context);
+  return {
+    "PAYMENT-SIGNATURE": paymentSignature,
+    [X402_INTERNAL_CONTEXT_HEADER]: signed.contextHeader,
+    [X402_INTERNAL_SIGNATURE_HEADER]: signed.signatureHeader,
+  };
+}
+
+async function runX402Checks() {
   const previous = {
     X402_PAY_TO: process.env.X402_PAY_TO,
     X402_PRICE_USD: process.env.X402_PRICE_USD,
@@ -2161,10 +2242,10 @@ function runX402Checks() {
   assert(routeConfig.accepts[0]?.network === config.network, "x402 route config must bind the expected network.");
 
   // Test: fresh payment passes guard
-  const request = new Request("http://localhost/api/x402/deep-scan?query=GOAT&chain=base", {
-    headers: { "PAYMENT-SIGNATURE": "fixture-payment-signature" },
+  const request = new NextRequest("http://localhost/api/x402/deep-scan?query=GOAT&chain=base", {
+    headers: signedPaymentHeaders("fixture-payment-signature", config),
   });
-  const guard = assertFreshX402Payment({
+  const guard = await assertFreshX402Payment({
     request,
     requestBody: { query: "GOAT", chain: "base" },
     config,
@@ -2175,7 +2256,7 @@ function runX402Checks() {
   assert(typeof guard.requestBodyHash === "string" && guard.requestBodyHash.length === 64, "Payment must bind to exact request body hash.");
 
   // Test: receipt with chain family
-  const receipt = createX402PaymentReceipt({
+  const receipt = await createX402PaymentReceipt({
     requestId: guard.requestId,
     paymentHeaderHash: guard.paymentHeaderHash,
     network: config.network,
@@ -2192,10 +2273,10 @@ function runX402Checks() {
 
   assert(receipt.id.startsWith("x402_"), "x402 payment receipts must use x402 ids.");
   assert(receipt.chainFamily === "evm", "x402 receipt must store evm chain family.");
-  assert(getX402PaymentReceiptByHeaderHash(hashPaymentHeader("fixture-payment-signature"))?.id === receipt.id, "x402 receipts must be retrievable by payment header hash.");
+  assert((await getX402PaymentReceiptByHeaderHash(hashPaymentHeader("fixture-payment-signature")))?.id === receipt.id, "x402 receipts must be retrievable by payment header hash.");
 
   // Test: duplicate payment rejected
-  const duplicate = assertFreshX402Payment({
+  const duplicate = await assertFreshX402Payment({
     request,
     requestBody: { query: "GOAT", chain: "base" },
     config,
@@ -2204,9 +2285,9 @@ function runX402Checks() {
   assert(!duplicate.ok && duplicate.status === 409, "Duplicate x402 payment signature must be rejected before premium work runs.");
 
   // Test: amount mismatch with x402 middleware headers
-  const amountMismatch = assertFreshX402Payment({
-    request: new Request("http://localhost/api/x402/deep-scan?query=GOAT&chain=base", {
-      headers: { "PAYMENT-SIGNATURE": "fixture-amount-mismatch", "X-PAYMENT-AMOUNT": "$0.99" },
+  const amountMismatch = await assertFreshX402Payment({
+    request: new NextRequest("http://localhost/api/x402/deep-scan?query=GOAT&chain=base", {
+      headers: signedPaymentHeaders("fixture-amount-mismatch", config, { amount: "$0.001" }),
     }),
     requestBody: { query: "GOAT", chain: "base" },
     config,
@@ -2215,9 +2296,9 @@ function runX402Checks() {
   assert(!amountMismatch.ok && amountMismatch.error === "payment_amount_mismatch", "Payment amount mismatch must be rejected before premium work runs.");
 
   // Test: recipient mismatch
-  const recipientMismatch = assertFreshX402Payment({
-    request: new Request("http://localhost/api/x402/deep-scan?query=GOAT&chain=base", {
-      headers: { "PAYMENT-SIGNATURE": "fixture-recipient-mismatch", "X-PAYMENT-RECIPIENT": "0x0000000000000000000000000000000000000099" },
+  const recipientMismatch = await assertFreshX402Payment({
+    request: new NextRequest("http://localhost/api/x402/deep-scan?query=GOAT&chain=base", {
+      headers: signedPaymentHeaders("fixture-recipient-mismatch", config, { recipient: "0x0000000000000000000000000000000000000099" }),
     }),
     requestBody: { query: "GOAT", chain: "base" },
     config,
@@ -2226,9 +2307,9 @@ function runX402Checks() {
   assert(!recipientMismatch.ok && recipientMismatch.error === "payment_recipient_mismatch", "Payment recipient mismatch must be rejected before premium work runs.");
 
   // Test: network mismatch
-  const networkMismatch = assertFreshX402Payment({
-    request: new Request("http://localhost/api/x402/deep-scan?query=GOAT&chain=base", {
-      headers: { "PAYMENT-SIGNATURE": "fixture-network-mismatch", "X-PAYMENT-NETWORK": "eip155:1" },
+  const networkMismatch = await assertFreshX402Payment({
+    request: new NextRequest("http://localhost/api/x402/deep-scan?query=GOAT&chain=base", {
+      headers: signedPaymentHeaders("fixture-network-mismatch", config, { network: "eip155:1" }),
     }),
     requestBody: { query: "GOAT", chain: "base" },
     config,
@@ -2237,12 +2318,11 @@ function runX402Checks() {
   assert(!networkMismatch.ok && networkMismatch.error === "payment_network_mismatch", "Payment network mismatch must be rejected before premium work runs.");
 
   // Test: expired payment
-  const expired = assertFreshX402Payment({
-    request: new Request("http://localhost/api/x402/deep-scan?query=GOAT&chain=base", {
-      headers: {
-        "PAYMENT-SIGNATURE": "fixture-expired",
-        "X-PAYMENT-SETTLED-AT": new Date(Date.now() - 600_000).toISOString(),
-      },
+  const expired = await assertFreshX402Payment({
+    request: new NextRequest("http://localhost/api/x402/deep-scan?query=GOAT&chain=base", {
+      headers: signedPaymentHeaders("fixture-expired", config, {
+        settlementTimestamp: new Date(Date.now() - 600_000).toISOString(),
+      }),
     }),
     requestBody: { query: "GOAT", chain: "base" },
     config,
@@ -2251,13 +2331,12 @@ function runX402Checks() {
   assert(!expired.ok && expired.error === "payment_expired", "Expired x402 payment must be rejected before premium work runs.");
 
   // Test: payment with payer identity on headers
-  const withPayer = assertFreshX402Payment({
-    request: new Request("http://localhost/api/x402/deep-scan?query=GOAT&chain=base", {
-      headers: {
-        "PAYMENT-SIGNATURE": "fixture-with-payer",
-        "X-PAYMENT-PAYER": "0x0000000000000000000000000000000000000001",
-        "X-PAYMENT-TX-HASH": "0x" + "a".repeat(64),
-      },
+  const withPayer = await assertFreshX402Payment({
+    request: new NextRequest("http://localhost/api/x402/deep-scan?query=GOAT&chain=base", {
+      headers: signedPaymentHeaders("fixture-with-payer", config, {
+        payer: "0x0000000000000000000000000000000000000001",
+        transactionHash: "0x" + "a".repeat(64),
+      }),
     }),
     requestBody: { query: "GOAT", chain: "base" },
     config,
@@ -2299,13 +2378,12 @@ function runX402Checks() {
   assert(stellarConfig.asset === "USDC:stellar", "Stellar config must default to USDC:stellar asset.");
 
   // Test: Stellar payment with valid payer
-  const stellarGuard = assertFreshX402Payment({
-    request: new Request("http://localhost/api/x402/deep-scan?query=GOAT&chain=stellar", {
-      headers: {
-        "PAYMENT-SIGNATURE": "fixture-stellar-payer",
-        "X-PAYMENT-PAYER": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
-        "X-PAYMENT-TX-HASH": "a".repeat(64),
-      },
+  const stellarGuard = await assertFreshX402Payment({
+    request: new NextRequest("http://localhost/api/x402/deep-scan?query=GOAT&chain=stellar", {
+      headers: signedPaymentHeaders("fixture-stellar-payer", stellarConfig, {
+        payer: "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+        transactionHash: "a".repeat(64),
+      }),
     }),
     requestBody: { query: "GOAT", chain: "stellar" },
     config: stellarConfig,
@@ -2316,12 +2394,9 @@ function runX402Checks() {
   assert(stellarGuard.paymentDetails.payer === "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H", "Stellar payer must be exposed in payment details.");
 
   // Test: invalid payer address format
-  const invalidPayer = assertFreshX402Payment({
-    request: new Request("http://localhost/api/x402/deep-scan?query=GOAT&chain=base", {
-      headers: {
-        "PAYMENT-SIGNATURE": "fixture-invalid-payer",
-        "X-PAYMENT-PAYER": "not-a-valid-address",
-      },
+  const invalidPayer = await assertFreshX402Payment({
+    request: new NextRequest("http://localhost/api/x402/deep-scan?query=GOAT&chain=base", {
+      headers: signedPaymentHeaders("fixture-invalid-payer", config, { payer: "not-a-valid-address" }),
     }),
     requestBody: { query: "GOAT", chain: "base" },
     config,
@@ -2330,12 +2405,11 @@ function runX402Checks() {
   assert(!invalidPayer.ok && invalidPayer.error === "invalid_payer_identity", "Invalid payer address format must be rejected.");
 
   // Test: payer chain family mismatch (Stellar payer on EVM network)
-  const chainMismatch = assertFreshX402Payment({
-    request: new Request("http://localhost/api/x402/deep-scan?query=GOAT&chain=base", {
-      headers: {
-        "PAYMENT-SIGNATURE": "fixture-chain-mismatch",
-        "X-PAYMENT-PAYER": "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
-      },
+  const chainMismatch = await assertFreshX402Payment({
+    request: new NextRequest("http://localhost/api/x402/deep-scan?query=GOAT&chain=base", {
+      headers: signedPaymentHeaders("fixture-chain-mismatch", config, {
+        payer: "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H",
+      }),
     }),
     requestBody: { query: "GOAT", chain: "base" },
     config,
@@ -2344,13 +2418,12 @@ function runX402Checks() {
   assert(!chainMismatch.ok && chainMismatch.error === "payer_chain_family_mismatch", "Stellar payer on EVM network must be rejected.");
 
   // Test: invalid EVM transaction hash format
-  const invalidTxHash = assertFreshX402Payment({
-    request: new Request("http://localhost/api/x402/deep-scan?query=GOAT&chain=base", {
-      headers: {
-        "PAYMENT-SIGNATURE": "fixture-invalid-tx",
-        "X-PAYMENT-PAYER": "0x0000000000000000000000000000000000000001",
-        "X-PAYMENT-TX-HASH": "not-a-tx-hash",
-      },
+  const invalidTxHash = await assertFreshX402Payment({
+    request: new NextRequest("http://localhost/api/x402/deep-scan?query=GOAT&chain=base", {
+      headers: signedPaymentHeaders("fixture-invalid-tx", config, {
+        payer: "0x0000000000000000000000000000000000000001",
+        transactionHash: "not-a-tx-hash",
+      }),
     }),
     requestBody: { query: "GOAT", chain: "base" },
     config,
@@ -2531,7 +2604,7 @@ async function main() {
   await runReadinessChecks();
   await runProviderReliabilityChecks();
   runCachePolicyChecks();
-  runX402Checks();
+  await runX402Checks();
   runStellarAssetIdentityChecks();
 
   const discoveryFixtureResults = await runDiscoveryFixtures();

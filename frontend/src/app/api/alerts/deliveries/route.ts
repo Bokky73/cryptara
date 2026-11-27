@@ -16,7 +16,7 @@ const retryBodySchema = z.object({
   walletAddress: z.string().optional(),
 });
 
-export function GET(request: NextRequest) {
+export async function GET(request: NextRequest) {
   const rateLimited = checkRateLimitProfile(request, "alertRead");
   if (rateLimited) return rateLimited;
 
@@ -33,7 +33,7 @@ export function GET(request: NextRequest) {
   if (session.response) return session.response;
   const wallet = session.wallet!;
 
-  const deliveries = listAlertDeliveries(parsed.data.alertId, wallet).map((delivery) => ({
+  const deliveries = (await listAlertDeliveries(parsed.data.alertId, wallet)).map((delivery) => ({
     id: delivery.id,
     deliveryId: delivery.id,
     alertId: delivery.alertId,

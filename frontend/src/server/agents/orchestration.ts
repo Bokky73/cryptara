@@ -173,7 +173,7 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
     const identity = identityInput ? resolveTokenIdentity(identityInput) : undefined;
 
     // Load user rules once so Decision and Execution share the same versioned snapshot
-    const userRules = input.walletAddress ? getUserRuleRecord(input.walletAddress) : undefined;
+    const userRules = input.walletAddress ? await getUserRuleRecord(input.walletAddress) : undefined;
 
     if (input.mode === "portfolio_review" && candidateInputs.length > 0) {
       for (const candidate of candidateInputs) {
@@ -224,10 +224,10 @@ export async function runAgentOrchestration(input: AgentOrchestrationInput): Pro
 
     let runRecord: AgentRunRecord | undefined;
     if (input.persistRun) {
-      runRecord = createAgentRunRecord({
+      runRecord = await createAgentRunRecord({
         runId,
         mode: input.mode,
-        walletAddress: input.walletAddress,
+        walletAddress: input.walletAddress ?? "",
         identity,
         results,
         decision,

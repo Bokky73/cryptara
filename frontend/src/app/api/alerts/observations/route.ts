@@ -10,7 +10,7 @@ const querySchema = z.object({
   limit: z.coerce.number().min(1).max(500).optional(),
 });
 
-export function GET(request: NextRequest) {
+export async function GET(request: NextRequest) {
   const rateLimited = checkRateLimitProfile(request, "alertRead");
   if (rateLimited) return rateLimited;
 
@@ -28,7 +28,7 @@ export function GET(request: NextRequest) {
   const wallet = session.wallet!;
 
   return withCacheHeaders(
-    NextResponse.json(listAlertObservations(wallet, parsed.data.limit ?? 100)),
+    NextResponse.json(await listAlertObservations(wallet, parsed.data.limit ?? 100)),
     "alerts",
   );
 }

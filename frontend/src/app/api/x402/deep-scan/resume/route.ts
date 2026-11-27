@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
   }
 
   const { paymentHeaderHash, query, chain, walletAddress } = parsed.data;
-  const receipt = getX402PaymentReceiptByHeaderHash(paymentHeaderHash);
+  const receipt = await getX402PaymentReceiptByHeaderHash(paymentHeaderHash);
 
   if (!receipt) {
     return jsonError({

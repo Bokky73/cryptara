@@ -21,7 +21,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: parameters.error.flatten() }, { status: 400 });
   }
 
-  const record = getTransactionRecord(hash);
+  const record = await getTransactionRecord(hash);
   if (!record) {
     return NextResponse.json({ error: "transaction_not_found", detail: `No transaction record found for hash ${hash}.` }, { status: 404 });
   }

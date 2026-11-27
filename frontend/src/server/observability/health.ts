@@ -5,8 +5,8 @@ import { getPortfolioProviderHealth } from "@/server/portfolio/getPortfolio";
 import { getStorageHealth, listAgentRunRecords } from "@/server/storage";
 import { getConfiguredProviderHealth, getExecutionDisableFlags, getProviderCircuitHealth } from "@/server/observability/providerHealth";
 
-function getLastSuccessfulProviderCall() {
-  const records = listAgentRunRecords();
+async function getLastSuccessfulProviderCall() {
+  const records = await listAgentRunRecords();
   const connectedSources = records
     .flatMap((record) => record.results)
     .flatMap((result) => result.sources.map((source) => ({ agent: result.agent, source })))
@@ -22,7 +22,7 @@ function getLastSuccessfulProviderCall() {
     : undefined;
 }
 
-export function getProductionHealth() {
+export async function getProductionHealth() {
   return {
     envConfig: getEnvHealth(),
     agentReadiness: getAgentReadiness(),
@@ -30,10 +30,10 @@ export function getProductionHealth() {
       portfolio: getPortfolioProviderHealth(),
     },
     providerHealth: getConfiguredProviderHealth(),
-    databaseConnectivity: getStorageHealth(),
+    databaseConnectivity: await getStorageHealth(),
     cacheStatus: apiCacheStrategy,
     releaseReadiness: getReleaseReadinessHealth(),
-    lastSuccessfulProviderCall: getLastSuccessfulProviderCall(),
+    lastSuccessfulProviderCall: await getLastSuccessfulProviderCall(),
     executionDisableFlags: getExecutionDisableFlags(),
     providerResilience: {
       circuits: getProviderCircuitHealth(),

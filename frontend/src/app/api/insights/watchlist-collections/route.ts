@@ -42,8 +42,9 @@ export function setCollectionsRepository(next: CollectionsRepository | null) {
   repository = next;
 }
 
-function watchlistEntryIds(owner: OwnerScope): string[] {
-  return listWatchlist(owner.walletAddress)
+async function watchlistEntryIds(owner: OwnerScope): Promise<string[]> {
+  const entries = await listWatchlist(owner.walletAddress);
+  return entries
     .filter((entry) => (entry.network ?? entry.chain ?? "").toLowerCase() === owner.network.toLowerCase())
     .map((entry) => entry.id);
 }

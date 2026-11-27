@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { jsonError } from "@/server/api/errors";
+import { jsonError, type ApiErrorCode } from "@/server/api/errors";
 import { withApiHandler } from "@/server/api/withApiHandler";
 import { gateFeature } from "@/server/features/evaluator";
 import { isWalletAddressForChain, isStellarAccountAddress, canonicalizeAddress, getChainFamily } from "@/lib/chainIdentity";
@@ -86,7 +86,10 @@ export const POST = withApiHandler(
         : code === "hash_chain_family_mismatch" || code === "network_chain_family_mismatch" ? 400
         : code === "transaction_not_found" ? 404
         : 502;
-      return jsonError({ code: code as any, message: error instanceof Error ? error.message : "Could not submit transaction.", status, legacy: (error && typeof error === "object" && "detail" in error ? { extra: (error as { detail?: unknown }).detail } : {}) });
+      return jsonError(
+        { code: code as ApiErrorCode, message: error instanceof Error ? error.message : "Could not submit transaction.", status },
+        { legacy: error && typeof error === "object" && "detail" in error ? { extra: (error as { detail?: unknown }).detail } : {} },
+      );
     }
   },
 );

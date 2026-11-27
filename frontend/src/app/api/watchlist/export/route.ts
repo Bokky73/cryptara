@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   const session = resolveWalletSession(request, { suppliedWallet: wallet });
   if (session.response) return session.response;
 
-  const entries = listWatchlist(wallet);
+  const entries = await listWatchlist(wallet);
 
   const exportedRows: WatchlistExportRow[] = entries.map(entry => ({
     version: "1.0.0",

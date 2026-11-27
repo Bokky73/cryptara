@@ -219,11 +219,11 @@ export type DecisionResult = {
  * Pure decision function: returns a single next action for the persistence
  * layer to apply. No storage side-effects.
  */
-export function decideObservation(
+export async function decideObservation(
   observation: AlertObservation,
   rule: AlertRule,
   now: Date = new Date(),
-): DecisionResult {
+): Promise<DecisionResult> {
   const matchesKey = !rule.observationKey || rule.observationKey === observation.observationKey;
 
   if (!rule.enabled) return { decision: "rule_disabled", reasoning: "Rule disabled." };
@@ -243,7 +243,7 @@ export function decideObservation(
   }
 
   const evaluation = evaluateObservationVsRule(rule, observation);
-  const walletAlerts = listAlerts(observation.walletAddress);
+  const walletAlerts = await listAlerts(observation.walletAddress);
   const activeAlert = activeAlertFor(walletAlerts, rule.id, observation.observationKey);
   const lastResolved = lastResolvedAlertFor(walletAlerts, rule.id, observation.observationKey);
 
@@ -296,7 +296,7 @@ export async function evaluateAndPersistObservation(
   rule: AlertRule,
 ): Promise<AlertEvaluation> {
   const now = new Date();
-  const decision = decideObservation(observation, rule, now);
+  const decision = await decideObservation(observation, rule, now);
 
   switch (decision.decision) {
     case "rule_disabled":
@@ -322,7 +322,7 @@ export async function evaluateAndPersistObservation(
   }
 
   if (decision.decision === "recovered") {
-    const recoveredAlert = updateAlert(decision.activeAlert!.id, observation.walletAddress, {
+    const recoveredAlert = await updateAlert(decision.activeAlert!.id, observation.walletAddress, {
       status: "recovered",
       recoveredAt: now.toISOString(),
     });
@@ -341,7 +341,7 @@ export async function evaluateAndPersistObservation(
     if (!chain.includes(observation.id)) chain.push(observation.id);
     const afterHash = hashEvidence(observation.evidence);
 
-    const updated = updateAlert(previous.id, observation.walletAddress, {
+    const updated = await updateAlert(previous.id, observation.walletAddress, {
       afterValue: observation.value,
       evidenceAfter: observation.evidence,
       message: buildAlertMessage(rule, observation, observation.direction),
@@ -362,7 +362,7 @@ export async function evaluateAndPersistObservation(
   }
 
   // decision === "trigger": build a fresh alert + fan out deliveries.
-  const walletObservations = listAlertObservations(observation.walletAddress).filter(
+  const walletObservations = (await listAlertObservations(observation.walletAddress)).filter(
     (stored) => stored.observationKey === observation.observationKey && stored.id !== observation.id,
   );
   const previousObservation = walletObservations[0];
@@ -372,7 +372,7 @@ export async function evaluateAndPersistObservation(
   const beforeObservationId = previousObservation?.id;
   const beforeHash = previousObservation ? hashEvidence(previousObservation.evidence) : hashEvidence(beforeEvidence);
   const afterHash = hashEvidence(observation.evidence);
-  const alert = createAlert({
+  const alert = await createAlert({
     walletAddress: observation.walletAddress,
     ruleId: rule.id,
     triggerType: rule.triggerType,
@@ -410,11 +410,11 @@ export async function evaluateAndPersistObservation(
  * on the stored preference (or the default EVM scope) is carried into the
  * routing decision.
  */
-export function resolveRoutingPreferencesForWallet(
+export async function resolveRoutingPreferencesForWallet(
   walletAddress: string,
   scope?: { chainFamily?: "evm" | "stellar"; network?: string },
 ) {
-  const stored = listNotificationPreferences(walletAddress)[0];
+  const stored = (await listNotificationPreferences(walletAddress))[0];
   if (stored) return stored;
 
   return defaultNotificationPreferences({
@@ -449,7 +449,7 @@ export async function fanOutDeliveries(
   event: "trigger" | "recover" = "trigger",
 ): Promise<AlertDelivery[]> {
   const sanitized = buildSanitizedAlertPayload(alert, observation.evidence, { walletAddressHint: alert.walletAddress });
-  const preferences = resolveRoutingPreferencesForWallet(alert.walletAddress);
+  const preferences = await resolveRoutingPreferencesForWallet(alert.walletAddress);
   const plan = routeAlert(alert, preferences);
 
   // When a plan lands in the digest stream (quiet-hours suppressed,
@@ -464,18 +464,18 @@ export async function fanOutDeliveries(
 
   for (const channel of plan.deliverNow) {
     const idempotencyKey = buildDeliveryIdempotencyKey(alert.id, channel, event);
-    const existing = findDeliveryByIdempotencyKey(alert.id, alert.walletAddress, idempotencyKey);
+    const existing = await findDeliveryByIdempotencyKey(alert.id, alert.walletAddress, idempotencyKey);
     if (existing) {
       out.push(existing);
       continue;
     }
 
-    out.push(enqueueAlertDelivery(alert, channel, sanitized, idempotencyKey));
+    out.push(await enqueueAlertDelivery(alert, channel, sanitized, idempotencyKey));
   }
 
   return out;
 }
 
-export function listEnabledRulesForEvaluation(walletAddress?: string) {
-  return listAlertRules(walletAddress).filter((rule) => rule.enabled);
+export async function listEnabledRulesForEvaluation(walletAddress?: string) {
+  return (await listAlertRules(walletAddress)).filter((rule) => rule.enabled);
 }

@@ -104,12 +104,12 @@ async function runPrivacyLifecycleCheck() {
   const userB_Stellar = "GBBCBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
 
   // User A EVM records on Ethereum
-  createAgentRunRecord({
+  await createAgentRunRecord({
     walletAddress: userA_EVM,
     mode: "portfolio_review",
     results: [],
   });
-  upsertUserRuleRecord({
+  await upsertUserRuleRecord({
     walletAddress: userA_EVM,
     maxRiskScore: 50,
     maxTradePercent: 10,
@@ -118,8 +118,9 @@ async function runPrivacyLifecycleCheck() {
     blockedTokens: [],
     allowedActions: ["reduce_exposure", "swap_to_stable"],
     autoExecute: false,
+    createdAt: new Date().toISOString(),
   });
-  createRecommendationRecord({
+  await createRecommendationRecord({
     runId: "run_userA_1",
     walletAddress: userA_EVM,
     action: "reduce_exposure",
@@ -127,7 +128,7 @@ async function runPrivacyLifecycleCheck() {
     confidence: 0.9,
     summary: "Favorable buy opportunity",
   });
-  createTransactionRecord({
+  await createTransactionRecord({
     walletAddress: userA_EVM,
     hash: "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
     type: "swap",
@@ -140,7 +141,7 @@ async function runPrivacyLifecycleCheck() {
   });
 
   // User A EVM records on Polygon
-  createTransactionRecord({
+  await createTransactionRecord({
     walletAddress: userA_EVM,
     hash: "0xa2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
     type: "swap",
@@ -153,12 +154,12 @@ async function runPrivacyLifecycleCheck() {
   });
 
   // User B EVM records on Ethereum
-  createAgentRunRecord({
+  await createAgentRunRecord({
     walletAddress: userB_EVM,
     mode: "token_scan",
     results: [],
   });
-  upsertUserRuleRecord({
+  await upsertUserRuleRecord({
     walletAddress: userB_EVM,
     maxRiskScore: 70,
     maxTradePercent: 20,
@@ -167,8 +168,9 @@ async function runPrivacyLifecycleCheck() {
     blockedTokens: [],
     allowedActions: ["reduce_exposure"],
     autoExecute: false,
+    createdAt: new Date().toISOString(),
   });
-  createTransactionRecord({
+  await createTransactionRecord({
     walletAddress: userB_EVM,
     hash: "0xb1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
     type: "swap",
@@ -181,12 +183,12 @@ async function runPrivacyLifecycleCheck() {
   });
 
   // User A & B Stellar records
-  createAgentRunRecord({
+  await createAgentRunRecord({
     walletAddress: userA_Stellar,
     mode: "token_scan",
     results: [],
   });
-  createAgentRunRecord({
+  await createAgentRunRecord({
     walletAddress: userB_Stellar,
     mode: "token_scan",
     results: [],
@@ -247,7 +249,7 @@ async function runPrivacyLifecycleCheck() {
   assert(netDeleteRes.status === 200, `Expected 200 for network-scoped delete, got ${netDeleteRes.status}`);
 
   // Verify Ethereum tx unlinked, but Polygon tx remains
-  const txsAfterNetDelete = listTransactionRecords();
+  const txsAfterNetDelete = await listTransactionRecords();
   const ethTxA = txsAfterNetDelete.find((tx) => tx.hash === "0xa1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1");
   const polyTxA = txsAfterNetDelete.find((tx) => tx.hash === "0xa2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2");
   assert(ethTxA?.walletAddress === "" || ethTxA?.walletAddress === undefined, "Ethereum tx was not unlinked!");
@@ -264,19 +266,19 @@ async function runPrivacyLifecycleCheck() {
   assert(fullDeleteRes.status === 200, `Expected 200 for full delete, got ${fullDeleteRes.status}`);
 
   // Verify User A data is completely deleted / unlinked
-  const userARunsAfter = listAgentRunRecords(userA_EVM);
+  const userARunsAfter = await listAgentRunRecords(userA_EVM);
   assert(userARunsAfter.length === 0, "User A agent runs still exist after deletion!");
   const exportAAfter = await exportWalletData(userA_EVM);
   assert(exportAAfter.memoryData.userRules.length === 0, "User A rules still exist after deletion!");
 
   // Verify Polygon tx unlinked now
-  const polyTxAAfter = listTransactionRecords().find((tx) => tx.hash === "0xa2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2");
+  const polyTxAAfter = (await listTransactionRecords()).find((tx) => tx.hash === "0xa2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2");
   assert(polyTxAAfter?.walletAddress === "" || polyTxAAfter?.walletAddress === undefined, "Polygon tx not unlinked after full delete!");
 
   // Verify User B data is 100% intact
-  const userBRunsAfter = listAgentRunRecords(userB_EVM);
+  const userBRunsAfter = await listAgentRunRecords(userB_EVM);
   assert(userBRunsAfter.length >= 1, "User B agent runs deleted inadvertently!");
-  const userBTxsAfter = listTransactionRecords(userB_EVM);
+  const userBTxsAfter = await listTransactionRecords(userB_EVM);
   assert(userBTxsAfter.length >= 1, "User B transactions deleted inadvertently!");
   console.log("   ✅ Full deletion and audit unlinking verified.\n");
 
@@ -301,7 +303,7 @@ async function runPrivacyLifecycleCheck() {
 
   // Create an old agent run past retention cutoff
   const oldDate = new Date(now.getTime() - (retentionConfig.agentRunsDays + 10) * 86400 * 1000).toISOString();
-  createAgentRunRecord({
+  await createAgentRunRecord({
     walletAddress: "0xoldwallet000000000000000000000000000000000",
     mode: "portfolio_review",
     results: [],

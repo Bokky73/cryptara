@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import type { ZodType, ZodTypeDef } from "zod";
+import type { ZodType } from "zod";
 import { getCorrelationId } from "@/server/observability/logger/context";
 import { getActiveTraceId } from "@/server/observability/tracing/spans";
 
@@ -30,7 +30,13 @@ export type ApiErrorCode =
   | "payment_proof_rejected"
   | "duplicate_payment"
   | "expected_effects_mismatch"
-  | "incident_mode";
+  | "incident_mode"
+  | "feature_disabled"
+  | "not_found"
+  | "wallet_session_disabled"
+  | "receipt_not_found"
+  | "receipt_mismatch"
+  | "receipt_expired";
 
 export type RecoveryAction =
   | "retry"
@@ -129,18 +135,68 @@ export interface JsonErrorOptions {
   headers?: Record<string, string>;
 }
 
-export function jsonError(input: ApiError | JsonErrorInput, options?: JsonErrorOptions): NextResponse {
+export interface LegacyJsonErrorOptions extends JsonErrorOptions {
+  status?: number;
+  message?: string;
+  details?: unknown;
+}
+
+export function jsonError(input: ApiError | JsonErrorInput, options?: JsonErrorOptions): NextResponse;
+export function jsonError(
+  code: string,
+  messageOrOptions?: string | Record<string, unknown>,
+  options?: LegacyJsonErrorOptions,
+): NextResponse;
+export function jsonError(
+  input: ApiError | JsonErrorInput | string,
+  messageOrOptions?: string | JsonErrorOptions | LegacyJsonErrorOptions | Record<string, unknown>,
+  options?: LegacyJsonErrorOptions,
+): NextResponse {
+  let normalizedInput: ApiError | JsonErrorInput;
+  let normalizedOptions: JsonErrorOptions | undefined = options;
+
+  if (typeof input === "string") {
+    const messageObject = typeof messageOrOptions === "string" ? undefined : (messageOrOptions as Record<string, unknown>);
+    const details =
+      options?.details ??
+      messageObject?.details ??
+      (messageObject && !("message" in messageObject) && !("status" in messageObject)
+        ? messageObject
+        : undefined);
+    normalizedInput = {
+      code: input as ApiErrorCode,
+      message:
+        typeof messageOrOptions === "string"
+          ? messageOrOptions
+          : typeof messageObject?.message === "string"
+            ? messageObject.message
+            : "Request failed",
+      status: options?.status ?? (typeof messageObject?.status === "number" ? messageObject.status : 400),
+      details,
+    };
+    normalizedOptions = {
+      ...options,
+      requestId: options?.requestId ?? (typeof messageObject?.requestId === "string" ? messageObject.requestId : undefined),
+    };
+  } else {
+    normalizedInput = input;
+  }
+
   const apiError =
-    input instanceof ApiError
-      ? input
-      : new ApiError(input.code, input.message, input.status, { retryable: input.retryable, recoveryAction: input.recoveryAction, details: input.details });
-  const requestId = options?.requestId ?? getCorrelationId() ?? createRequestId();
+    normalizedInput instanceof ApiError
+      ? normalizedInput
+      : new ApiError(normalizedInput.code, normalizedInput.message, normalizedInput.status, {
+          retryable: normalizedInput.retryable,
+          recoveryAction: normalizedInput.recoveryAction,
+          details: normalizedInput.details,
+        });
+  const requestId = normalizedOptions?.requestId ?? getCorrelationId() ?? createRequestId();
   const traceId = getActiveTraceId();
-  const body = { ...toErrorShape(apiError, requestId), ...(traceId ? { traceId } : {}), ...(options?.legacy ?? {}) };
+  const body = { ...toErrorShape(apiError, requestId), ...(traceId ? { traceId } : {}), ...(normalizedOptions?.legacy ?? {}) };
 
   return NextResponse.json(body, {
     status: apiError.status,
-    headers: { "Cache-Control": "no-store", ...(traceId ? { "X-Trace-Id": traceId } : {}), ...(options?.headers ?? {}) },
+    headers: { "Cache-Control": "no-store", ...(traceId ? { "X-Trace-Id": traceId } : {}), ...(normalizedOptions?.headers ?? {}) },
   });
 }
 
@@ -160,9 +216,9 @@ export interface ApiHandlerContext<TBody = unknown, TQuery = unknown> {
 
 export interface ApiHandlerConfig<TBody = unknown, TQuery = unknown> {
   /** Zod schema for the JSON request body (POST/PUT/PATCH). */
-  schema?: ZodType<TBody, ZodTypeDef, unknown>;
+  schema?: ZodType<TBody>;
   /** Zod schema for query string parameters. */
-  querySchema?: ZodType<TQuery, ZodTypeDef, unknown>;
+  querySchema?: ZodType<TQuery>;
   /** Auth hook. Throw an ApiError to reject; return value is passed through. */
   auth?: (request: NextRequest) => unknown | Promise<unknown>;
   /** Rate limit hook. Throw an ApiError to reject. */
@@ -349,7 +405,7 @@ export function withApiHandler<TBody = unknown, TQuery = unknown>(
             details: zodDetails(result.error),
           });
         }
-        body = result.data;
+        body = result.data as TBody;
       }
 
       let query: TQuery = undefined as unknown as TQuery;
@@ -362,7 +418,7 @@ export function withApiHandler<TBody = unknown, TQuery = unknown>(
             details: zodDetails(result.error),
           });
         }
-        query = result.data;
+        query = result.data as TQuery;
       }
 
       return await handler({ request, requestId, body, query, params });

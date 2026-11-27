@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
   if (inputs instanceof NextResponse) return inputs;
 
   await ensureStorageReady();
-  const existing = listWatchlistEntries(wallet);
+  const existing = await listWatchlistEntries(wallet);
   const result = previewWatchlistImport(inputs, existing);
 
   for (const rowResult of result.results) {
@@ -118,13 +118,13 @@ export async function POST(request: NextRequest) {
     } else if (strategy === "skip") {
       rowResult.outcome = "skipped";
     } else {
-      if (current) updateWatchlistEntryDetails(current.id, pickDetails(row));
+      if (current) await updateWatchlistEntryDetails(current.id, pickDetails(row));
       else if (queued) Object.assign(queued, pickDetails(row));
       rowResult.outcome = "updated";
     }
   }
 
-  const { appliedCount } = addWatchlistEntriesBulk([...pending.values()]);
+  const { appliedCount } = await addWatchlistEntriesBulk([...pending.values()]);
   const outcomeCount = (outcome: string) => result.results.filter((entry) => entry.outcome === outcome).length;
 
   return NextResponse.json({

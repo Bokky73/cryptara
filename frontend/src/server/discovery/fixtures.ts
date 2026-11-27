@@ -306,7 +306,7 @@ export async function runDiscoveryFixtures(): Promise<DiscoveryFixtureResult[]> 
   });
 
   assert(addResult.ok, "Watchlist add must succeed for resolved EVM candidate.");
-  const entriesAfterAdd = listWatchlistEntries(FIXTURE_WALLET);
+  const entriesAfterAdd = await listWatchlistEntries(FIXTURE_WALLET);
 
   results.push({
     fixture: "Watchlist add creates canonical entry",
@@ -322,7 +322,7 @@ export async function runDiscoveryFixtures(): Promise<DiscoveryFixtureResult[]> 
     source: "dexscreener",
     symbol: "FIX",
   });
-  const entriesAfterDup = listWatchlistEntries(FIXTURE_WALLET);
+  const entriesAfterDup = await listWatchlistEntries(FIXTURE_WALLET);
 
   results.push({
     fixture: "Duplicate watchlist add is idempotent",
@@ -366,7 +366,7 @@ export async function runDiscoveryFixtures(): Promise<DiscoveryFixtureResult[]> 
   const priorSuccessClassification = priorEntry.latestClassification;
   const priorSuccessScore = priorEntry.latestScore;
 
-  addWatchlistScanRun({
+  await addWatchlistScanRun({
     entryId: priorEntry.id,
     walletAddress: FIXTURE_WALLET,
     identityKey: priorEntry.identityKey,
@@ -388,7 +388,7 @@ export async function runDiscoveryFixtures(): Promise<DiscoveryFixtureResult[]> 
     status: "failed",
   });
 
-  const refreshedEntry = getWatchlistEntry(priorEntry.id);
+  const refreshedEntry = await getWatchlistEntry(priorEntry.id);
 
   results.push({
     fixture: "Failed run preserves prior successful classification + score on WatchlistEntry",
@@ -438,7 +438,7 @@ export async function runDiscoveryFixtures(): Promise<DiscoveryFixtureResult[]> 
     tokenName: "USD Coin",
   };
   const stellarAdd = await addToWatchlist(stellarEntry);
-  const stellarEntries = listWatchlistEntries(FIXTURE_WALLET);
+  const stellarEntries = await listWatchlistEntries(FIXTURE_WALLET);
 
   results.push({
     fixture: "Stellar watchlist entry identity differs from EVM",

@@ -59,7 +59,7 @@ export async function validateApproval(
   const normalizedInputWallet = normalizeWallet(input.walletAddress);
 
   // 1. Look up the prepared transaction
-  const record = getTransactionRecordByIdempotencyKey(input.walletAddress, input.idempotencyKey);
+  const record = await getTransactionRecordByIdempotencyKey(input.walletAddress, input.idempotencyKey);
 
   if (!record) {
     return {
@@ -102,13 +102,13 @@ export async function validateApproval(
 
   if (expired) {
     // Mark as expired in storage
-    updateTransactionRecord(record.hash, {
+    await updateTransactionRecord(record.hash, {
       lifecycleStatus: "expired",
       status: "expired",
       terminalAt: new Date().toISOString(),
       failureReason: "Preparation TTL expired before approval.",
     });
-    appendLifecycleEventByName(record.hash, "expired", {
+    await appendLifecycleEventByName(record.hash, "expired", {
       reason: "Preparation TTL expired before wallet approval.",
       ttlMs: PREPARATION_TTL_MS,
       elapsedMs: elapsed,

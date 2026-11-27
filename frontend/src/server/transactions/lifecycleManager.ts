@@ -91,7 +91,7 @@ type LifecycleStorageDependencies = {
   getByIdempotencyKey: typeof getTransactionRecordByIdempotencyKey;
   create: typeof createTransactionRecord;
   update: typeof updateTransactionRecord;
-  removeByHash: (hash: string) => boolean;
+  removeByHash: typeof removeTransactionRecordByHash;
   appendEvent: typeof appendLifecycleEventByName;
   listEvents: typeof listTransactionLifecycleEvents;
   createObservation: typeof createTransactionObservation;
@@ -255,7 +255,7 @@ function buildBaseRecord(
   };
 }
 
-export function prepareTransaction(input: PrepareTransactionInput): PrepareTransactionResult {
+export async function prepareTransaction(input: PrepareTransactionInput): Promise<PrepareTransactionResult> {
   const storage = getStorage();
   const family = input.chainFamily;
 
@@ -266,12 +266,12 @@ export function prepareTransaction(input: PrepareTransactionInput): PrepareTrans
     );
   }
 
-  const existing = storage.getByIdempotencyKey(input.walletAddress, input.idempotencyKey);
+  const existing = await storage.getByIdempotencyKey(input.walletAddress, input.idempotencyKey);
   if (existing) {
     return { transaction: existing, idempotent: true, created: false };
   }
 
-  const record = storage.create({
+  const record = await storage.create({
     hash: canonicalizeTransactionHash(`pending:${input.walletAddress}:${input.idempotencyKey}`, family),
     type: "swap",
     asset: input.asset,
@@ -296,7 +296,7 @@ export function prepareTransaction(input: PrepareTransactionInput): PrepareTrans
       : undefined,
   });
 
-  storage.appendEvent(record.hash, "prepared", {
+  await storage.appendEvent(record.hash, "prepared", {
     walletAddress: input.walletAddress,
     network: input.network,
     chainFamily: family,
@@ -319,7 +319,7 @@ export async function submitTransaction(input: SubmitTransactionInput): Promise<
   }
 
   const existingByKey = input.idempotencyKey
-    ? storage.getByIdempotencyKey(input.walletAddress, input.idempotencyKey)
+    ? await storage.getByIdempotencyKey(input.walletAddress, input.idempotencyKey)
     : undefined;
   if (existingByKey && existingByKey.hash !== canonicalizeTransactionHash(`pending:${input.walletAddress}:${input.idempotencyKey}`, family)) {
     return {
@@ -334,7 +334,7 @@ export async function submitTransaction(input: SubmitTransactionInput): Promise<
         explorerUrl: existingByKey.explorerUrl,
         idempotent: true,
         reuseReason: "idempotency_key",
-        lifecycle: storage.listEvents(existingByKey.hash),
+        lifecycle: await storage.listEvents(existingByKey.hash),
       },
     };
   }
@@ -348,10 +348,10 @@ export async function submitTransaction(input: SubmitTransactionInput): Promise<
     const syntheticHash = `0x${createHash("sha256").update(fallbackPayload).digest("hex")}`;
     return normalizeHashForRecord(syntheticHash, family);
   });
-  const existingByHash = storage.getByHash(normalizedHash);
+  const existingByHash = await storage.getByHash(normalizedHash);
 
   if (existingByHash) {
-    storage.appendEvent(normalizedHash, "duplicate_rejected", { reason: "duplicate_hash", walletAddress: input.walletAddress });
+    await storage.appendEvent(normalizedHash, "duplicate_rejected", { reason: "duplicate_hash", walletAddress: input.walletAddress });
     return {
       transaction: existingByHash,
       outcome: "ignored_duplicate",
@@ -364,7 +364,7 @@ export async function submitTransaction(input: SubmitTransactionInput): Promise<
         explorerUrl: existingByHash.explorerUrl,
         idempotent: true,
         reuseReason: "duplicate_hash",
-        lifecycle: storage.listEvents(existingByHash.hash),
+        lifecycle: await storage.listEvents(existingByHash.hash),
       },
     };
   }
@@ -373,25 +373,25 @@ export async function submitTransaction(input: SubmitTransactionInput): Promise<
     // A prepared placeholder exists with the same idempotency key. Remove it so
     // the real record below can use the same key without violating the unique
     // (wallet_address, idempotency_key) index.
-    storage.removeByHash(existingByKey.hash);
+    await storage.removeByHash(existingByKey.hash);
   }
 
   const base = buildBaseRecord(input, normalizedHash);
-  const record = storage.create({ ...base, status: "prepared", lifecycleStatus: "prepared" });
-  storage.appendEvent(normalizedHash, "prepared", { walletAddress: input.walletAddress, network: input.network, chainFamily: family });
+  const record = await storage.create({ ...base, status: "prepared", lifecycleStatus: "prepared" });
+  await storage.appendEvent(normalizedHash, "prepared", { walletAddress: input.walletAddress, network: input.network, chainFamily: family });
 
   let submitResult;
   try {
     submitResult = await submitToChainAdapter(input);
   } catch (error) {
     const failureReason = error instanceof Error ? error.message : "Unknown adapter failure during submission.";
-    storage.appendEvent(normalizedHash, SUBMISSION_FAILED_EVENT, {
+    await storage.appendEvent(normalizedHash, SUBMISSION_FAILED_EVENT, {
       reason: failureReason,
       network: input.network,
       chainFamily: family,
     }, { label: family === "stellar" ? "stellar_rpc" : "evm_rpc", url: getProviderUrl(family, input.network) });
 
-    const failedRecord = storage.update(normalizedHash, {
+    const failedRecord = await storage.update(normalizedHash, {
       lifecycleStatus: "failed",
       status: "failed",
       terminalAt: new Date().toISOString(),
@@ -409,21 +409,21 @@ export async function submitTransaction(input: SubmitTransactionInput): Promise<
         status: failedRecord.lifecycleStatus,
         explorerUrl: failedRecord.explorerUrl,
         idempotent: false,
-        lifecycle: storage.listEvents(failedRecord.hash),
+        lifecycle: await storage.listEvents(failedRecord.hash),
       },
     };
   }
 
   const submittedAt = submitResult.broadcastAcceptedAt ?? new Date().toISOString();
 
-  const updated = storage.update(normalizedHash, {
+  const updated = await storage.update(normalizedHash, {
     lifecycleStatus: "submitted",
     status: "submitted",
     submittedAt,
     explorerUrl: attachExplorerUrl({ hash: normalizedHash, network: input.network, chainFamily: family }),
   }) ?? record;
 
-  storage.appendEvent(normalizedHash, "submitted", {
+  await storage.appendEvent(normalizedHash, "submitted", {
     network: input.network,
     providerUrl: submitResult.providerUrl,
     detail: submitResult.detail,
@@ -440,7 +440,7 @@ export async function submitTransaction(input: SubmitTransactionInput): Promise<
       status: updated.lifecycleStatus ?? "prepared",
       explorerUrl: updated.explorerUrl,
       idempotent: false,
-      lifecycle: storage.listEvents(updated.hash),
+      lifecycle: await storage.listEvents(updated.hash),
     },
   };
 }
@@ -573,7 +573,7 @@ export async function confirmTransaction(
 ): Promise<TransactionRecord> {
   const storage = getStorage();
   const normalizedHash = normalizeHashForRecord(hash, getChainFamilyForHash(hash));
-  const record = storage.getByHash(normalizedHash);
+  const record = await storage.getByHash(normalizedHash);
 
   if (!record) {
     throw new TransactionLifecycleError(
@@ -601,7 +601,7 @@ export async function recordUserRejection(
   const storage = getStorage();
   const family = isTransactionHashForChain(hash, "stellar") ? "stellar" : "evm";
   const normalizedHash = canonicalizeTransactionHash(hash, family);
-  const record = storage.getByHash(normalizedHash);
+  const record = await storage.getByHash(normalizedHash);
 
   if (!record) {
     throw new TransactionLifecycleError(
@@ -624,13 +624,13 @@ export async function recordUserRejection(
   }
 
   const rejectedAt = new Date().toISOString();
-  storage.appendEvent(normalizedHash, "user_rejected", {
+  await storage.appendEvent(normalizedHash, "user_rejected", {
     reason: input.reason,
     source: input.source ?? "wallet",
     walletAddress: input.walletAddress ?? record.walletAddress,
   });
 
-  return storage.update(normalizedHash, {
+  return await storage.update(normalizedHash, {
     lifecycleStatus: "user_rejected",
     status: "user_rejected",
     terminalAt: rejectedAt,
@@ -640,20 +640,20 @@ export async function recordUserRejection(
 
 export async function pollTransaction(hash: string, options: { network?: string; familyHint?: ChainFamily; expectation?: ConfirmationExpectation } = {}): Promise<PollTransactionResult> {
   const storage = getStorage();
-  const record = storage.getByHash(hash);
+  const record = await storage.getByHash(hash);
 
   if (!record) {
     throw new TransactionLifecycleError("transaction_not_found", `Transaction ${hash} not found in lifecycle store.`, { hash });
   }
 
   if (isImmutableTerminal(record.lifecycleStatus)) {
-    return { transaction: record, polled: false, terminalReached: true, events: storage.listEvents(record.hash), observations: storage.listObservations(record.hash) };
+    return { transaction: record, polled: false, terminalReached: true, events: await storage.listEvents(record.hash), observations: await storage.listObservations(record.hash) };
   }
   if ((record.pollAttempts ?? 0) >= MAX_POLL_ATTEMPTS) {
     const reason = `Polling stopped after ${MAX_POLL_ATTEMPTS} bounded attempts.`;
-    const updated = storage.update(record.hash, { lifecycleStatus: "manual_review", status: "manual_review", manualReviewReason: reason }) ?? record;
-    storage.appendEvent(record.hash, "manual_review_required", { reason, maxPollAttempts: MAX_POLL_ATTEMPTS });
-    return { transaction: updated, polled: false, terminalReached: false, events: storage.listEvents(record.hash), observations: storage.listObservations(record.hash) };
+    const updated = (await storage.update(record.hash, { lifecycleStatus: "manual_review", status: "manual_review", manualReviewReason: reason })) ?? record;
+    await storage.appendEvent(record.hash, "manual_review_required", { reason, maxPollAttempts: MAX_POLL_ATTEMPTS });
+    return { transaction: updated, polled: false, terminalReached: false, events: await storage.listEvents(record.hash), observations: await storage.listObservations(record.hash) };
   }
 
   const family = options.familyHint ?? record.chainFamily;
@@ -678,7 +678,7 @@ export async function pollTransaction(hash: string, options: { network?: string;
   const replacementHash = "replacementHash" in pollResult ? pollResult.replacementHash : undefined;
   const blockHash = "blockHash" in pollResult ? pollResult.blockHash : undefined;
   const evidenceKey = createHash("sha256").update(JSON.stringify({ family, network, provider: pollResult.providerUrl, observationStatus, blockNumber, blockHash, ledgerSequence, confirmations, requiredConfirmations, replacementHash })).digest("hex");
-  const created = storage.createObservation({
+  const created = await storage.createObservation({
     hash: record.hash,
     evidenceKey,
     chainFamily: family,
@@ -699,13 +699,13 @@ export async function pollTransaction(hash: string, options: { network?: string;
   if (!created.created) {
     if (observationStatus === "not_found") {
       const decision = reconcileObservation(record, created.observation);
-      const updated = storage.update(hash, { ...decision.updates, observationCount: record.observationCount ?? 1, lifecycleStatus: decision.status, status: decision.status }) ?? record;
-      if (decision.status === "dropped") storage.appendEvent(hash, "dropped_detected", decision.detail);
-      return { transaction: updated, polled: true, terminalReached: isImmutableTerminal(updated.lifecycleStatus), events: storage.listEvents(hash), observations: storage.listObservations(hash) };
+      const updated = (await storage.update(hash, { ...decision.updates, observationCount: record.observationCount ?? 1, lifecycleStatus: decision.status, status: decision.status })) ?? record;
+      if (decision.status === "dropped") await storage.appendEvent(hash, "dropped_detected", decision.detail);
+      return { transaction: updated, polled: true, terminalReached: isImmutableTerminal(updated.lifecycleStatus), events: await storage.listEvents(hash), observations: await storage.listObservations(hash) };
     }
-    return { transaction: record, polled: true, terminalReached: record.lifecycleStatus === "confirmed" || isImmutableTerminal(record.lifecycleStatus), events: storage.listEvents(hash), observations: storage.listObservations(hash) };
+    return { transaction: record, polled: true, terminalReached: isImmutableTerminal(record.lifecycleStatus), events: await storage.listEvents(hash), observations: await storage.listObservations(hash) };
   }
-  storage.appendEvent(hash, "observation_recorded", { evidenceKey, observationStatus, confirmations, requiredConfirmations }, { label: created.observation.provider, url: created.observation.providerUrl });
+  await storage.appendEvent(hash, "observation_recorded", { evidenceKey, observationStatus, confirmations, requiredConfirmations }, { label: created.observation.provider, url: created.observation.providerUrl });
   const decision = reconcileObservation(record, created.observation);
   let nextStatus = decision.status;
   try {
@@ -713,19 +713,19 @@ export async function pollTransaction(hash: string, options: { network?: string;
   } catch (error) {
     nextStatus = "manual_review";
     decision.updates.manualReviewReason = error instanceof Error ? error.message : "Conflicting lifecycle transition.";
-    storage.appendEvent(hash, "manual_review_required", { current: record.lifecycleStatus, proposed: decision.status });
+    await storage.appendEvent(hash, "manual_review_required", { current: record.lifecycleStatus, proposed: decision.status });
   }
-  storage.appendEvent(hash, decision.event, decision.detail, { label: created.observation.provider, url: created.observation.providerUrl });
-  const updated = storage.update(hash, { ...decision.updates, lifecycleStatus: nextStatus, status: nextStatus }) ?? record;
-  return { transaction: updated, polled: true, terminalReached: nextStatus === "confirmed" || isImmutableTerminal(nextStatus), events: storage.listEvents(hash), observations: storage.listObservations(hash) };
+  await storage.appendEvent(hash, decision.event, decision.detail, { label: created.observation.provider, url: created.observation.providerUrl });
+  const updated = (await storage.update(hash, { ...decision.updates, lifecycleStatus: nextStatus, status: nextStatus })) ?? record;
+  return { transaction: updated, polled: true, terminalReached: nextStatus === "confirmed" || isImmutableTerminal(nextStatus), events: await storage.listEvents(hash), observations: await storage.listObservations(hash) };
 }
 
 export async function expireTransactionIfStale(hash: string, options: { now?: () => Date; ttlMs?: number } = {}): Promise<{ expired: boolean; transaction?: TransactionRecord; events: TransactionLifecycleEvent[] }> {
   const storage = getStorage();
-  const record = storage.getByHash(hash);
+  const record = await storage.getByHash(hash);
 
   if (!record || isImmutableTerminal(record.lifecycleStatus)) {
-    return { expired: false, transaction: record, events: storage.listEvents(hash) };
+    return { expired: false, transaction: record, events: await storage.listEvents(hash) };
   }
 
   const ttl = options.ttlMs ?? SUBMISSION_TTL_MS;
@@ -735,11 +735,11 @@ export async function expireTransactionIfStale(hash: string, options: { now?: ()
   const elapsed = nowMs - submittedAtTs;
 
   if (elapsed < ttl) {
-    return { expired: false, transaction: record, events: storage.listEvents(hash) };
+    return { expired: false, transaction: record, events: await storage.listEvents(hash) };
   }
 
   const polledAt = new Date(nowMs).toISOString();
-  const updated = storage.update(hash, {
+  const updated = await storage.update(hash, {
     lifecycleStatus: "expired",
     status: "expired",
     terminalAt: polledAt,
@@ -747,11 +747,11 @@ export async function expireTransactionIfStale(hash: string, options: { now?: ()
     failureReason: "Submission TTL exceeded without a terminal response from chain provider.",
   }) ?? record;
 
-  storage.appendEvent(hash, "expired", { ttlMs: ttl, elapsedMs: elapsed });
+  await storage.appendEvent(hash, "expired", { ttlMs: ttl, elapsedMs: elapsed });
 
-  return { expired: true, transaction: updated, events: storage.listEvents(hash) };
+  return { expired: true, transaction: updated, events: await storage.listEvents(hash) };
 }
 
-export function listHashEvents(hash: string): TransactionLifecycleEvent[] {
+export async function listHashEvents(hash: string): Promise<TransactionLifecycleEvent[]> {
   return listTransactionLifecycleEvents(hash);
 }

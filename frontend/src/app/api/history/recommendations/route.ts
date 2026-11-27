@@ -3,7 +3,7 @@ import { withCacheHeaders } from "@/server/cache/strategy";
 import { checkRateLimit } from "@/server/security/rateLimit";
 import { listRecommendationRecordsPaginated } from "@/server/storage";
 
-export function GET(request: NextRequest) {
+export async function GET(request: NextRequest) {
   const rateLimited = checkRateLimit(request, { namespace: "history:recommendations", limit: 80, windowMs: 60_000 });
 
   if (rateLimited) {
@@ -15,8 +15,9 @@ export function GET(request: NextRequest) {
   const limitRaw = request.nextUrl.searchParams.get("limit");
   const limit = limitRaw ? Math.min(Math.max(1, parseInt(limitRaw, 10)), 200) : 50;
 
+  const result = await listRecommendationRecordsPaginated(walletAddress, { cursor, limit });
   return withCacheHeaders(
-    NextResponse.json(listRecommendationRecordsPaginated(walletAddress, { cursor, limit })),
+    NextResponse.json(result),
     "history",
   );
 }

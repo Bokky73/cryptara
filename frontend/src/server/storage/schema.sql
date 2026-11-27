@@ -41,7 +41,7 @@ create table if not exists token_identities (
 );
 
 create table if not exists agent_runs (
-  id uuid primary key default gen_random_uuid(),
+  id text primary key,
   wallet_address text not null,
   mode text check (mode in ('portfolio_review', 'token_scan', 'pre_buy_check', 'holding_review', 'execution_prepare', 'discovery_candidate')),
   input_snapshot jsonb not null default '{}'::jsonb,
@@ -62,7 +62,7 @@ create table if not exists agent_runs (
 
 create table if not exists agent_results (
   id uuid primary key default gen_random_uuid(),
-  run_id uuid not null references agent_runs(id) on delete cascade,
+  run_id text not null references agent_runs(id) on delete cascade,
   agent text not null,
   status text not null,
   risk_score integer not null,
@@ -82,7 +82,7 @@ create table if not exists agent_results (
 
 create table if not exists source_snapshots (
   id uuid primary key default gen_random_uuid(),
-  run_id uuid references agent_runs(id) on delete cascade,
+  run_id text references agent_runs(id) on delete cascade,
   result_id uuid references agent_results(id) on delete cascade,
   agent text not null,
   label text not null,
@@ -97,8 +97,8 @@ create table if not exists source_snapshots (
 );
 
 create table if not exists recommendations (
-  id uuid primary key default gen_random_uuid(),
-  run_id uuid references agent_runs(id) on delete set null,
+  id text primary key,
+  run_id text references agent_runs(id) on delete set null,
   wallet_address text not null,
   action text not null,
   decision_score integer not null,
@@ -109,7 +109,7 @@ create table if not exists recommendations (
 );
 
 create table if not exists approvals (
-  id uuid primary key default gen_random_uuid(),
+  id text primary key,
   wallet_address text not null,
   decision_id text,
   tx_hash text not null,
@@ -200,7 +200,7 @@ create unique index if not exists transactions_idempotency_wallet_idx
   on transactions(wallet_address, idempotency_key)
   where idempotency_key is not null;
 create table if not exists transaction_lifecycle_events (
-  id uuid primary key default gen_random_uuid(),
+  id text primary key,
   transaction_hash text not null references transactions(tx_hash) on delete cascade,
   event text not null check (event in ('prepared', 'submitted', 'submission_failed', 'user_rejected', 'polled', 'observation_recorded', 'confirmation_progress', 'provider_disagreement', 'reorg_detected', 'replacement_detected', 'dropped_detected', 'manual_review_required', 'confirmed', 'failed', 'replaced', 'expired', 'duplicate_rejected')),
   detail jsonb not null default '{}'::jsonb,
@@ -235,7 +235,7 @@ create table if not exists transaction_observations (
 create index if not exists transaction_observations_hash_observed_idx on transaction_observations(transaction_hash, observed_at desc);
 
 create table if not exists x402_payment_receipts (
-  id uuid primary key default gen_random_uuid(),
+  id text primary key,
   request_id text not null,
   payment_header_hash text not null unique,
   wallet_address text,
@@ -358,7 +358,7 @@ create table if not exists recovery_requests (
 );
 create index if not exists recovery_requests_wallet_updated_idx on recovery_requests(wallet_address, updated_at desc);
 create index if not exists recovery_requests_status_idx on recovery_requests(status);
-create unique index if not exists recovery_requests_active_unique on recovery_requests(wallet_address, recovery_type, coalesce(asset, E'\0'), coalesce(consumer, E'\0'))
+create unique index if not exists recovery_requests_active_unique on recovery_requests(wallet_address, recovery_type, coalesce(asset, ''), coalesce(consumer, ''))
   where status in ('requested', 'prepared');
 
 create table if not exists user_rules (
@@ -569,6 +569,10 @@ begin
   exception when others then null;
   end;
   begin
+    alter table watchlist_entries add column if not exists successful_scan_run_ids jsonb not null default '[]'::jsonb;
+  exception when others then null;
+  end;
+  begin
     alter table watchlist_entries add column if not exists pair_address text;
   exception when others then null;
   end;
@@ -613,7 +617,7 @@ begin
   exception when others then null;
   end;
   begin
-    alter table watchlist_scan_runs add column if not exists agent_run_id uuid;
+    alter table watchlist_scan_runs add column if not exists agent_run_id text;
   exception when others then null;
   end;
 end $$;
@@ -689,7 +693,7 @@ create table if not exists alert_deliveries (
   alert_id text not null references alerts(id) on delete cascade,
   wallet_address text not null,
   channel text not null check (channel in ('in_app', 'email', 'telegram', 'discord')),
-  status text not null check (status in ('pending', 'delivered', 'failed', 'skipped')),
+  status text not null check (status in ('pending', 'delivered', 'failed', 'skipped', 'dead_letter')),
   error_detail text,
   sanitized_payload jsonb not null default '{}'::jsonb,
   attempt_count integer not null default 0,
@@ -753,6 +757,7 @@ create table if not exists watchlist_entries (
   latest_scan_run_id text,
   latest_classification text check (latest_classification in ('watch', 'risky', 'scam', 'early_opportunity')),
   latest_score integer,
+  successful_scan_run_ids jsonb not null default '[]'::jsonb,
   latest_status text check (latest_status in ('completed', 'partial', 'failed', 'stale')),
   created_at timestamptz not null default now()
 );
@@ -765,7 +770,7 @@ create table if not exists watchlist_scan_runs (
   entry_id text not null references watchlist_entries(id) on delete cascade,
   wallet_address text not null,
   identity_key text not null,
-  agent_run_id uuid references agent_runs(id) on delete set null,
+  agent_run_id text references agent_runs(id) on delete set null,
   classification text not null check (classification in ('watch', 'risky', 'scam', 'early_opportunity')),
   classification_reasons jsonb not null default '[]'::jsonb,
   confidence numeric not null,

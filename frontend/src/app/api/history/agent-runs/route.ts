@@ -24,7 +24,7 @@ const bodySchema = z.object({
   userAction: z.enum(["pending", "approved", "rejected", "adjusted", "executed"]).optional(),
 });
 
-export function GET(request: NextRequest) {
+export async function GET(request: NextRequest) {
   const rateLimited = checkRateLimit(request, { namespace: "history:agent-runs", limit: 80, windowMs: 60_000 });
 
   if (rateLimited) {
@@ -36,8 +36,9 @@ export function GET(request: NextRequest) {
   const limitRaw = request.nextUrl.searchParams.get("limit");
   const limit = limitRaw ? Math.min(Math.max(1, parseInt(limitRaw, 10)), 200) : 50;
 
+  const result = await listAgentRunRecordsPaginated(walletAddress, { cursor, limit });
   return withCacheHeaders(
-    NextResponse.json(listAgentRunRecordsPaginated(walletAddress, { cursor, limit })),
+    NextResponse.json(result),
     "history",
   );
 }
@@ -56,7 +57,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const record = createAgentRunRecord({
+  const record = await createAgentRunRecord({
     walletAddress: parsed.data.walletAddress,
     mode: parsed.data.mode,
     inputSnapshot: parsed.data.inputSnapshot,

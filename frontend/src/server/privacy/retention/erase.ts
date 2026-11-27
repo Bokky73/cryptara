@@ -157,7 +157,7 @@ export function eraseWalletDataFromMemory(input: EraseWalletInput): {
           walletMatches(tx.walletAddress, canonicalWallet) &&
           networkMatches(tx.network, network, tx.chainFamily, chainFamily)
         ) {
-          tx.walletAddress = null;
+          tx.walletAddress = "";
           tx.sourceAccount = undefined;
           rowsAffected++;
         }
@@ -176,8 +176,8 @@ export function eraseWalletDataFromMemory(input: EraseWalletInput): {
           walletMatches(rec.walletAddress, canonicalWallet) ||
           walletMatches(rec.payer, canonicalWallet);
         if (walletHit && networkMatches(rec.network, network, rec.chainFamily, chainFamily)) {
-          rec.walletAddress = null;
-          rec.payer = null;
+          rec.walletAddress = "";
+          rec.payer = "";
           rowsAffected++;
         }
       }

@@ -68,10 +68,7 @@ export async function GET(request: NextRequest) {
       walletAddress: resolvedWallet,
       resource: "rules",
     }),
-    loader: async () => getUserRuleRecord(resolvedWallet, {
-      chainFamily: chainFamily.success ? chainFamily.data : undefined,
-      network,
-    }),
+    loader: async () => getUserRuleRecord(resolvedWallet),
     ttlMs: 30_000,
     staleMs: 30_000,
     tags: [RULES_CACHE_TAG, ruleCacheTag(resolvedWallet)],
@@ -110,13 +107,15 @@ export const POST = withApiHandler(
       });
     }
 
-    return withCacheHeaders(NextResponse.json(upsertUserRuleRecord({
+    const saved = await upsertUserRuleRecord({
       ...data,
       autoExecute: false,
       // Only pass version if the client explicitly provided one; otherwise
       // upsertUserRuleRecord auto-increments from the current stored version.
       ...(data.version !== undefined ? { version: data.version } : {}),
       createdAt: data.createdAt ?? new Date().toISOString(),
-    })), "rules");
+    });
+
+    return withCacheHeaders(NextResponse.json(saved), "rules");
   },
 );

@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const source = getAuditSourceRecords(session.wallet);
+  const source = await getAuditSourceRecords(session.wallet);
   const selectionSet = selection ? new Set(selection) : undefined;
 
   const decisions = source.decisions

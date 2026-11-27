@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { jsonError } from "@/server/api/errors";
 import { gateFeature } from "@/server/features/evaluator";
 import { StrKey } from "@stellar/stellar-sdk";
 import { runTokenScan } from "@/server/scan/tokenScan";
@@ -132,14 +133,13 @@ async function stellarDeepScanHandler(request: NextRequest): Promise<NextRespons
   }
 
   // Replay check: reject a tx hash that has already been redeemed for any payload.
-  const existingReceipt = findX402PaymentReceiptByTxHash(proofFields.txHash);
+  const existingReceipt = await findX402PaymentReceiptByTxHash(proofFields.txHash);
   if (existingReceipt) {
     return jsonError({
       code: "duplicate_payment",
       message: "This Stellar payment transaction was already used.",
       status: 402,
-      legacy: { receiptId: existingReceipt.id },
-    });
+    }, { legacy: { receiptId: existingReceipt.id } });
   }
 
   // Cryptographic on-chain verification: do not trust client-supplied fields.
@@ -169,7 +169,7 @@ async function stellarDeepScanHandler(request: NextRequest): Promise<NextRespons
   const paymentHeaderHash = hashPaymentHeader(parsed.data.paymentProof);
   const requestBody = { query: parsed.data.query, chain: parsed.data.chain, walletAddress: parsed.data.walletAddress };
 
-  const receipt = createX402PaymentReceipt({
+  const receipt = await createX402PaymentReceipt({
     requestId: `${config.protectedResource}:stellar:${paymentHeaderHash.slice(0, 16)}`,
     paymentHeaderHash,
     walletAddress: parsed.data.walletAddress,
@@ -187,7 +187,7 @@ async function stellarDeepScanHandler(request: NextRequest): Promise<NextRespons
   });
 
   if ("verificationStatus" in receipt && receipt.verificationStatus === "duplicate") {
-    return jsonError({ code: "duplicate_payment", message: "This Stellar payment proof was already used.", status: 402, legacy: { receiptId: receipt.id } });
+    return jsonError({ code: "duplicate_payment", message: "This Stellar payment proof was already used.", status: 402 }, { legacy: { receiptId: receipt.id } });
   }
 
   const scan = await runTokenScan(parsed.data.query, parsed.data.chain, parsed.data.walletAddress);
